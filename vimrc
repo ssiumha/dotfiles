@@ -683,6 +683,9 @@ if has('gui_macvim')
   let &undodir = expand('$HOME/.cache/macvim/undo')
   let &backupdir = expand('$HOME/.cache/macvim/backup')
   let &directory = expand('$HOME/.cache/macvim/swap')
+  for s:d in [&undodir, &backupdir, &directory]
+    if !isdirectory(s:d) | call mkdir(s:d, 'p') | endif
+  endfor
 
   source ~/dots/vim/note.vim
   " autocmd VimEnter * if argc() == 0

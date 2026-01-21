@@ -41,7 +41,7 @@ let s:default_file = 'index.md'
 
 function! RestoreOrDefault()
   execute 'cd ' . s:default_dir
-  execute 'edit ' . s:default_file
+  silent! execute 'edit ' . s:default_file
 endfunction
 
 autocmd VimLeave * mksession! ~/.local/vim/neovide_session.vim

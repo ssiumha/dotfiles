@@ -92,7 +92,7 @@ require('packer').startup(function(use)
     }
   end }
 
-  use { 'nvim-treesitter/nvim-treesitter', run = ':TSUpdate' }
+  use 'nvim-treesitter/nvim-treesitter'
   use 'nvim-treesitter/nvim-treesitter-context'
   use 'nvim-treesitter/nvim-treesitter-textobjects'
 
@@ -346,48 +346,42 @@ require("mason-lspconfig").setup {
 ----------------------------------
 -- nvim-treesitter/nvim-treesitter
 ----------------------------------
--- vim.opt.rtp:append("~/.cache/treesitter")
---
--- ~/.local/share/mise/installs/neovim/0.10.1/lib/nvim
-require'nvim-treesitter.configs'.setup {
-  -- parser_install_dir = "~/.cache/treesitter",
+-- Neovim 0.11+: treesitter highlighting is built-in
+-- nvim-treesitter is now only needed for parser installation
+require('nvim-treesitter').setup {
   ensure_installed = { 'ruby', 'yaml' },
   auto_install = true,
-  highlight = {
-    enable = true,
-    additional_vim_regex_highlighting = false,
-    -- disable = { 'embedded_template' }
-  },
+}
 
-  textobjects = {
-    select = {
-      enable = true,
-      lookahead = true,
-      keymaps = {
-        ['ib'] = '@block.inner',
-        ['ab'] = '@block.outer',
-        ['if'] = '@function.inner',
-        ['af'] = '@function.outer',
-        ['ip'] = '@parameter.inner',
-        ['ap'] = '@parameter.outer',
-        ['aS'] = '@statement.outer',
-      },
-      selection_modes = {
-        ['@block.outer'] = 'V',
-        ['@block.inner'] = 'V',
-        ['@function.outer'] = 'V',
-        ['@function.inner'] = 'V',
-        ['@statement.outer'] = 'V',
-      },
+-- nvim-treesitter-textobjects
+require('nvim-treesitter-textobjects').setup {
+  select = {
+    enable = true,
+    lookahead = true,
+    keymaps = {
+      ['ib'] = '@block.inner',
+      ['ab'] = '@block.outer',
+      ['if'] = '@function.inner',
+      ['af'] = '@function.outer',
+      ['ip'] = '@parameter.inner',
+      ['ap'] = '@parameter.outer',
+      ['aS'] = '@statement.outer',
     },
-    move = {
-      enable = true,
-      set_jumps = true,
-      goto_next_start     = { [']m'] = '@function.outer', },
-      goto_next_end       = { [']M'] = '@function.outer', },
-      goto_previous_start = { ['[m'] = '@function.outer', },
-      goto_previous_end   = { ['[M'] = '@function.outer', },
+    selection_modes = {
+      ['@block.outer'] = 'V',
+      ['@block.inner'] = 'V',
+      ['@function.outer'] = 'V',
+      ['@function.inner'] = 'V',
+      ['@statement.outer'] = 'V',
     },
+  },
+  move = {
+    enable = true,
+    set_jumps = true,
+    goto_next_start     = { [']m'] = '@function.outer', },
+    goto_next_end       = { [']M'] = '@function.outer', },
+    goto_previous_start = { ['[m'] = '@function.outer', },
+    goto_previous_end   = { ['[M'] = '@function.outer', },
   },
 }
 
