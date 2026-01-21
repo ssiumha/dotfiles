@@ -30,7 +30,20 @@ task :console do
 end
 
 desc 'install all process'
-task 'install:all' => ['install:base', 'install:config', 'install:claude', 'install:brew', 'install:mise'] do
+task 'install:all' => [
+  'install:xcode',
+  'install:homebrew',
+  'install:mise',
+  'install:rc',
+  'install:config',
+  'install:zprofile',
+  'install:brew:core',
+  'install:brew:dev',
+  'install:brew:extra',
+  'install:vim_plugins',
+  'install:claude',
+  'install:macos'
+] do
 end
 
 desc 'install zshrc, vimrc'
@@ -81,17 +94,93 @@ task 'uninstall:config' do
   end
 end
 
-desc 'init brew'
-task 'install:brew' do
+desc 'install xcode command line tools'
+task 'install:xcode' do
   next if OS_TYPE != :osx
+  if system('xcode-select', '-p', out: File::NULL, err: File::NULL)
+    puts 'Xcode CLI Tools: already installed'
+  else
+    sh 'xcode-select --install'
+  end
+end
 
-  if `command -v brew`.chomp.empty?
+desc 'generate SSH key and show public key'
+task 'install:ssh_key' do
+  ssh_key_path = File.join(Dir.home, '.ssh/id_ed25519')
+  if File.exist?(ssh_key_path)
+    puts 'SSH key: already exists'
+  else
+    sh %(ssh-keygen -t ed25519 -C "#{`whoami`.chomp}@#{`hostname`.chomp}" -f #{ssh_key_path} -N "")
+  end
+  puts "\n=== Public Key (add to GitHub) ==="
+  puts File.read("#{ssh_key_path}.pub")
+end
+
+desc 'install homebrew'
+task 'install:homebrew' do
+  next if OS_TYPE != :osx
+  if system('which brew', out: File::NULL, err: File::NULL)
+    puts 'Homebrew: already installed'
+  else
     sh %{ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" }
   end
+end
 
-  sh <<~SH
-    cat Brewfile | brew bundle --file=/dev/stdin
-  SH
+desc 'setup zprofile for mise'
+task 'install:zprofile' do
+  zprofile_path = File.join(Dir.home, '.zprofile')
+  mise_line = 'eval "$($HOME/.local/bin/mise activate zsh --shims)"'
+
+  if File.exist?(zprofile_path) && File.read(zprofile_path).include?('mise activate')
+    puts '.zprofile: mise already configured'
+  else
+    File.open(zprofile_path, 'a') { |f| f.puts mise_line }
+    puts '.zprofile: mise PATH added'
+  end
+end
+
+desc 'install vim plugins'
+task 'install:vim_plugins' do
+  plug_path = File.join(Dir.home, '.vim/autoload/plug.vim')
+  unless File.exist?(plug_path)
+    sh 'curl -fLo ~/.vim/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim'
+  end
+  sh 'vim +PlugInstall +qall'
+end
+
+desc 'install core brew packages'
+task 'install:brew:core' do
+  next if OS_TYPE != :osx
+  sh 'brew bundle --file=brew/core.Brewfile'
+end
+
+desc 'install dev brew packages'
+task 'install:brew:dev' do
+  next if OS_TYPE != :osx
+  sh 'brew bundle --file=brew/dev.Brewfile'
+end
+
+desc 'install extra brew packages'
+task 'install:brew:extra' do
+  next if OS_TYPE != :osx
+  sh 'brew bundle --file=brew/extra.Brewfile'
+end
+
+desc 'configure macOS settings'
+task 'install:macos' do
+  next if OS_TYPE != :osx
+
+  # 키 반복 활성화 (press and hold 비활성화)
+  sh 'defaults write -g ApplePressAndHoldEnabled -bool false'
+
+  # Spotlight 단축키 비활성화 (Raycast 사용)
+  sh 'defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 "<dict><key>enabled</key><false/></dict>"'
+
+  puts 'macOS settings configured. Logout may be required.'
+end
+
+desc 'init brew (deprecated: use install:homebrew + install:brew:*)'
+task 'install:brew' => ['install:homebrew', 'install:brew:extra'] do
 end
 
 desc 'install mise'
@@ -159,12 +248,25 @@ task 'install:claude' do
   statusline_path = File.join(DOT_DIR, 'prompts/statusline.sh')
 
   if File.exist?(settings_path)
-    sh <<~SH
-      jq '. + {"statusLine": {"type": "command", "command": "#{statusline_path}"}}' \
-        "#{settings_path}" > "#{settings_path}.tmp" && \
-        mv "#{settings_path}.tmp" "#{settings_path}"
-    SH
-    puts "settings.json  : statusLine updated"
+    begin
+      settings_content = JSON.parse(File.read(settings_path))
+    rescue JSON::ParserError => e
+      puts "settings.json  : invalid JSON, skipping (#{e.message})"
+      settings_content = nil
+    end
+
+    if settings_content
+      if settings_content.dig('statusLine', 'command') == statusline_path
+        puts "settings.json  : statusLine already configured"
+      else
+        settings_content['statusLine'] = {
+          'type' => 'command',
+          'command' => statusline_path
+        }
+        File.write(settings_path, JSON.pretty_generate(settings_content))
+        puts "settings.json  : statusLine updated"
+      end
+    end
   else
     puts "settings.json  : not found, skipping"
   end
@@ -193,10 +295,15 @@ task 'install:claude' do
     marketplace_list = `claude plugin marketplace list 2>/dev/null`
     unless marketplace_list.include?(marketplace_name)
       puts "marketplace    : adding #{marketplace}"
-      system("claude plugin marketplace add #{marketplace}")
+      unless system("claude plugin marketplace add #{marketplace}")
+        puts "marketplace    : failed to add #{marketplace}, skipping"
+        next
+      end
     end
 
     puts "plugin         : installing #{plugin}"
-    system("claude plugin install #{plugin}")
+    unless system("claude plugin install #{plugin}")
+      puts "plugin         : failed to install #{plugin}"
+    end
   end
 end
