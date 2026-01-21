@@ -1,0 +1,460 @@
+#!/usr/bin/env ruby
+#MISE description="SSH 터널 관리 (healthcheck 포함)"
+
+require 'fileutils'
+require 'yaml'
+require 'socket'
+
+CONFIG_DIR = File.expand_path('~/.config/tunnel')
+STATE_FILE = File.join(CONFIG_DIR, 'state.yml')
+LOG_DIR = File.join(CONFIG_DIR, 'logs')
+
+def ensure_dirs
+  FileUtils.mkdir_p(CONFIG_DIR)
+  FileUtils.mkdir_p(LOG_DIR)
+end
+
+def load_state
+  return { 'tunnels' => {} } unless File.exist?(STATE_FILE)
+  YAML.safe_load(File.read(STATE_FILE), permitted_classes: [Time]) || { 'tunnels' => {} }
+end
+
+def save_state(state)
+  ensure_dirs
+  tmp_file = "#{STATE_FILE}.tmp.#{Process.pid}"
+  File.write(tmp_file, YAML.dump(state))
+  File.rename(tmp_file, STATE_FILE)  # 원자적 교체
+end
+
+def log_file(name)
+  File.join(LOG_DIR, "#{name}.log")
+end
+
+def running?(pid)
+  return false unless pid
+  Process.kill(0, pid)
+  true
+rescue Errno::ESRCH, Errno::EPERM
+  false
+end
+
+# PID 재사용 방어: 프로세스명 검증 후 kill
+def safe_kill(pid, expected_cmd = nil)
+  return false unless pid && running?(pid)
+
+  # macOS/Linux 호환
+  cmd = `ps -p #{pid} -o command= 2>/dev/null`.strip rescue ""
+
+  # 기대하는 명령어가 있으면 검증
+  if expected_cmd && !cmd.empty?
+    return false unless cmd.include?(expected_cmd)
+  end
+
+  Process.kill('TERM', pid)
+  sleep 0.5
+  Process.kill('KILL', pid) rescue nil
+  true
+rescue Errno::ESRCH
+  false
+end
+
+def healthy?(pid, name)
+  return false unless running?(pid)
+
+  # SSH config에서 LocalForward 포트 찾기
+  local_port = get_local_port(name)
+  return true unless local_port  # 포트 정보 없으면 프로세스 체크만
+
+  socket = nil
+  begin
+    socket = TCPSocket.new('127.0.0.1', local_port)
+    true
+  rescue Errno::ECONNREFUSED
+    true  # 포트 열림, 대상이 거부 (SSH는 정상)
+  rescue Errno::ETIMEDOUT, Errno::ECONNRESET
+    false # 터널 문제
+  ensure
+    socket&.close rescue nil
+  end
+end
+
+def get_local_port(name)
+  config_paths = [
+    File.expand_path('~/.ssh/config'),
+    *Dir.glob(File.expand_path('~/.ssh/*/config'))
+  ]
+
+  config_paths.each do |path|
+    next unless File.exist?(path)
+
+    in_host = false
+    File.open(path, 'r') do |f|
+      f.each_line do |line|
+        if line =~ /^\s*Host\s+(\S+)/i
+          in_host = ($1 == name)
+        elsif in_host && line =~ /^\s*LocalForward\s+(\d+)\s+/i
+          return $1.to_i
+        end
+      end
+    end
+  end
+  nil
+end
+
+def spawn_ssh(name)
+  spawn("ssh", "-N", name,
+        [:out, :err] => [log_file(name), "a"])
+end
+
+def start(name, auto_restart: true)
+  state = load_state
+  tunnel = state['tunnels'][name] || {}
+
+  # 이미 healthchecker 또는 SSH가 살아있으면 스킵
+  if running?(tunnel['pid']) || running?(tunnel['ssh_pid'])
+    puts "\e[33m#{name}\e[0m already running (pid: #{tunnel['pid']})"
+    exit 0
+  end
+
+  ensure_dirs
+
+  # IPC pipe로 SSH PID 전달
+  parent_r, child_w = IO.pipe
+
+  # healthchecker fork
+  hc_pid = fork do
+    parent_r.close
+    @ssh_pid = nil
+    @name = name
+
+    # Signal handler로 SSH 정리
+    cleanup = -> {
+      if @ssh_pid
+        Process.kill('TERM', @ssh_pid) rescue nil
+        sleep 0.5
+        Process.kill('KILL', @ssh_pid) rescue nil
+        Process.wait(@ssh_pid) rescue nil
+      end
+      File.open(log_file(@name), 'a') { |f| f.puts "=== Stopped at #{Time.now} ===" }
+      exit 0
+    }
+
+    trap('TERM', &cleanup)
+    trap('INT', &cleanup)
+
+    at_exit do
+      if @ssh_pid
+        Process.kill('TERM', @ssh_pid) rescue nil
+        Process.wait(@ssh_pid) rescue nil
+      end
+    end
+
+    # 로그 파일 초기화
+    File.write(log_file(name), "=== Started at #{Time.now} ===\n")
+
+    retry_count = 0
+    max_retries = 5
+    uptime_threshold = 60  # 60초 이상 살아있으면 성공
+
+    loop do
+      @ssh_pid = spawn_ssh(name)
+      start_time = Time.now
+
+      # SSH PID를 parent에 전달 (첫 번째 실행만)
+      if child_w
+        begin
+          child_w.write(@ssh_pid.to_s)
+          child_w.close
+        rescue Errno::EPIPE
+          File.open(log_file(@name), 'a') { |f| f.puts "WARN: Parent closed pipe early" }
+        ensure
+          child_w = nil
+        end
+      end
+
+      # SSH 초기 연결 대기
+      sleep 2
+
+      # SSH 프로세스 감시 + healthcheck
+      loop do
+        sleep 10
+
+        # uptime이 threshold 넘으면 retry 카운터 리셋
+        if Time.now - start_time > uptime_threshold
+          retry_count = 0
+        end
+
+        # SSH 프로세스가 스스로 죽었는지 먼저 체크
+        begin
+          result = Process.waitpid(@ssh_pid, Process::WNOHANG)
+          if result
+            File.open(log_file(name), 'a') { |f| f.puts "=== SSH exited at #{Time.now} ===" }
+            break  # 재시작
+          end
+        rescue Errno::ECHILD
+          break  # 재시작
+        end
+
+        unless healthy?(@ssh_pid, name)
+          Process.kill('TERM', @ssh_pid) rescue nil
+          sleep 0.5
+          Process.kill('KILL', @ssh_pid) rescue nil
+          Process.wait(@ssh_pid) rescue nil
+
+          # auto_restart 체크
+          current_state = load_state
+          current_tunnel = current_state['tunnels'][name] || {}
+
+          if current_tunnel['auto_restart'] == false
+            File.open(log_file(name), 'a') { |f| f.puts "=== Stopped (auto_restart: false) at #{Time.now} ===" }
+            exit 0
+          end
+
+          File.open(log_file(name), 'a') { |f| f.puts "=== Restarting at #{Time.now} ===" }
+          break  # 바깥 loop로 → 재시작
+        end
+      end
+
+      # 60초 안에 죽었으면 재시도 카운터 증가
+      if Time.now - start_time < uptime_threshold
+        retry_count += 1
+        if retry_count >= max_retries
+          File.open(log_file(name), 'a') { |f| f.puts "=== Too many retries (#{max_retries}), stopping at #{Time.now} ===" }
+          exit 1
+        end
+
+        # 지수 백오프
+        backoff = [3, 6, 12, 30, 60].fetch(retry_count - 1, 60)
+        sleep backoff
+      else
+        sleep 3  # 정상 종료 후 재시작은 짧은 대기
+      end
+    end
+  end
+
+  child_w.close
+
+  # SSH PID 수신 (타임아웃 3초)
+  ssh_pid = nil
+  if IO.select([parent_r], nil, nil, 3)
+    ssh_pid = parent_r.read.to_i
+  else
+    File.open(log_file(name), 'a') { |f| f.puts "WARN: SSH PID not received (timeout)" }
+  end
+  parent_r.close
+
+  Process.detach(hc_pid)
+
+  # 상태 저장 (SSH PID 포함)
+  state['tunnels'][name] = {
+    'pid' => hc_pid,
+    'ssh_pid' => ssh_pid,
+    'auto_restart' => auto_restart,
+    'started_at' => Time.now.strftime('%Y-%m-%d %H:%M:%S')
+  }
+  save_state(state)
+
+  # 연결 대기
+  sleep 2
+  local_port = get_local_port(name)
+  port_info = local_port ? " (port: #{local_port})" : ""
+
+  puts "\e[32m#{name}\e[0m started (pid: #{hc_pid})#{port_info}"
+end
+
+def stop(name)
+  state = load_state
+  tunnel = state['tunnels'][name]
+
+  unless tunnel
+    puts "\e[33m#{name}\e[0m not found"
+    return
+  end
+
+  stopped = false
+
+  # healthchecker 종료 (safe_kill로 검증)
+  if tunnel['pid'] && safe_kill(tunnel['pid'], 'ruby')
+    stopped = true
+  end
+
+  # SSH 프로세스도 직접 정리 (healthchecker가 못 정리한 경우)
+  if tunnel['ssh_pid'] && safe_kill(tunnel['ssh_pid'], 'ssh')
+    stopped = true
+  end
+
+  state['tunnels'].delete(name)
+  save_state(state)
+
+  if stopped
+    puts "\e[32m#{name}\e[0m stopped"
+  else
+    puts "\e[33m#{name}\e[0m already stopped (cleaned up)"
+  end
+end
+
+def status
+  state = load_state
+
+  if state['tunnels'].empty?
+    puts "No tunnels"
+    return
+  end
+
+  state['tunnels'].each do |name, info|
+    pid = info['pid']
+    auto = info['auto_restart'] != false ? '♻' : '○'
+    port = get_local_port(name)
+    port_info = port ? ":#{port}" : ""
+
+    if running?(pid)
+      health = healthy?(pid, name) ? "\e[32m●\e[0m" : "\e[33m●\e[0m"
+      puts "#{health} #{auto} #{name}#{port_info} (pid: #{pid}, since: #{info['started_at']})"
+    else
+      puts "\e[31m●\e[0m #{auto} #{name}#{port_info} (stale)"
+      # 정리
+      state['tunnels'].delete(name)
+    end
+  end
+
+  save_state(state)
+end
+
+def list
+  config_paths = [
+    File.expand_path('~/.ssh/config'),
+    *Dir.glob(File.expand_path('~/.ssh/*/config'))
+  ]
+
+  hosts = []
+  config_paths.each do |path|
+    next unless File.exist?(path)
+
+    current_host = nil
+    has_forward = false
+    forward_info = nil
+
+    File.open(path, 'r') do |f|
+      f.each_line do |line|
+        if line =~ /^\s*Host\s+(\S+)/i
+          hosts << { name: current_host, forward: forward_info } if current_host && has_forward
+          current_host = $1
+          has_forward = false
+          forward_info = nil
+        elsif line =~ /^\s*LocalForward\s+(.+)/i
+          has_forward = true
+          forward_info = $1.strip
+        end
+      end
+    end
+    hosts << { name: current_host, forward: forward_info } if current_host && has_forward
+  end
+
+  hosts.uniq! { |h| h[:name] }
+
+  if hosts.empty?
+    puts "No hosts with LocalForward found in SSH config"
+    return
+  end
+
+  state = load_state
+
+  puts "Available tunnel hosts:"
+  hosts.each do |h|
+    tunnel = state['tunnels'][h[:name]]
+    marker = (tunnel && running?(tunnel['pid'])) ? "\e[32m●\e[0m" : "\e[90m○\e[0m"
+    puts "  #{marker} #{h[:name]} → #{h[:forward]}"
+  end
+end
+
+def set_option(name, key, value)
+  state = load_state
+
+  unless state['tunnels'][name]
+    puts "\e[31m#{name}\e[0m not found"
+    exit 1
+  end
+
+  case key
+  when 'auto_restart'
+    state['tunnels'][name]['auto_restart'] = (value == 'true')
+  else
+    puts "Unknown option: #{key}"
+    exit 1
+  end
+
+  save_state(state)
+  puts "#{name}: #{key} = #{value}"
+end
+
+def logs(name)
+  lf = log_file(name)
+  if File.exist?(lf)
+    exec("tail", "-f", lf)
+  else
+    puts "No logs for #{name}"
+  end
+end
+
+def help
+  puts <<~HELP
+    Usage: mise run tunnel <command> [args]
+
+    Commands:
+      start <name> [--no-restart]   Start tunnel (with healthcheck)
+      stop <name>                   Stop tunnel
+      status                        Show running tunnels
+      list                          Show available hosts (SSH config)
+      logs <name>                   Tail tunnel logs
+      set <name> <key>=<value>      Set option (auto_restart=true|false)
+
+    Examples:
+      mise run tunnel start dev-bastion
+      mise run tunnel start prod-bastion --no-restart
+      mise run tunnel stop dev-bastion
+      mise run tunnel set dev-bastion auto_restart=false
+      mise run tunnel logs dev-bastion
+  HELP
+end
+
+# Main
+command = ARGV[0]
+
+case command
+when 'start'
+  name = ARGV[1]
+  abort "Usage: mise run tunnel start <name>" unless name
+  auto_restart = !ARGV.include?('--no-restart')
+  start(name, auto_restart: auto_restart)
+
+when 'stop'
+  name = ARGV[1]
+  abort "Usage: mise run tunnel stop <name>" unless name
+  stop(name)
+
+when 'status'
+  status
+
+when 'list', 'ls'
+  list
+
+when 'logs'
+  name = ARGV[1]
+  abort "Usage: mise run tunnel logs <name>" unless name
+  logs(name)
+
+when 'set'
+  name = ARGV[1]
+  option = ARGV[2]
+  abort "Usage: mise run tunnel set <name> <key>=<value>" unless name && option
+  key, value = option.split('=', 2)
+  set_option(name, key, value)
+
+when 'help', '-h', '--help', nil
+  help
+
+else
+  puts "Unknown command: #{command}"
+  help
+  exit 1
+end
