@@ -1,6 +1,6 @@
 [settings]
 # disable_tools = ["python"]
-experimental = true # with python virtaulenv activation
+experimental = true # with python virtualenv activation
 python_venv_auto_create = true
 idiomatic_version_file_enable_tools = ["ruby"]
 
@@ -14,7 +14,7 @@ neovim = "latest"
 fzf = "latest"
 ripgrep = "latest"
 delta = "latest"
-zoxide = "latest"
+zoxide = "0.9.8"
 fd = "latest"
 bat = "latest"
 dust = "latest"
@@ -33,8 +33,8 @@ ubi = "latest"
 sq = "latest"
 tv = { version = "latest", exe = "tv" }
 sops = "latest"
-maven = "3.9.9"
-java = "21"
+ghq = "latest"
+gh = "latest"
 # rust = "latest"
 # "cargo:jwt-cli" = "latest"
 # "ubi:DarthSim/overmind" = "latest"
@@ -45,20 +45,20 @@ java = "21"
 
 # "cargo:similarity-ts" = "latest"
 
-[alias]
+[tool_alias]
 usage = "https://github.com/jdx/mise-usage.git"
-sq = 'ubi:neilotoole/sq'
-xq = 'ubi:sibprogrammer/xq'
-tv = 'ubi:alexpasmantier/television'
+sq = 'github:neilotoole/sq'
+xq = 'github:sibprogrammer/xq'
+tv = 'github:alexpasmantier/television'
 claude = "npm:@anthropic-ai/claude-code"
 gemini = "npm:@google/gemini-cli"
 codex = "npm:@openai/codex"
 agent-browser = "npm:agent-browser"
 claude_swarm = "gem:claude_swarm"
-roast = "gem:roast-ai"
-copilot = "aqua:aws/copilot-cli"
-rainfrog = "ubi:achristmascarl/rainfrog"
-rbw = "ubi:doy/rbw"
+copilot = "github:aws/copilot-cli"
+rainfrog = "github:achristmascarl/rainfrog"
+rbw = "github:doy/rbw"
+mole = "github:davrodpin/mole"
 
 [tasks."yarn:latest"]
 description = "set yarn version to latest"
