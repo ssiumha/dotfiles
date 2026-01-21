@@ -59,6 +59,8 @@ date +"%Y-%m-%dT%H:%M:%S%z"  ## iso-8610 in BSD
 ssh -L 8080:10.0.0.0:80 user@remote -N ## local port forward. curl localhost:8080 -> 10.0.0.0:80 in remote
 ssh -R 8080:192.168.0.0:80 user@remote -N ## remote port forward. curl remote:8080 -> 192.168.0.0:80 in local
 
+mole add alias local example --source :8080 --destination 172.17.0.100:80 --server user@example.com:22
+
 join -a 1 -a 2 -e "-" -o '0,1.2,2.2' /tmp/before.txt /tmp/after.txt  ## key,name file outer join
 
 openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out cert.crt -keyout cert.key
@@ -254,6 +256,7 @@ terraform apply plan.out   ## or TF_LOG=DEBUG or TF_LOG=TRACE
 aws --cli-auto-prompt  ## aws auto prompt
 aws eks update-kubeconfig --name ${CLUSTER_NAME} --profile ${PROFILE}
 aws configure --profile ${PROFILE} ## region=ap-northeast-2, format=text|table|json|yaml
+aws configure sso --profile ${PROFILE}
 aws s3 ls
 aws s3 ls --recursive --human-readable --summarize s3://bucket-name/directory
 aws s3api get-bucket-lifecycle-configuration --bucket ${BUCKET}
