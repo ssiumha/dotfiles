@@ -1,6 +1,6 @@
 ---
 name: ldoc-automation
-description: "Use PROACTIVELY as background task: (1) after significant work (2+ files) for doc sync, (2) in auto-dev PLAN for knowledge search, (3) on TODO completion for archiving. Triggers: 문서화, TODO, ldoc, 지식 검색, 관련 문서."
+description: "Use PROACTIVELY as background task: (1) after significant work (2+ files) for doc sync, (2) knowledge search, (3) on TODO completion for archiving. Triggers: 문서화, TODO, ldoc, 지식 검색, 관련 문서."
 tools: Read, Glob, Grep, Write, Edit, Bash
 model: sonnet
 ---

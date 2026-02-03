@@ -1,6 +1,6 @@
 ---
 name: test-verifier
-description: 테스트 독립 검증 전문가. auto-dev IMPLEMENT phase에서 테스트 통과 후 자동 호출. Overfitting 방지, 테스트 품질 평가.
+description: 테스트 독립 검증 전문가. 테스트 통과 후 자동 호출. Overfitting 방지, 테스트 품질 평가.
 tools: Read, Glob, Grep
 model: sonnet
 ---

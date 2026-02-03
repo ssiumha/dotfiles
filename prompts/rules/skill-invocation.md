@@ -14,8 +14,8 @@
 
 | 패턴 | 예시 | 동작 |
 |------|------|------|
-| `{skill} + 동사` | "auto-dev 실행" | 호출 |
-| `{skill} 단독` | "auto-dev" | 호출 |
+| `{skill} + 동사` | "tdd-practices 실행" | 호출 |
+| `{skill} 단독` | "ldoc" | 호출 |
 | `{skill} + 조사형` | "ldoc으로 할까?" | 호출 후 결과로 판단 |
 | `어떤 skill?` | "이 작업에 맞는 skill?" | 적합한 skill 탐색 후 호출 |
 | **작업 매칭** | "테스트 먼저 작성" | → tdd-practices |
@@ -32,7 +32,6 @@
 
 | 작업 유형 | Skill |
 |----------|-------|
-| 전체 개발 워크플로우 | auto-dev |
 | 테스트 먼저 | tdd-practices |
 | 복잡한 계획 수립 | plan-creator |
 | 코드 구조 검색 | ast-grep |

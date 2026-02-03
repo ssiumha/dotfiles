@@ -1,6 +1,6 @@
 ---
 name: spec-validator
-description: 요구사항 검증 전문가. auto-dev SPECIFY phase에서 자동 호출. 기능 요청의 모호함 감지, 질문 생성, 완료 조건 도출.
+description: 요구사항 검증 전문가. 기능 요청의 모호함 감지, 질문 생성, 완료 조건 도출.
 tools: Read, Glob, Grep
 model: sonnet
 ---
