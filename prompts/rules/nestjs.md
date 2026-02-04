@@ -1,3 +1,7 @@
+---
+paths: "**/*.module.ts"
+---
+
 # NestJS 개발 규칙
 
 ## DI 안전성

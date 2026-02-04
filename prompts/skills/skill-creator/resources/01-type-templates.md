@@ -93,7 +93,7 @@ User: "{요청}" → 워크플로우 N → {결과}
 상세한 내용은 `REFERENCE.md`를 참조하세요.
 ```
 
-**대표 예시**: ldoc, dev-docs, test-guidelines
+**대표 예시**: ldoc, test-guidelines
 
 ---
 
@@ -166,7 +166,7 @@ User: "{요청}" → 키워드 매칭 → Read 리소스 → 적용
 - `resources/02-{name}.md`: {설명}
 ```
 
-**대표 예시**: ansible-deployment, patterns-devops
+**대표 예시**: deployment, ci-cd
 
 ---
 
@@ -308,7 +308,7 @@ description: {언제 사용}. {키워드}.
 분석 → 리포트 → 사용자 선택 → 개선 → 검증
 ```
 
-**대표 예시**: claude-md-guide, review-security
+**대표 예시**: claude-guide, review-security
 
 ---
 
@@ -362,7 +362,7 @@ User: "{요청}" → 도구 실행 → 검증 → 정리
 도구 사용법은 `REFERENCE.md` 참조.
 ```
 
-**대표 예시**: pdf-tools
+**대표 예시**: qmd, ast-grep
 
 ---
 

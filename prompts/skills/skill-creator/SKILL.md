@@ -20,8 +20,11 @@ Description은 Claude가 skill 활성화를 결정하는 **유일한 기준**입
 # 명확한 기능 + 트리거 조건
 description: Generates commit messages from git diffs. Use when writing commits or reviewing staged changes.
 
-# 구체적 키워드 포함
-description: Creates Docker configurations. Use when containerizing apps, writing compose.yaml, or building multi-stage images.
+# 구체적 키워드 + 네거티브 트리거
+description: Creates Docker configurations. Use when containerizing apps, writing compose.yaml, or building multi-stage images. Do NOT use for Kubernetes manifests or Helm charts (use deployment instead).
+
+# 범용 skill에 오버트리거 방지
+description: Manages project knowledge base. Use when recording decisions, creating TODOs, or updating knowledge docs. Do NOT use for one-off documentation or simple README edits.
 ```
 
 **나쁜 예시**:
@@ -31,7 +34,15 @@ description: Helps with documents.
 
 # 트리거 조건 없음
 description: Code review tool.
+
+# 네거티브 트리거 없이 너무 넓은 범위
+description: Manages all project documentation and notes.
 ```
+
+**네거티브 트리거 (Do NOT use when)**:
+- 범용성이 높은 skill에 필수 — 오버트리거 방지
+- 유사 skill이 있을 때 경계 명확화
+- 형식: `Do NOT use for {제외 케이스} (use {대안 skill} instead).`
 
 ## Progressive Disclosure (토큰 효율)
 
@@ -197,9 +208,16 @@ Skill 생성 전 **구체적 사용 예시**를 수집하십시오. 예시가 �
    - 2-3 단어 권장
    - 도메인 명확 (예: doc-optimization, deployment-automation)
 
-2. **Skill 유형 선택**
+2. **Skill 카테고리 및 유형 선택**
 
-   AskUserQuestion으로 확인:
+   **카테고리** (Anthropic 공식 분류):
+   | 카테고리 | 설명 | 예시 |
+   |---------|------|------|
+   | **Document/Asset 생성** | 파일, 문서, 다이어그램 등 산출물 생성 | literate-docs, good-spec |
+   | **Workflow 자동화** | 다단계 프로세스를 정형화하여 실행 | tdd-practices, git-worktree, plan-creator |
+   | **MCP 강화** | 외부 도구/서비스 조합을 전문화 | agent-browser, tmux-agent |
+
+   **구현 패턴** (AskUserQuestion으로 확인):
    - [1] 워크플로우 기반 (단계별 작업, 200-450줄)
    - [2] 리소스 로딩 기반 (키워드 매칭, 140-160줄)
    - [3] Phase 기반 (선형 진행, 200-250줄)

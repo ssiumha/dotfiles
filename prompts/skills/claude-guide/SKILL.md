@@ -19,7 +19,7 @@ Claude Code는 다양한 설정 방식을 제공합니다. **컨텍스트 소비
 | rules/ | 자동 로드 (paths 지정 시 해당 경로만) | 상세 규칙 분리 (20줄+ 시) |
 | hooks/ | 이벤트 시 | 도구 호출 전후 자동 실행 |
 | commands/ | 호출 시만 | 반복 작업 템플릿 (/docs, /self-review) |
-| skills/ | 필요 시만 | 전문 지식 패키지 (drawio) |
+| skills/ | 필요 시만 | 전문 지식 패키지 (tdd-practices) |
 | agents/ | 위임 시만 | 독립 컨텍스트 작업 (code-review) |
 
 ### 어디에 넣을까?

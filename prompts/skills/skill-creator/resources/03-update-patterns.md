@@ -328,7 +328,7 @@ git commit -m "[skill] update {skill-name} - {변경 요약}"
 
 **예시**:
 - `[skill] update ldoc - add 간결성 원칙, 안티패턴 섹션`
-- `[skill] update ansible-deployment - add playbook 검증 워크플로우`
+- `[skill] update deployment - add playbook 검증 워크플로우`
 - `[skill] update tdd-practices - add Red Flag (Phase 2)`
 
 **변경 요약 작성 원칙**:
