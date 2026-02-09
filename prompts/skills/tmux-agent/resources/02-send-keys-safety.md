@@ -1,40 +1,20 @@
 # send-keys 안전 가이드
 
-## Race Condition 이해
+## 전송 패턴
 
-tmux send-keys는 터미널에 키 입력을 시뮬레이션합니다. 문제는 **입력 완료 전에 Enter가 전송**되면 명령이 잘리는 것입니다.
+tmux send-keys는 터미널에 키 입력을 시뮬레이션합니다.
 
-### 문제 상황
+### 기본 패턴
 
 ```bash
-# 위험: 명령어 입력 중 Enter 전송 → 잘린 명령 실행
+# 명령 전송 (Enter 포함)
 tmux send-keys -t 1.0 "npm install --save-dev typescript" Enter
 
-# 실제로 실행될 수 있는 것:
-# "npm install --save-d" + Enter (잘림)
-# 또는 "ev typescript" + Enter (다음 줄에서 실행)
-```
-
-### 안전한 패턴
-
-```bash
-# 권장: 명령 입력 → 대기 → Enter 분리
-tmux send-keys -t 1.0 "npm install --save-dev typescript" && sleep 0.5 && tmux send-keys -t 1.0 Enter
-
-# 또는 변수 사용
+# 변수 사용
 TARGET="1.0"
 CMD="npm install --save-dev typescript"
-tmux send-keys -t "$TARGET" "$CMD" && sleep 0.5 && tmux send-keys -t "$TARGET" Enter
+tmux send-keys -t "$TARGET" "$CMD" Enter
 ```
-
-### delay 가이드
-
-| 명령 길이 | 권장 delay |
-|----------|-----------|
-| 짧은 명령 (< 50자) | 0.3초 |
-| 일반 명령 (50-100자) | 0.5초 |
-| 긴 명령 (> 100자) | 1.0초 |
-| heredoc / 다중 라인 | 각 라인마다 0.5초 |
 
 ---
 
@@ -122,18 +102,12 @@ tmux send-keys -t 1.0 "cat file.txt | grep pattern"
 ### Heredoc (다중 라인)
 
 ```bash
-# 방법 1: 라인별 전송
-tmux send-keys -t 1.0 "cat <<'EOF'" && sleep 0.3 && tmux send-keys -t 1.0 Enter
-tmux send-keys -t 1.0 "line 1" && sleep 0.3 && tmux send-keys -t 1.0 Enter
-tmux send-keys -t 1.0 "line 2" && sleep 0.3 && tmux send-keys -t 1.0 Enter
-tmux send-keys -t 1.0 "EOF" && sleep 0.3 && tmux send-keys -t 1.0 Enter
-
-# 방법 2: 임시 파일 사용 (권장, 긴 내용일 때)
+# 방법 1: 임시 파일 사용 (권장)
 cat > /tmp/script.sh << 'EOF'
 #!/bin/bash
 echo "hello"
 EOF
-tmux send-keys -t 1.0 "bash /tmp/script.sh" && sleep 0.5 && tmux send-keys -t 1.0 Enter
+tmux send-keys -t 1.0 "bash /tmp/script.sh" Enter
 ```
 
 ---
@@ -145,8 +119,7 @@ tmux send-keys -t 1.0 "bash /tmp/script.sh" && sleep 0.5 && tmux send-keys -t 1.
 - [ ] 타겟 pane 존재 확인 (`tmux list-panes`)
 - [ ] 타겟 pane이 Idle 상태인지 확인
 - [ ] 특수문자 이스케이프 완료
-- [ ] delay 설정 (명령 길이에 맞게)
-- [ ] Enter 분리 전송
+- [ ] Enter 포함 확인
 
 전송 후 확인:
 
@@ -160,7 +133,7 @@ tmux send-keys -t 1.0 "bash /tmp/script.sh" && sleep 0.5 && tmux send-keys -t 1.
 ### "command not found" 에러
 
 원인: 명령이 잘려서 전송됨
-해결: delay 증가 (0.5초 → 1.0초)
+해결: 긴 명령은 임시 파일로 전송
 
 ### 특수문자가 해석됨
 
@@ -170,7 +143,7 @@ tmux send-keys -t 1.0 "bash /tmp/script.sh" && sleep 0.5 && tmux send-keys -t 1.
 ### 명령이 두 번 실행됨
 
 원인: Enter가 두 번 전송됨
-해결: send-keys에 Enter 포함하지 않고 별도 전송
+해결: send-keys에 Enter를 한 번만 포함
 
 ### pane이 응답하지 않음
 

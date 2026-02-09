@@ -1,6 +1,6 @@
 ---
 name: spec-validator
-description: 요구사항 검증 전문가. 기능 요청의 모호함 감지, 질문 생성, 완료 조건 도출.
+description: "Use PROACTIVELY when receiving feature requests or ambiguous requirements. Detects vagueness, generates clarifying questions, and derives testable acceptance criteria."
 tools: Read, Glob, Grep
 model: sonnet
 ---

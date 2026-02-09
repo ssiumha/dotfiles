@@ -27,6 +27,7 @@
 | `nohup`, `disown` | 프로세스 분리 금지 |
 | `lsof -i`, `netstat` + kill | 포트 점유 프로세스 강제 종료 금지 |
 | `pnpm dev`, `npm start` (포그라운드) | 서버를 직접 실행 금지 (overmind 경유 필수) |
+| `sleep` | 대기/폴링 금지. 명령 결과는 즉시 확인하거나 도구의 timeout 옵션 사용 |
 
 ### Claude 도구
 

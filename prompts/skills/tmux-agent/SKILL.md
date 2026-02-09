@@ -13,15 +13,14 @@ Claude가 tmux를 자율적으로 조작하여 다른 pane을 인식하고, 명�
 |------|-----------|------------|
 | Pane 목록 | WF1: Discover | `tmux list-panes -a -F "..."` |
 | 출력 캡처 | WF2: Observe | `tmux capture-pane -t {target} -p` |
-| 명령 전송 | WF3: Command | `tmux send-keys` + delay + Enter |
+| 명령 전송 | WF3: Command | `tmux send-keys "cmd" Enter` |
 | 윈도우 생성 | WF4: Create | `tmux new-window -n "name"` |
-| 유휴 감지 | WF5: Idle | 2초 간격 캡처 비교 |
-| Claude 통신 | WF6: Communicate | WF3 + WF5 조합 |
+| 유휴 감지 | WF5: Idle | 프롬프트 패턴 매칭 |
 
 ## 핵심 철학
 
 - **비침투적 관찰**: `capture-pane`으로 프로세스 방해 없이 상태 파악
-- **Race condition 방지**: `send-keys` 후 반드시 delay + 별도 Enter
+- **간결한 전송**: `send-keys "cmd" Enter` 형식으로 한 번에 전송
 - **Escape 처리**: 특수문자 이스케이핑 철저히 (`resources/02-send-keys-safety.md`)
 - **Naming convention**: 구조화된 이름으로 pane 역할 명시
 
@@ -89,7 +88,7 @@ Claude가 tmux를 자율적으로 조작하여 다른 pane을 인식하고, 명�
 
 2. **안전한 전송 패턴**
    ```bash
-   tmux send-keys -t {target} "command" && sleep 0.5 && tmux send-keys -t {target} Enter
+   tmux send-keys -t {target} "command" Enter
    ```
 
 3. **특수문자 이스케이핑** (필수 확인)
@@ -156,65 +155,29 @@ Claude가 tmux를 자율적으로 조작하여 다른 pane을 인식하고, 명�
 **목적**: pane이 명령 대기 중인지, 작업 중인지 판단
 
 **단계**:
-1. **2회 캡처** (2초 간격)
+1. **출력 캡처**
    ```bash
-   output1=$(tmux capture-pane -t {target} -p | tail -5)
-   sleep 2
-   output2=$(tmux capture-pane -t {target} -p | tail -5)
+   tmux capture-pane -t {target} -p | tail -5
    ```
 
-2. **diff 비교**
+2. **프롬프트 패턴 매칭**
    ```bash
-   if [ "$output1" = "$output2" ]; then
-       echo "NO_CHANGE"
-   else
-       echo "ACTIVE"
-   fi
+   # Shell 프롬프트: $, %, ❯, >, ➜
+   echo "$output" | grep -qE '(\$|%|❯|➜|>)\s*$' && echo "IDLE"
+
+   # Claude 프롬프트
+   echo "$output" | grep -qE '(You:)\s*$' && echo "IDLE"
+
+   # 에러 패턴
+   echo "$output" | grep -qE '(Error:|FAIL|Traceback|panic:)' && echo "FAILED"
    ```
 
 3. **상태 판정**
-   - 변화 없음 + 프롬프트 패턴 → **IDLE**
-   - 변화 있음 → **ACTIVE**
+   - 프롬프트 패턴 매칭 → **IDLE**
    - 에러 패턴 → **FAILED**
-
-4. **프롬프트 패턴 확인**
-   ```bash
-   echo "$output2" | grep -qE '(\$|❯|>>>|%) $' && echo "IDLE"
-   ```
-   - 상세 패턴: `resources/04-idle-patterns.md`
-
-5. **재시도 로직**: 불확실 시 1회 추가 확인
+   - 그 외 → **ACTIVE**
 
 **트리거 키워드**: "idle", "대기 중", "실행 완료", "상태 확인"
-
----
-
-### 워크플로우 6: Communicate (다른 Claude와 통신)
-
-**목적**: 다른 pane의 Claude 인스턴스에 프롬프트 전송 및 결과 대기
-
-**단계**:
-1. **Claude pane 확인** (WF1)
-   ```bash
-   tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index}" \
-       -f "#{m:*claude*,#{pane_current_command}}"
-   ```
-
-2. **Idle 대기** (WF5): 대상 Claude가 응답 대기 중인지 확인
-
-3. **프롬프트 전송** (WF3)
-   ```bash
-   tmux send-keys -t {target} "질문 내용" && sleep 0.5 && tmux send-keys -t {target} Enter
-   ```
-
-4. **응답 대기 루프** (30초 타임아웃)
-   - 2초마다 WF5 실행
-   - Idle 상태 감지 → 응답 완료
-   - 타임아웃 시 경고 + 부분 결과 반환
-
-5. **결과 캡처** (WF2): 최종 응답 읽기
-
-**트리거 키워드**: "다른 Claude", "agent 통신", "프롬프트 전송"
 
 ---
 
@@ -225,7 +188,7 @@ Claude가 tmux를 자율적으로 조작하여 다른 pane을 인식하고, 명�
    tmux list-panes -F "#{pane_id}" | grep -q "{target}"
    ```
 
-2. **Race condition 방지**: send-keys 후 반드시 `sleep 0.5` + 별도 Enter
+2. **간결한 전송**: `send-keys "cmd" Enter` 형식 (sleep 사용 금지)
 
 3. **Escape 처리**: 쌍따옴표 내 `"`, `$`, `` ` `` 반드시 이스케이프
 
@@ -237,7 +200,7 @@ Claude가 tmux를 자율적으로 조작하여 다른 pane을 인식하고, 명�
 
 | ❌ 위험한 패턴 | ✅ 안전한 패턴 |
 |--------------|--------------|
-| `send-keys "cmd" Enter` | `send-keys "cmd" && sleep 0.5 && send-keys Enter` |
+| `send-keys "cmd"` (Enter 누락) | `send-keys "cmd" Enter` |
 | `send-keys "echo $VAR"` | `send-keys "echo \$VAR"` 또는 `'echo "$VAR"'` |
 | Idle 확인 없이 명령 전송 | WF5로 Idle 확인 후 전송 |
 | 하드코딩된 타겟 `0.0` | WF1으로 동적 타겟 탐색 |
@@ -276,7 +239,5 @@ User: "3개 pane에서 각각 다른 테스트 실행"
 
 리소스 파일:
 - `resources/01-capture-patterns.md`: 에러/완료/프롬프트 패턴
-- `resources/02-send-keys-safety.md`: Escape + Race condition 처리
+- `resources/02-send-keys-safety.md`: Escape 처리
 - `resources/03-window-management.md`: 레이아웃 및 이름 규칙
-- `resources/04-idle-patterns.md`: Shell/REPL 프롬프트 인식
-- `resources/05-claude-patterns.md`: Claude 인스턴스 통신

@@ -420,6 +420,100 @@ cd ../worktrees/myapp_login_260113
 
 ---
 
+## 고정 Worktree (Persistent)
+
+임시 worktree와 달리 **상시 유지**되는 worktree. 특정 목적(문서화, 모니터링 등)에 전용.
+
+### 네이밍
+
+| 항목 | 형식 | 예시 |
+|------|------|------|
+| 디렉토리 | `wt/_{purpose}/` | `wt/_quality/`, `wt/_docs/` |
+| 브랜치 | `_{purpose}` | `_quality`, `_docs` |
+
+`_` prefix로 임시 worktree와 구분.
+
+### 라이프사이클
+
+```mermaid
+graph LR
+  A[create] --> B[세션 시작: rebase main]
+  B --> C[WORK]
+  C --> D{변경 축적?}
+  D -->|Yes| E[주기적 PR]
+  E --> F{Merged?}
+  F -->|Yes| B
+  F -->|No| C
+  D -->|No| B
+```
+
+### create {purpose}
+
+고정 worktree 생성. 한 번만 실행.
+
+```bash
+set -e
+
+PURPOSE="{purpose}"
+WORKTREE_PATH="wt/_${PURPOSE}"
+BRANCH="_${PURPOSE}"
+
+# 이미 존재 확인
+if [ -d "$WORKTREE_PATH" ]; then
+  echo "⚠️ 이미 존재: ${WORKTREE_PATH}"
+  exit 0
+fi
+
+# base 브랜치 감지
+BASE=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|origin/||')
+[ -z "$BASE" ] && BASE="main"
+
+# worktree 생성
+git worktree add "${WORKTREE_PATH}" -b "${BRANCH}" "origin/${BASE}"
+
+echo "✅ 고정 worktree 생성: ${WORKTREE_PATH}"
+echo "📁 cd ${WORKTREE_PATH}"
+```
+
+### sync
+
+**고정 worktree 전용**. 세션 시작 시 `wt/_*/` 패턴의 고정 worktree만 main에 rebase.
+임시 worktree(`wt/feat-*`, `../worktrees/*`)는 대상이 아니다.
+
+```bash
+for wt in wt/_*/; do
+  [ -d "$wt" ] || continue
+  BRANCH=$(git -C "$wt" branch --show-current)
+  echo "🔄 ${wt} (${BRANCH})..."
+  git -C "$wt" fetch origin
+  git -C "$wt" rebase "origin/main" || {
+    echo "❌ rebase 충돌: ${wt}"
+    echo "💡 git -C ${wt} rebase --abort 후 수동 해결"
+    continue
+  }
+  echo "✅ ${wt} 동기화 완료"
+done
+```
+
+### 운영 규칙
+
+| 규칙 | 설명 |
+|------|------|
+| 삭제 금지 | 영구 유지. cleanup 대상 아님 |
+| 세션 시작 시 sync | main rebase로 최신 상태 유지 |
+| 주기적 PR | 변경 축적 후 batch PR로 main 반영 |
+| 독립 운영 | 고정 worktree 간 의존성 없음 |
+
+### 일반적 용도
+
+| 용도 | worktree | 설명 |
+|------|----------|------|
+| 테스트 감시 | `wt/_quality/` | 커버리지 추적, 정합성 모니터링 |
+| 문서/분석 | `wt/_docs/` | 코드 분석, 아키텍처 문서 축적 |
+| 실험 | `wt/_lab/` | 프로토타입, PoC |
+
+---
+
 ## 프로세스 종료 원칙
 
 멀티 worktree 환경에서 다른 작업자에게 영향을 주지 않도록 주의.

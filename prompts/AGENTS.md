@@ -4,34 +4,6 @@
 
 ---
 
-# 멀티에이전트 3계층 시스템
-
-```
-Human <-> Supervisor (유일한 인터페이스)
-              |
-          Manager (작업 분해, 워커 분배)
-              |
-          Worker x N (병렬 실행)
-```
-
-통신: Task tool (subagent) 기반.
-
----
-
-# Compaction 실행 후 (필수)
-
-compaction 실행이 끝난 후, 작업전에 반드시 이하를 실행
-
-1. 자신의 기존 instructions 이름을 확인
-2. 대응하는 instructions을 읽는다
-  - supervisor -> instructions/supervisor.md
-  - manager -> instructions/manager.md
-  - worker -> instructions/worker.md
-3. 금지사항을 확인 후, 작업을 개시한다
-
-summary의 다음 단계를 읽고 바로 작업해선 안된다.
-반드시 자신의 instructions을 확인해야한다.
-
 # Context 관리
 
 ## Context Window 보호
@@ -40,7 +12,7 @@ summary의 다음 단계를 읽고 바로 작업해선 안된다.
 - MCP 과다 등록 시 → 실사용 **70k까지 감소**
 - 프로젝트당 MCP **5-6개만 활성화**
 - 활성 도구 **80개 미만** 유지
-- 불필요 MCP → `settings.local.json`에서 비활성화
+- 불필요 MCP → `settings.json`에서 비활성화
 
 ## Subagent 결과 압축
 
@@ -116,6 +88,25 @@ summary의 다음 단계를 읽고 바로 작업해선 안된다.
   }
 }
 ```
+
+---
+
+# Custom Agent 위임
+
+다음 조건에서 커스텀 agent를 **즉시 위임**한다:
+
+| 조건 | Agent |
+|------|-------|
+| 코드 변경 2+ 파일 완료 | `code-reviewer` (Python/TS skill 자동 주입) |
+| 기능 요청 수신, 요구사항 모호 | `spec-validator` |
+| 테스트 통과 후 | `test-verifier` |
+| 반복 패턴 3회+ 감지 | `skill-suggester` |
+| 작업 단계 완료, 커밋 전 | `tidy-commit` |
+
+**위임 원칙**:
+- description에 "PROACTIVELY"가 있는 agent는 사용자 요청 없이도 위임
+- 리뷰 계열 agent는 백그라운드로 실행 가능
+- 위임 결과는 압축하여 반환 (Summary + Critical/High만)
 
 ---
 
