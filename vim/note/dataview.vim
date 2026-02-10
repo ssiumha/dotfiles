@@ -4,7 +4,7 @@ runtime note/day.vim
 " Base62 for anchor ID generation
 let s:base62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 
-function! s:Base62Encode(num)
+function! NoteBase62Encode(num)
   if a:num == 0 | return '0' | endif
   let result = ''
   let n = a:num
@@ -15,7 +15,7 @@ function! s:Base62Encode(num)
   return result
 endfunction
 
-function! s:RandomBase62(len)
+function! NoteRandomBase62(len)
   let result = ''
   for i in range(a:len)
     let result .= s:base62[rand() % 62]
@@ -23,8 +23,8 @@ function! s:RandomBase62(len)
   return result
 endfunction
 
-function! s:GenerateAnchorId()
-  return s:Base62Encode(localtime()) . s:RandomBase62(3)
+function! NoteGenerateAnchorId()
+  return NoteBase62Encode(localtime()) . NoteRandomBase62(3)
 endfunction
 
 " Dataview emoji shorthand mappings (date fields only)
@@ -146,7 +146,7 @@ endfunction
 function! s:InputValueDeferred(key, current_val, fields, idx) abort
   " id 필드 신규 추가 시 자동 생성
   if a:key ==# 'id' && a:idx == -1
-    let val = s:GenerateAnchorId()
+    let val = NoteGenerateAnchorId()
     call s:AddFieldAndApply(a:fields, a:key, val)
     echo 'Anchor: ' . val
     return

@@ -98,6 +98,7 @@ endfunction
 runtime note/util.vim
 runtime note/link.vim
 runtime note/dataview.vim
+runtime note/complete.vim
 runtime note/outline.vim
 runtime note/move.vim
 
@@ -127,6 +128,9 @@ augroup MyMarkdown
   autocmd FileType markdown inoremap <buffer> <C-c>. <c-o>:PickDateAtCursor<CR>
 
   autocmd FileType markdown inoremap <buffer> [[ <C-o>:call LocalLinkFzf()<CR>
+  autocmd FileType markdown setlocal completefunc=NoteComplete
+  autocmd FileType markdown inoremap <buffer><expr> <C-n> NoteSmartCN()
+  autocmd FileType markdown inoremap <buffer><expr> <C-p> NoteSmartCP()
 
   autocmd FileType markdown noremap <S-Up>    :call TableOrDate('k', 1)<CR>
   autocmd FileType markdown noremap <S-Down>  :call TableOrDate('j', -1)<CR>
