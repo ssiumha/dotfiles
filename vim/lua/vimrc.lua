@@ -1,41 +1,22 @@
-local ensure_packer = function()
-  local fn = vim.fn
-  local install_path = fn.stdpath('data')..'/site/pack/packer/start/packer.nvim'
-  if fn.empty(fn.glob(install_path)) > 0 then
-    fn.system({'git', 'clone', '--depth', '1', 'https://github.com/wbthomason/packer.nvim', install_path})
-    vim.cmd [[packadd packer.nvim]]
-    return true
+local function bootstrap_pckr()
+  local pckr_path = vim.fn.stdpath('data') .. '/pckr/pckr.nvim'
+  if not (vim.uv or vim.loop).fs_stat(pckr_path) then
+    vim.fn.system({
+      'git', 'clone', '--filter=blob:none',
+      'https://github.com/lewis6991/pckr.nvim',
+      pckr_path
+    })
   end
-  return false
+  vim.opt.rtp:prepend(pckr_path)
 end
+bootstrap_pckr()
 
-local packer_bootstrap = ensure_packer()
+require('pckr').add{
+  'neovim/nvim-lspconfig',
 
-vim.cmd [[packadd packer.nvim]]
-
-require('packer').startup(function(use)
-  use 'wbthomason/packer.nvim'
-
-  use 'neovim/nvim-lspconfig'
-  use 'williamboman/mason.nvim'
-  use 'williamboman/mason-lspconfig.nvim'
-
-  use { 'nvimdev/lspsaga.nvim',
-    config = function()
-      require('lspsaga').setup({
-        symbol_in_winbar = {
-          enable = false
-        },
-        lightbulb = {
-          enable = false
-        }
-      })
-    end
-  }
-  use { 'catgoose/nvim-colorizer.lua',
+  { 'catgoose/nvim-colorizer.lua',
     config = function()
       require'colorizer'.setup({
-        -- filetypes = { 'html', 'css', 'scss', 'javascript', 'typescript', 'typescriptreact', 'vue', 'yaml', 'json', 'markdown' },
         user_default_options = {
           tailwind = 'normal',
           mode        = 'virtualtext',
@@ -45,21 +26,14 @@ require('packer').startup(function(use)
         }
       })
     end
-  }
-  use {
-    'stevearc/quicker.nvim',
-    disable = true,
-    config = function()
-      require("quicker").setup()
-    end,
-  }
+  },
 
-  use 'hrsh7th/cmp-nvim-lsp'
-  use 'hrsh7th/cmp-buffer'
-  use 'hrsh7th/cmp-path'
-  use 'hrsh7th/cmp-cmdline'
-  use 'hrsh7th/cmp-vsnip'
-  use { 'hrsh7th/nvim-cmp', config = function()
+  'hrsh7th/cmp-nvim-lsp',
+  'hrsh7th/cmp-buffer',
+  'hrsh7th/cmp-path',
+  'hrsh7th/cmp-cmdline',
+  'hrsh7th/cmp-vsnip',
+  { 'hrsh7th/nvim-cmp', config = function()
     local cmp = require'cmp'
     cmp.setup{
       snippet = {
@@ -74,109 +48,55 @@ require('packer').startup(function(use)
         ['<PageUp>'] = cmp.mapping.scroll_docs(-4),
         ['<PageDown>'] = cmp.mapping.scroll_docs(4),
         ['<CR>'] = cmp.mapping.confirm({ select = true }),
-        -- ['<Tab>'] = cmp.mapping.select_next_item({ behavior = cmp.SelectBehavior.Select }),
-        -- ['<S-Tab>'] = cmp.mapping.select_prev_item({ behavior = cmp.SelectBehavior.Select }),
       },
-      -- sources = cmp.config.sources(
-      --   { { name = 'nvim_lsp' } },
-      --   { { name = 'buffer' } }),
       sources = cmp.config.sources({
         { name = 'vsnip' },
         { name = 'nvim_lsp' },
         { name = 'path' },
-        -- { name = 'buffer' },
-        -- { name = 'cmdline' },
       }, {
         { name = 'buffer' },
       }),
     }
-  end }
+  end },
 
-  use 'nvim-treesitter/nvim-treesitter'
-  use 'nvim-treesitter/nvim-treesitter-context'
-  use 'nvim-treesitter/nvim-treesitter-textobjects'
+  { 'nvim-treesitter/nvim-treesitter', branch = 'main' },
+  'nvim-treesitter/nvim-treesitter-context',
+  { 'nvim-treesitter/nvim-treesitter-textobjects', branch = 'main' },
 
-  use 'lukas-reineke/indent-blankline.nvim'
-  use 'HiPhish/rainbow-delimiters.nvim'
+  { 'shellRaining/hlchunk.nvim' },
 
-  use { 'lewis6991/gitsigns.nvim', config = function() require('gitsigns').setup() end }
+  { 'lewis6991/gitsigns.nvim', config = function() require('gitsigns').setup() end },
 
-  use 'ibhagwan/fzf-lua'
+  'ibhagwan/fzf-lua',
 
-  use {
-    'andymass/vim-matchup',
-    setup = function()
+  { 'andymass/vim-matchup',
+    config_pre = function()
       vim.g.matchup_matchparen_offscreen = { method = "popup" }
       vim.g.matchup_matchparen_deferred = 1
       vim.g.matchup_matchparen_hi_surround_always = 1
       vim.g.matchup_treesitter_enabled = 1
       vim.g.matchup_treesitter_disabled = { 'ruby' }
     end
-  }
+  },
 
-  -- Require plugins for avante.nvim
-  use 'stevearc/dressing.nvim'
-  use 'nvim-lua/plenary.nvim'
-  use 'MunifTanjim/nui.nvim'
-  use 'MeanderingProgrammer/render-markdown.nvim'
+  'MeanderingProgrammer/render-markdown.nvim',
 
-  -- Optional dependencies for avante.nvim
-  -- use 'nvim-tree/nvim-web-devicons' -- or use 'echasnovski/mini.icons'
-  -- use 'HakonHarnes/img-clip.nvim'
-  -- use 'zbirenbaum/copilot.lua'
-  use {
-    'yetone/avante.nvim',
-    disable = true,
-    branch = 'main',
-    run = 'make',
-    config = function()
-      require('avante_lib').load()
-      require('avante').setup{
-        provider = 'copilot',
-      }
-    end
-  }
+  { 'WTFox/jellybeans.nvim', config = function()
+    vim.cmd.colorscheme('jellybeans')
+  end },
+}
 
-  if packer_bootstrap then
-    require('packer').sync()
-  end
-end)
-
+-- Neovim 0.11 defaults: K(hover), grr(references), gri(implementation),
+-- grn(rename), gra(code_action), grt(type_definition), gO(document_symbol),
+-- <C-s>(signature_help), <C-]>(definition via tagfunc), [d/]d(diagnostic nav)
 vim.api.nvim_create_autocmd("LspAttach", {
   group = vim.api.nvim_create_augroup("user_lsp_config", { clear = true }),
   callback = function(ev)
     local opts = { buffer = ev.buf, silent = true, noremap = true }
-
-    -- vim.lsp.buf.document_symbol -> vista
-    -- vim.lsp.buf.workspace_symbol
-    -- vim.lsp.buf.signature_help -- function arguments
-    -- vim.lsp.buf.rename
-    -- vim.diagnostic.open_float
-    vim.keymap.set("n", "gd",         vim.lsp.buf.declaration, opts)
-    vim.keymap.set("n", "gi",         vim.lsp.buf.implementation, opts)
-    vim.keymap.set("n", "gI",         vim.lsp.buf.type_definition, opts)
-    vim.keymap.set("n", "gr",         vim.lsp.buf.references, opts)
-    vim.keymap.set("n", "<c-]>",      vim.lsp.buf.definition, opts)
-    vim.keymap.set("n", "K",          vim.lsp.buf.hover, opts)
-    vim.keymap.set("n", "<space>lD",  function() vim.diagnostic.setqflist({ open = true }) end, opts)
-    vim.keymap.set('n', '<space>ld', ':Lspsaga show_cursor_diagnostics<cr>', opts)
-    vim.keymap.set('n', '<space>lp', ':Lspsaga diagnostic_jump_prev<cr>', opts)
-    vim.keymap.set('n', '<space>ln', ':Lspsaga diagnostic_jump_next<cr>', opts)
-    vim.keymap.set('n', '<space>la', ':Lspsaga code_action<cr>', opts)
-    -- vim.keymap.set("n", "<space>la", vim.lsp.buf.code_action, opts)
+    vim.keymap.set("n", "<space>lD", function() vim.diagnostic.setqflist({ open = true }) end, opts)
+    vim.keymap.set("n", "<space>ld", vim.diagnostic.open_float, opts)
   end,
 })
-
--- https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md
--- TODO: add auto installer
---   scripting: python deno bash
---   devops: terraform yaml dockerfile compose bash
---   rails: MasonInstall ruby-lsp stimulus tailwind rubocop...
---   nestjs: tsserver vue
---   web: css sjon nginx perl postgres prisma sql syntax_tree html htmx
---   markdown: unison
---   vim: lua, vimls
---   ttags, typst, unison
 
 -------------------
 -- CUSTOM
@@ -210,6 +130,9 @@ local function fzf_command(commands)
 end
 
 vim.api.nvim_set_keymap('n', '<space>ps', "<cmd>lua require('fzf-lua').lsp_live_workspace_symbols({ caseSensitive = true })<cr>", { noremap = true, silent = true })
+vim.api.nvim_set_keymap('n', '<space>pd', "<cmd>lua require('fzf-lua').lsp_document_symbols()<cr>", { noremap = true, silent = true })
+
+vim.api.nvim_create_user_command('Lw', function() require('fzf-lua').loclist() end, {})
 
 vim.api.nvim_create_user_command('FzfLuaTest', function()
   fzf_command({
@@ -218,155 +141,156 @@ vim.api.nvim_create_user_command('FzfLuaTest', function()
   })
 end, {})
 
-function CloseAllFunctionFolds()
-  local ts = vim.treesitter
-  local parsers = require("nvim-treesitter.parsers")
-
-  local bufnr = vim.api.nvim_get_current_buf()
-  if not parsers.has_parser() then
-    print("No Treesitter parser found for current buffer")
-    return
-  end
-
-  local parser = parsers.get_parser(bufnr)
-  local tree = parser:parse()[1]
-  local root = tree:root()
-
-  local query = ts.query.parse(
-    vim.bo.filetype,
-    [[
-      (function_declaration) @func
-      (method_signature) @func
-    ]]
-    -- [[
-    --   (function_declaration) @func
-    --   (method_declaration) @func
-    -- ]]
-  )
-
-  for _, node, _ in query:iter_captures(root, bufnr, 0, -1) do
-    local start_line, _, _, _ = node:range()
-    vim.cmd(start_line + 1 .. "foldclose")
-  end
-end
-
--- TODO
-function CloseAllStyleFolds()
-  local ts_utils = require('nvim-treesitter.ts_utils')
-  local parser = vim.treesitter.get_parser(0, "typescript")
-  local tree = parser:parse()[1]
-  local root = tree:root()
-
-  local query = vim.treesitter.query.parse("typescript", [[
-    (
-      (jsx_attribute
-        name: (property_identifier) @style_name
-        value: (jsx_expression
-                (object
-                  (pair)*)) @fold
-        (#eq? @style_name "style"))
-    )
-  ]])
-
-  for _, match in query:iter_matches(root, 0) do
-    local node = match[1]
-    local start_row, _, _, _ = node:range()
-    vim.api.nvim_win_set_cursor(0, { start_row + 1, 0 })
-    vim.cmd("normal! zc")
-  end
-end
 
 -------------------
--- williamboman/mason.nvim
 -- neovim/nvim-lspconfig
--- nvimdev/lspsaga.nvim
+-- LSP servers: :LspInstall → mise use
 -------------------
-require('mason').setup {
-  PATH = "prepend"
+local lsp_tools = {
+  lua_ls     = { tool = 'lua-language-server',              bin = 'lua-language-server',        ft = 'lua' },
+  ts_ls      = { tool = 'npm:typescript-language-server',   bin = 'typescript-language-server', ft = 'typescript' },
+  html       = { tool = 'npm:vscode-langservers-extracted', bin = 'vscode-html-language-server' },
+  yamlls     = { tool = 'npm:yaml-language-server',         bin = 'yaml-language-server',       ft = 'yaml' },
+  bashls     = { tool = 'npm:bash-language-server',         bin = 'bash-language-server',       ft = 'bash' },
+  biome      = { tool = 'biome',                            bin = 'biome' },
+  marksman   = { tool = 'marksman',                         bin = 'marksman',                   ft = 'markdown' },
+  pyright    = { tool = 'npm:pyright',                      bin = 'pyright-langserver',         ft = 'python' },
+  tombi      = { tool = 'tombi',                            bin = 'tombi',                      ft = 'toml' },
+  tailwindcss = { tool = 'npm:@tailwindcss/language-server', bin = 'tailwindcss-language-server' },
+  htmx       = { tool = 'npm:htmx-lsp',                    bin = 'htmx-lsp' },
 }
-require("mason-lspconfig").setup {
-  ensure_installed = {},
-  handlers = {
-    function(server_name)
-      require("lspconfig")[server_name].setup {}
-    end,
-    ["html"] = function()
-      require("lspconfig").html.setup {
-        filetypes = { "html", "eruby" }
-      }
-    end,
-    ["yamlls"] = function()
-      require("lspconfig").yamlls.setup {
-        settings = {
-          yaml = {
-            schemas = {
-              -- TODO: use environment variable?
-              ["https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.2-standalone-strict/deployment.json"] = "deployment/**/deployment/*.yaml",
-              ["https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.2-standalone-strict/statefulset.json"] = "deployment/**/statefulset/*.yaml",
-              ["https://json.schemastore.org/github-workflow.json"] = ".github/workflows/*",
-              ["https://json.schemastore.org/github-action.json"] = ".github/actions/*",
-            }
-          }
-        }
-      }
-    end,
-    ["docker_compose_language_service"] = function()
-      require("lspconfig").docker_compose_language_service.setup {
-        filetypes = { "yaml" }
-      }
-    end,
-    ["biome"] = function()
-      local lspconfig = require("lspconfig")
-      lspconfig.biome.setup {
-        root_dir = lspconfig.util.root_pattern("biome.json")
-      }
-    end,
-    ["ts_ls"] = function()
-      local lspconfig = require("lspconfig")
-      lspconfig.ts_ls.setup {
-        root_dir = lspconfig.util.root_pattern("package.json", "tsconfig.json", "jsconfig.json", ".git"),
-        init_options = {
-          plugins = {
-            -- {
-            --   name = "@vue/typescript-plugin",
-            --   location = "/usr/local/lib/node_modules/@vue/typescript-plugin",
-            --   languages = {"javascript", "typescript", "vue"},
-            -- },
-          },
-          preferences = {
-            includeCompletionsForModuleExports = true,
-            includeCompletionsForImportStatements = true,
-          },
-        },
-      }
+
+do
+  local names = {}
+  for name, e in pairs(lsp_tools) do
+    if vim.fn.executable(e.bin) == 1 then
+      names[#names + 1] = name
     end
-  }
-}
+  end
+  vim.lsp.enable(names)
+end
+
+local function lsp_do_install(entry)
+  vim.cmd('!mise use --env local ' .. entry.tool)
+end
+
+vim.api.nvim_create_user_command('LspInstall', function()
+  local ft = vim.bo.filetype
+  local matched, rest = {}, {}
+  for name, e in pairs(lsp_tools) do
+    local mark = vim.fn.system('mise which ' .. e.bin .. ' 2>/dev/null'):find('^/') and '✓' or ' '
+    local item = mark .. ' ' .. name
+    if (e.ft or name) == ft then
+      table.insert(matched, item)
+    else
+      table.insert(rest, item)
+    end
+  end
+  table.sort(rest)
+  local items = vim.list_extend(matched, rest)
+  require('fzf-lua').fzf_exec(items, {
+    prompt = 'LspInstall> ',
+    actions = {
+      ['default'] = function(selected)
+        local sel = selected[1]:gsub('^[✓ ] +', '')
+        if lsp_tools[sel] then lsp_do_install(lsp_tools[sel]) end
+      end,
+    },
+  })
+end, {})
+vim.lsp.config('html', {
+  filetypes = { "html", "eruby" },
+})
+
+vim.lsp.config('yamlls', {
+  settings = {
+    yaml = {
+      schemaStore = { enable = true, url = 'https://www.schemastore.org/api/json/catalog.json' },
+      validate = true,
+      kubernetes = "globPattern",
+      schemas = {
+        kubernetes = "deployment/**/*.yaml",
+      },
+    }
+  },
+})
+
+vim.lsp.config('docker_compose_language_service', {
+  filetypes = { "yaml" },
+})
+
+vim.lsp.config('biome', {
+  root_markers = { "biome.json" },
+})
+
+vim.lsp.config('ts_ls', {
+  root_markers = { "package.json", "tsconfig.json", "jsconfig.json", ".git" },
+  init_options = {
+    preferences = {
+      includeCompletionsForModuleExports = true,
+      includeCompletionsForImportStatements = true,
+    },
+  },
+})
 
 ----------------------------------
 -- nvim-treesitter/nvim-treesitter
 ----------------------------------
--- Neovim 0.11+: treesitter highlighting is built-in
--- nvim-treesitter is now only needed for parser installation
-require('nvim-treesitter').setup {
-  ensure_installed = { 'ruby', 'yaml' },
-  auto_install = true,
-}
+-- Neovim 0.11+: highlight/indent are built-in
+
+-- mise.toml: treesitter injection for run fields (bash highlighting)
+do
+  local ensured = {}
+  vim.treesitter.query.add_predicate('is-mise?', function(_, _, bufnr, _)
+    local filepath = vim.api.nvim_buf_get_name(tonumber(bufnr) or 0)
+    local filename = vim.fn.fnamemodify(filepath, ':t')
+    local is_mise = string.match(filename, '.*mise.*%.toml$') ~= nil
+    if is_mise and not ensured.bash then
+      ensured.bash = true
+      if not pcall(vim.treesitter.language.inspect, 'bash') then
+        require('nvim-treesitter').install { 'bash' }
+      end
+    end
+    return is_mise
+  end, { force = true, all = false })
+
+end
+
+-- nvim-treesitter: auto-install parser on filetype enter (once per lang per session)
+do
+  local checked = {}
+  local available = nil -- lazy-load available parsers list
+
+  vim.api.nvim_create_autocmd('FileType', {
+    group = vim.api.nvim_create_augroup('ts_auto_install', { clear = true }),
+    callback = function(ev)
+      local lang = vim.treesitter.language.get_lang(ev.match) or ev.match
+      -- already installed → start treesitter highlighting
+      if pcall(vim.treesitter.language.inspect, lang) then
+        vim.treesitter.start(ev.buf, lang)
+        return
+      end
+      -- auto-install: check once per lang per session
+      if checked[lang] then return end
+      checked[lang] = true
+      if not available then
+        local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
+        available = ok and parsers or {}
+      end
+      if available[lang] then
+        require('nvim-treesitter').install { lang }
+      end
+    end,
+  })
+end
 
 -- nvim-treesitter-textobjects
+local ts_select = require('nvim-treesitter-textobjects.select')
+local ts_move = require('nvim-treesitter-textobjects.move')
+
 require('nvim-treesitter-textobjects').setup {
   select = {
-    enable = true,
     lookahead = true,
-    keymaps = {
-      ['ib'] = '@block.inner',
-      ['ab'] = '@block.outer',
-      ['if'] = '@function.inner',
-      ['af'] = '@function.outer',
-      ['ip'] = '@parameter.inner',
-      ['ap'] = '@parameter.outer',
-      ['aS'] = '@statement.outer',
-    },
     selection_modes = {
       ['@block.outer'] = 'V',
       ['@block.inner'] = 'V',
@@ -376,14 +300,28 @@ require('nvim-treesitter-textobjects').setup {
     },
   },
   move = {
-    enable = true,
     set_jumps = true,
-    goto_next_start     = { [']m'] = '@function.outer', },
-    goto_next_end       = { [']M'] = '@function.outer', },
-    goto_previous_start = { ['[m'] = '@function.outer', },
-    goto_previous_end   = { ['[M'] = '@function.outer', },
   },
 }
+
+-- textobjects select
+for lhs, query in pairs({
+  ['ib'] = '@block.inner',
+  ['ab'] = '@block.outer',
+  ['if'] = '@function.inner',
+  ['af'] = '@function.outer',
+  ['ip'] = '@parameter.inner',
+  ['ap'] = '@parameter.outer',
+  ['aS'] = '@statement.outer',
+}) do
+  vim.keymap.set({ 'x', 'o' }, lhs, function() ts_select.select(query) end)
+end
+
+-- textobjects move
+vim.keymap.set({ 'n', 'x', 'o' }, ']m', function() ts_move.goto_next_start('@function.outer') end)
+vim.keymap.set({ 'n', 'x', 'o' }, ']M', function() ts_move.goto_next_end('@function.outer') end)
+vim.keymap.set({ 'n', 'x', 'o' }, '[m', function() ts_move.goto_previous_start('@function.outer') end)
+vim.keymap.set({ 'n', 'x', 'o' }, '[M', function() ts_move.goto_previous_end('@function.outer') end)
 
 vim.api.nvim_set_hl(0, "TreesitterContext", { ctermbg = 8, bg = "#393939" })
 require'treesitter-context'.setup{
@@ -396,144 +334,9 @@ require'treesitter-context'.setup{
 
 vim.opt.foldmethod = 'expr'
 vim.opt.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
-vim.opt.foldtext = "v:lua.neovim_foldtext()"
+-- Neovim 0.11: foldtext='' enables built-in treesitter-highlighted foldtext
+vim.opt.foldtext = ''
 
--- ref: https://github.com/neovim/neovim/pull/25391/files
----@package
----@return { [1]: string, [2]: string[] }[]|string
-function neovim_foldtext()
-  local ts = vim.treesitter
-  local api = vim.api
-  ---
-
-  local foldstart = vim.v.foldstart
-  local bufnr = api.nvim_get_current_buf()
-
-  ---@type boolean, LanguageTree
-  local ok, parser = pcall(ts.get_parser, bufnr)
-  if not ok then
-    return vim.fn.foldtext()
-  end
-
-  local query = ts.query.get(parser:lang(), 'highlights')
-  if not query then
-    return vim.fn.foldtext()
-  end
-
-  local tree = parser:parse({ foldstart - 1, foldstart })[1]
-
-  local line = api.nvim_buf_get_lines(bufnr, foldstart - 1, foldstart, false)[1]
-  if not line then
-    return vim.fn.foldtext()
-  end
-
-  ---@type { [1]: string, [2]: string[], range: { [1]: integer, [2]: integer } }[] | { [1]: string, [2]: string[] }[]
-  local result = {}
-
-  local line_pos = 0
-
-  for id, node, metadata in query:iter_captures(tree:root(), 0, foldstart - 1, foldstart) do
-    local name = query.captures[id]
-    local start_row, start_col, end_row, end_col = node:range()
-
-    local priority = tonumber(metadata.priority or vim.highlight.priorities.treesitter)
-
-    if start_row == foldstart - 1 and end_row == foldstart - 1 then
-      -- check for characters ignored by treesitter
-      if start_col > line_pos then
-        table.insert(result, {
-          line:sub(line_pos + 1, start_col),
-          { { 'Folded', priority } },
-          range = { line_pos, start_col },
-        })
-      end
-      line_pos = end_col
-
-      local text = line:sub(start_col + 1, end_col)
-      table.insert(result, { text, { { '@' .. name, priority } }, range = { start_col, end_col } })
-    end
-  end
-
-  local i = 1
-  while i <= #result do
-    -- find first capture that is not in current range and apply highlights on the way
-    local j = i + 1
-    while
-      j <= #result
-      and result[j].range[1] >= result[i].range[1]
-      and result[j].range[2] <= result[i].range[2]
-    do
-      for k, v in ipairs(result[i][2]) do
-        if not vim.tbl_contains(result[j][2], v) then
-          table.insert(result[j][2], k, v)
-        end
-      end
-      j = j + 1
-    end
-
-    -- remove the parent capture if it is split into children
-    if j > i + 1 then
-      table.remove(result, i)
-    else
-      -- highlights need to be sorted by priority, on equal prio, the deeper nested capture (earlier
-      -- in list) should be considered higher prio
-      if #result[i][2] > 1 then
-        table.sort(result[i][2], function(a, b)
-          return a[2] < b[2]
-        end)
-      end
-
-      result[i][2] = vim.tbl_map(function(tbl)
-        return tbl[1]
-      end, result[i][2])
-      result[i] = { result[i][1], result[i][2] }
-
-      i = i + 1
-    end
-  end
-
-  -- custom
-  local count = vim.v.foldend - vim.v.foldstart + 1
-  if count > 0 then
-    --  '| ' .. vim.v.foldlevel .. ' dpeth'
-    local endline = api.nvim_buf_get_lines(bufnr, vim.v.foldend - 1, vim.v.foldend, false)[1]
-    endline = endline:gsub('^%s+', '')
-
-    table.insert(result, i, { ' ...' .. count .. ' lines... ' .. endline, { 'Folded' } })
-  end
-
-  return result
-end
-
-----------------------------------
--- HiPhish/rainbow-delimiters.nvim
-----------------------------------
-local rainbow_delimiters = require 'rainbow-delimiters'
-
----@type rainbow_delimiters.config
-vim.g.rainbow_delimiters = {
-  strategy = {
-    [''] = rainbow_delimiters.strategy['global'],
-    vim = rainbow_delimiters.strategy['local'],
-  },
-  query = {
-    [''] = 'rainbow-delimiters',
-    lua = 'rainbow-blocks',
-  },
-  priority = {
-    [''] = 110,
-    lua = 210,
-  },
-  highlight = {
-    'RainbowDelimiterRed',
-    'RainbowDelimiterYellow',
-    'RainbowDelimiterBlue',
-    'RainbowDelimiterOrange',
-    'RainbowDelimiterGreen',
-    'RainbowDelimiterViolet',
-    'RainbowDelimiterCyan',
-  },
-}
 
 --------------------------------------
 --- render-markdown
@@ -576,30 +379,20 @@ if not vim.g.neovide then
 end
 
 --------------------------------------
--- lukas-reineke/indent-blankline.nvim
+-- shellRaining/hlchunk.nvim
 --------------------------------------
--- local highlight = {
---     "RainbowRed",
---     "RainbowYellow",
---     "RainbowBlue",
---     "RainbowOrange",
---     "RainbowGreen",
---     "RainbowViolet",
---     "RainbowCyan",
--- }
-
--- local hooks = require "ibl.hooks"
--- hooks.register(hooks.type.HIGHLIGHT_SETUP, function()
---     vim.api.nvim_set_hl(0, "RainbowRed",    { bg = "#E06C75" })
---     vim.api.nvim_set_hl(0, "RainbowYellow", { bg = "#E5C07B" })
---     vim.api.nvim_set_hl(0, "RainbowBlue",   { bg = "#61AFEF" })
---     vim.api.nvim_set_hl(0, "RainbowOrange", { bg = "#D19A66" })
---     vim.api.nvim_set_hl(0, "RainbowGreen",  { bg = "#98C379" })
---     vim.api.nvim_set_hl(0, "RainbowViolet", { bg = "#C678DD" })
---     vim.api.nvim_set_hl(0, "RainbowCyan",   { bg = "#56B6C2" })
--- end)
--- require("ibl").setup {
---     indent = { char = "" },
---     whitespace = { highlight = highlight, remove_blankline_trail = true },
---     scope = { highlight = highlight, enabled = true, char = "▎", show_exact_scope = true },
--- }
+require('hlchunk').setup({
+  chunk = {
+    enable = true,
+    delay = 0,
+  },
+  indent = {
+    enable = true,
+  },
+  line_num = {
+    enable = false,
+  },
+  blank = {
+    enable = false,
+  },
+})
