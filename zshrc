@@ -62,9 +62,11 @@ export SAVEHIST=500000
 
 export ZSH_CACHE_DIR="$XDG_CACHE_HOME/zsh/.zcompcache"
 
+export MISE_GLOBAL_CONFIG_FILE="$HOME/.mise.toml"
 export RIPGREP_CONFIG_PATH="$XDG_CONFIG_HOME/ripgrep/ripgreprc"
 export K9SCONFIG="$XDG_CONFIG_HOME/k9s"
 
+export DEDOC_HOME="$XDG_CACHE_HOME/dedoc"
 export DENO_INSTALL_ROOT="$XDG_CACHE_HOME/deno"
 export KREW_ROOT="$XDG_DATA_HOME/krew"
 
@@ -113,10 +115,9 @@ alias jl="JUST_JUSTFILE=justfile.local just"
 alias ghw="gh pr view --web"
 
 alias vdb="v +DBUI"
+alias flog="v +Flog"
 
 alias rb="ruby --disable-gems"
-
-alias mux="tmuxinator"
 
 alias ~d="$HOME/dots"
 alias ~r="$HOME/room"
@@ -190,16 +191,37 @@ git_repo_info() {
   echo "${branch}${changes}${staged}"
 }
 
+_cmd_start=0
+_cmd_name=""
+
+preexec() {
+  _cmd_start=$EPOCHREALTIME
+  _cmd_name="${1%% *}"
+}
+
+_elapsed_ignore=(vim nvim less man top htop btop tmux)
+
 precmd() {
-  #[%D{%y-%d-%m %H:%M}]
-  # TODO : %~ coloring. symbolic:cyan(6), current:bold?
-  # %F-fg, %K-bg, %S-reverse
+  local elapsed=""
+  if (( _cmd_start > 0 )); then
+    local dt=$(( EPOCHREALTIME - _cmd_start ))
+    _cmd_start=0
+    if (( dt >= 3 )) && (( ! ${_elapsed_ignore[(Ie)$_cmd_name]} )); then
+      if (( dt >= 60 )); then
+        elapsed=" %F{3}$(( ${dt%.*} / 60 ))m$(( ${dt%.*} % 60 ))s%f"
+      else
+        elapsed=" %F{3}${dt%.*}s%f"
+      fi
+    fi
+    _cmd_name=""
+  fi
 
   local reset_color="\e[49m\e[39m"
 
   txt="\n"
   txt+="%K{0} %~ ${reset_color}"
   txt+="%K{8} $(git_repo_info) ${reset_color}"
+  txt+="${elapsed}"
 
   print -P $txt
 }
