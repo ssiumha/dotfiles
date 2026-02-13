@@ -1,42 +1,41 @@
 [settings]
 # disable_tools = ["python"]
-experimental = true # with python virtualenv activation
-python_venv_auto_create = true
+experimental = true  # with python virtualenv activation
 idiomatic_version_file_enable_tools = ["ruby"]
-
 auto_install = false
 
 [env]
 
 [tools]
-usage = "latest"
+usage = "latest"  # mise usage
+watchexec = "latest"  # mise watch -t
 neovim = "latest"
+tree-sitter = "latest"
 fzf = "latest"
 ripgrep = "latest"
-delta = "latest"
 zoxide = "0.9.8"
+delta = "latest"
 fd = "latest"
 bat = "latest"
 dust = "latest"
 jq = "latest"
 yq = "latest"
 xq = "latest"
-fx = "latest"
 just = "latest"
-dasel = "latest"
-gum = "latest"
-watchexec = "latest" # mise watch -t
-
 ruby = "latest"
-
-ubi = "latest"
 sq = "latest"
-tv = { version = "latest", exe = "tv" }
 sops = "latest"
 ghq = "latest"
 gh = "latest"
+tmux-thumbs = "latest"
+
+# gum = "latest"
+# tv = { version = "latest", exe = "tv" }
 # rust = "latest"
+# fx = "latest" # json viewer
 # "cargo:jwt-cli" = "latest"
+# ubi = "latest"
+# dasel = "latest"
 # "ubi:DarthSim/overmind" = "latest"
 # "ubi:DarthSim/hivemind" = "latest"
 # "ubi:mr-karan/doggo" = "latest"
@@ -46,32 +45,27 @@ gh = "latest"
 # "cargo:similarity-ts" = "latest"
 
 [tool_alias]
-usage = "https://github.com/jdx/mise-usage.git"
-sq = 'github:neilotoole/sq'
-xq = 'github:sibprogrammer/xq'
-tv = 'github:alexpasmantier/television'
-claude = "npm:@anthropic-ai/claude-code"
-gemini = "npm:@google/gemini-cli"
-codex = "npm:@openai/codex"
 agent-browser = "npm:agent-browser"
+claude = "npm:@anthropic-ai/claude-code"
 claude_swarm = "gem:claude_swarm"
+codex = "npm:@openai/codex"
 copilot = "github:aws/copilot-cli"
+gemini = "npm:@google/gemini-cli"
+mole = "github:davrodpin/mole"
 rainfrog = "github:achristmascarl/rainfrog"
 rbw = "github:doy/rbw"
-mole = "github:davrodpin/mole"
+scc = "github:boyter/scc"
+sq = "github:neilotoole/sq"
+tv = "github:alexpasmantier/television"
+usage = "https://github.com/jdx/mise-usage.git"
+xq = "github:sibprogrammer/xq"
+typos-lsp = "github:tekumara/typos-lsp"
+dedoc = "toiletbril/dedoc"
+tmux-thumbs = "github:fcsonline/tmux-thumbs"
 
 [tasks."yarn:latest"]
 description = "set yarn version to latest"
 run = "yarn set version latest"
-
-[tasks."uvx:specify"]
-run = "uvx --from git+https://github.com/github/spec-kit.git specify"
-
-[tasks."setup:devcontainer"]
-description = "setup devcontainer"
-run = """
-mise use -C $HOME --yes npm:@devcontainers/cli
-"""
 
 [tasks."setup:devops"]
 description = "setup devops tools"
