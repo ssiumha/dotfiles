@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dependency Graph</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  :root {
+    --bg: #ffffff; --bg-sidebar: #f5f5f5; --bg-card: #ffffff;
+    --text: #212121; --text-secondary: #757575; --border: #e0e0e0;
+    --accent: #1976D2; --accent-hover: #1565C0;
+    --danger: #E53935; --warn: #F57C00;
+    --input-bg: #ffffff; --input-border: #bdbdbd;
+    --badge-bg: #e3f2fd; --badge-text: #1565c0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a2e; --bg-sidebar: #16213e; --bg-card: #1a1a2e;
+      --text: #e0e0e0; --text-secondary: #9e9e9e; --border: #333;
+      --accent: #64B5F6; --accent-hover: #42A5F5;
+      --danger: #EF5350; --warn: #FFA726;
+      --input-bg: #0f3460; --input-border: #555;
+      --badge-bg: #0f3460; --badge-text: #64b5f6;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+
+  /* Sidebar */
+  #sidebar { width: 280px; min-width: 280px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; }
+  #sidebar h2 { padding: 16px; font-size: 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-section { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-section h3 { font-size: 12px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px; letter-spacing: 0.5px; }
+
+  /* Search */
+  #search { width: 100%; padding: 8px 12px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 13px; outline: none; }
+  #search:focus { border-color: var(--accent); }
+
+  /* Filters */
+  .filter-list { max-height: 200px; overflow-y: auto; }
+  .filter-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; cursor: pointer; }
+  .filter-item input { accent-color: var(--accent); }
+  .filter-color { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .filter-actions { display: flex; gap: 8px; margin-bottom: 6px; }
+  .filter-actions button { font-size: 11px; color: var(--accent); background: none; border: none; cursor: pointer; padding: 0; }
+  .filter-actions button:hover { text-decoration: underline; }
+
+  /* Stats */
+  .stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+  .stat-value { font-weight: 600; color: var(--accent); }
+  .stat-warn { color: var(--danger); font-weight: 600; }
+
+  /* Node detail */
+  #node-detail { display: none; }
+  #node-detail.active { display: block; }
+  #node-name { font-size: 14px; font-weight: 600; word-break: break-all; margin-bottom: 4px; }
+  #node-role { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+  .dep-list { list-style: none; font-size: 12px; max-height: 120px; overflow-y: auto; }
+  .dep-list li { padding: 2px 0; cursor: pointer; color: var(--accent); }
+  .dep-list li:hover { text-decoration: underline; }
+
+  /* Toolbar */
+  #toolbar { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; z-index: 10; }
+  .tool-btn { padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); font-size: 12px; cursor: pointer; transition: all 0.15s; }
+  .tool-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .tool-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 10px; background: var(--badge-bg); color: var(--badge-text); font-size: 11px; font-weight: 600; margin-left: 4px; }
+  .badge.danger { background: #fbe9e7; color: var(--danger); }
+  @media (prefers-color-scheme: dark) {
+    .badge.danger { background: #3e1a1a; }
+  }
+
+  /* Graph container */
+  #graph-container { flex: 1; position: relative; }
+  #graph { width: 100%; height: 100%; }
+
+  /* Legend */
+  #legend { position: absolute; bottom: 12px; left: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 11px; z-index: 10; max-width: 400px; }
+  #legend h4 { margin-bottom: 6px; font-size: 12px; }
+  .legend-items { display: flex; flex-wrap: wrap; gap: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+
+  /* Toast */
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 8px 16px; border-radius: 6px; font-size: 13px; background: var(--accent); color: #fff; opacity: 0; transition: opacity 0.3s; z-index: 100; pointer-events: none; }
+  #toast.show { opacity: 1; }
+
+  /* Copy path button */
+  .copy-btn { display: inline-block; margin-top: 8px; padding: 4px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--accent); cursor: pointer; }
+  .copy-btn:hover { border-color: var(--accent); background: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>Dependency Graph</h2>
+
+  <div class="sidebar-section">
+    <h3>Search</h3>
+    <input type="text" id="search" placeholder="Filter files..." />
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Directories</h3>
+    <div class="filter-actions">
+      <button onclick="toggleAllFilters('dir-filters', true)">All</button>
+      <button onclick="toggleAllFilters('dir-filters', false)">None</button>
+    </div>
+    <div class="filter-list" id="dir-filters"></div>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Roles</h3>
+    <div class="filter-actions">
+      <button onclick="toggleAllFilters('role-filters', true)">All</button>
+      <button onclick="toggleAllFilters('role-filters', false)">None</button>
+    </div>
+    <div class="filter-list" id="role-filters"></div>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Statistics</h3>
+    <div id="stats"></div>
+  </div>
+
+  <div class="sidebar-section" id="node-detail">
+    <h3>Node Detail</h3>
+    <div id="node-name"></div>
+    <div id="node-role"></div>
+    <div style="margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);">Imports:</div>
+    <ul class="dep-list" id="node-imports"></ul>
+    <div style="margin: 6px 0; font-size: 12px; color: var(--text-secondary);">Imported by:</div>
+    <ul class="dep-list" id="node-importedby"></ul>
+    <button class="copy-btn" id="btn-copy-path" onclick="copySelectedNode()">Copy Path</button>
+  </div>
+</div>
+
+<div id="graph-container">
+  <div id="toolbar">
+    <button class="tool-btn" id="btn-reset" title="Reset view">Reset</button>
+    <button class="tool-btn active" id="btn-physics" title="Toggle physics">Physics</button>
+    <button class="tool-btn" id="btn-color" title="Toggle color mode">Color: Role</button>
+    <button class="tool-btn" id="btn-external" title="Toggle external deps">External</button>
+    <button class="tool-btn" id="btn-circular" title="Highlight circular deps">Circular</button>
+  </div>
+  <div id="graph"></div>
+  <div id="legend"><h4>Legend</h4><div class="legend-items" id="legend-items"></div></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// --- DATA INJECTION POINT ---
+const GRAPH_DATA = {{GRAPH_DATA}};
+
+// --- Theme colors ---
+const COLORS = (() => {
+  return {
+    highlightNode: '#FFD600',
+    highlightEdge: '#FF6F00',
+    dimEdge: '#88888844',
+    fadedEdge: '#88888815',
+    circularEdge: '#E53935',
+    defaultNode: '#90A4AE',
+  };
+})();
+
+function escapeHTML(str) {
+  return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// --- State ---
+let network, allNodes, allEdges, nodesDataset, edgesDataset;
+let physicsEnabled = true;
+let externalVisible = false;
+let circularHighlighted = false;
+let selectedNode = null;
+let colorMode = GRAPH_DATA.groupBy || 'role'; // 'dir' or 'role'
+
+function getNodeColor(node) {
+  const role = node._role ?? node.role;
+  const dir = node._dir ?? node.group;
+  if (colorMode === 'role' && GRAPH_DATA.roles && GRAPH_DATA.roles[role]) {
+    return GRAPH_DATA.roles[role].color;
+  }
+  return GRAPH_DATA.groups[dir]?.color || COLORS.defaultNode;
+}
+
+// --- Init ---
+function init() {
+  const nodes = GRAPH_DATA.nodes.map(n => {
+    const c = getNodeColor(n);
+    return {
+      id: n.id, label: n.label, title: n.title,
+      _dir: n.group, _role: n.role,
+      font: { color: '#fff', strokeWidth: 2, strokeColor: '#000' },
+      shape: 'dot',
+      size: Math.max(8, Math.min(30, (n.size || 1) * 3 + 5)),
+      color: { background: c, border: c, highlight: { background: COLORS.highlightNode, border: '#FFA000' } },
+      hidden: false,
+    };
+  });
+
+  const edges = GRAPH_DATA.edges.map(e => ({
+    ...e,
+    color: { color: COLORS.dimEdge, highlight: COLORS.highlightEdge },
+    smooth: { type: 'cubicBezier', forceDirection: 'none', roundness: 0.4 },
+    width: 1,
+  }));
+
+  allNodes = nodes;
+  allEdges = edges;
+  nodesDataset = new vis.DataSet(nodes);
+  edgesDataset = new vis.DataSet(edges);
+
+  const container = document.getElementById('graph');
+  network = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, {
+    physics: {
+      enabled: true,
+      solver: 'forceAtlas2Based',
+      forceAtlas2Based: { gravitationalConstant: -40, centralGravity: 0.005, springLength: 120, springConstant: 0.02, damping: 0.4 },
+      stabilization: { iterations: 200, fit: true },
+    },
+    interaction: { hover: true, tooltipDelay: 100, navigationButtons: false, keyboard: false },
+    layout: { improvedLayout: true },
+  });
+
+  network.on('click', onNodeClick);
+  network.on('doubleClick', onNodeDoubleClick);
+
+  renderDirFilters();
+  renderRoleFilters();
+  renderStats();
+  renderLegend();
+  setupToolbar();
+  setupSearch();
+}
+
+// --- Directory Filters ---
+function renderDirFilters() {
+  const container = document.getElementById('dir-filters');
+  const groups = Object.keys(GRAPH_DATA.groups).sort();
+  container.innerHTML = groups.map(g => {
+    const count = allNodes.filter(n => n._dir === g).length;
+    const c = GRAPH_DATA.groups[g].color;
+    return `<label class="filter-item">
+      <input type="checkbox" checked data-group="${escapeHTML(g)}" />
+      <span class="filter-color" style="background:${c}"></span>
+      ${escapeHTML(g)} <span class="badge">${count}</span>
+    </label>`;
+  }).join('');
+  container.querySelectorAll('input').forEach(cb => cb.addEventListener('change', applyFilters));
+}
+
+// --- Role Filters ---
+function renderRoleFilters() {
+  const container = document.getElementById('role-filters');
+  const roles = GRAPH_DATA.roles ? Object.keys(GRAPH_DATA.roles).sort() : [];
+  container.innerHTML = roles.map(r => {
+    const count = allNodes.filter(n => n._role === r).length;
+    const c = GRAPH_DATA.roles[r].color;
+    return `<label class="filter-item">
+      <input type="checkbox" checked data-role="${escapeHTML(r)}" />
+      <span class="filter-color" style="background:${c}"></span>
+      ${escapeHTML(r)} <span class="badge">${count}</span>
+    </label>`;
+  }).join('');
+  container.querySelectorAll('input').forEach(cb => cb.addEventListener('change', applyFilters));
+}
+
+function toggleAllFilters(containerId, checked) {
+  const cbs = document.querySelectorAll(`#${containerId} input[type=checkbox]`);
+  cbs.forEach(cb => { cb.checked = checked; });
+  applyFilters();
+}
+
+function applyFilters() {
+  const checkedGroups = new Set();
+  document.querySelectorAll('#dir-filters input:checked').forEach(cb => checkedGroups.add(cb.dataset.group));
+  const checkedRoles = new Set();
+  document.querySelectorAll('#role-filters input:checked').forEach(cb => checkedRoles.add(cb.dataset.role));
+  const query = document.getElementById('search').value.toLowerCase();
+
+  const updates = [];
+  nodesDataset.forEach(n => {
+    const orig = allNodes.find(an => an.id === n.id);
+    const matchGroup = n.external ? externalVisible : checkedGroups.has(orig?._dir);
+    const matchRole = checkedRoles.has(orig?._role || 'other');
+    const matchSearch = !query || n.id.toLowerCase().includes(query) || (n.label || '').toLowerCase().includes(query);
+    updates.push({ id: n.id, hidden: !matchGroup || !matchRole || !matchSearch });
+  });
+  nodesDataset.update(updates);
+}
+
+// --- Stats ---
+function renderStats() {
+  const s = GRAPH_DATA.stats;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat-row"><span>Files</span><span class="stat-value">${s.totalFiles}</span></div>
+    <div class="stat-row"><span>Dependencies</span><span class="stat-value">${s.totalEdges}</span></div>
+    <div class="stat-row"><span>Avg deps/file</span><span class="stat-value">${s.avgDependencies}</span></div>
+    <div class="stat-row"><span>Max fan-out</span><span class="stat-value" title="${escapeHTML(s.maxFanOut.file)}">${s.maxFanOut.count}</span></div>
+    <div class="stat-row"><span>Max fan-in</span><span class="stat-value" title="${escapeHTML(s.maxFanIn.file)}">${s.maxFanIn.count}</span></div>
+    <div class="stat-row"><span>Circular</span><span class="${s.circular.length > 0 ? 'stat-warn' : 'stat-value'}">${s.circular.length}</span></div>
+    <div class="stat-row"><span>External pkgs</span><span class="stat-value">${s.externalDeps.length}</span></div>
+  `;
+}
+
+// --- Legend ---
+function renderLegend() {
+  const container = document.getElementById('legend-items');
+  if (colorMode === 'role' && GRAPH_DATA.roles) {
+    container.innerHTML = Object.entries(GRAPH_DATA.roles)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([name, r]) =>
+        `<span class="legend-item"><span class="filter-color" style="background:${r.color}"></span>${escapeHTML(name)}</span>`
+      ).join('');
+  } else {
+    container.innerHTML = Object.entries(GRAPH_DATA.groups).map(([name, g]) =>
+      `<span class="legend-item"><span class="filter-color" style="background:${g.color}"></span>${escapeHTML(name)}</span>`
+    ).join('');
+  }
+}
+
+// --- Recolor nodes ---
+function recolorNodes() {
+  const updates = [];
+  nodesDataset.forEach(n => {
+    const orig = allNodes.find(an => an.id === n.id);
+    if (!orig) return;
+    const c = getNodeColor(orig);
+    updates.push({ id: n.id, color: { background: c, border: c, highlight: { background: COLORS.highlightNode, border: '#FFA000' } } });
+  });
+  nodesDataset.update(updates);
+  renderLegend();
+}
+
+// --- Toolbar ---
+function setupToolbar() {
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    network.fit({ animation: { duration: 500 } });
+    clearHighlight();
+  });
+
+  document.getElementById('btn-physics').addEventListener('click', function() {
+    physicsEnabled = !physicsEnabled;
+    this.classList.toggle('active', physicsEnabled);
+    if (physicsEnabled) {
+      network.setOptions({ physics: { enabled: true, stabilization: { iterations: 100 } } });
+    } else {
+      network.stopSimulation();
+      network.setOptions({ physics: { enabled: false } });
+    }
+  });
+
+  document.getElementById('btn-color').addEventListener('click', function() {
+    colorMode = colorMode === 'role' ? 'dir' : 'role';
+    this.textContent = 'Color: ' + (colorMode === 'role' ? 'Role' : 'Dir');
+    recolorNodes();
+  });
+
+  document.getElementById('btn-external').addEventListener('click', function() {
+    externalVisible = !externalVisible;
+    this.classList.toggle('active', externalVisible);
+    applyFilters();
+  });
+
+  document.getElementById('btn-circular').addEventListener('click', function() {
+    circularHighlighted = !circularHighlighted;
+    this.classList.toggle('active', circularHighlighted);
+    if (circularHighlighted) highlightCircular();
+    else clearHighlight();
+  });
+}
+
+// --- Search ---
+function setupSearch() {
+  let debounce;
+  document.getElementById('search').addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(applyFilters, 200);
+  });
+}
+
+// --- Node interaction ---
+function onNodeClick(params) {
+  clearHighlight();
+  if (params.nodes.length === 0) {
+    document.getElementById('node-detail').classList.remove('active');
+    selectedNode = null;
+    return;
+  }
+  selectedNode = params.nodes[0];
+  highlightConnected(selectedNode);
+  showNodeDetail(selectedNode);
+}
+
+function onNodeDoubleClick(params) {
+  if (params.nodes.length > 0) {
+    const nodeId = params.nodes[0];
+    network.focus(nodeId, { scale: 1.5, animation: { duration: 500 } });
+    copyToClipboard(nodeId);
+  }
+}
+
+// --- Clipboard & Toast ---
+function copyToClipboard(filePath) {
+  navigator.clipboard.writeText(filePath).then(() => {
+    showToast('Copied: ' + filePath);
+  }).catch(() => {
+    showToast('Copy failed');
+  });
+}
+
+function copySelectedNode() {
+  if (selectedNode) copyToClipboard(selectedNode);
+}
+
+let toastTimer;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+function highlightConnected(nodeId) {
+  const connEdges = edgesDataset.get().filter(e => e.from === nodeId || e.to === nodeId);
+  const connNodes = new Set([nodeId]);
+  connEdges.forEach(e => { connNodes.add(e.from); connNodes.add(e.to); });
+
+  const nodeUpdates = [];
+  nodesDataset.forEach(n => {
+    nodeUpdates.push({ id: n.id, opacity: connNodes.has(n.id) ? 1.0 : 0.15 });
+  });
+  nodesDataset.update(nodeUpdates);
+
+  const edgeUpdates = [];
+  edgesDataset.forEach(e => {
+    const connected = connEdges.some(ce => ce.id === e.id);
+    edgeUpdates.push({ id: e.id, color: { color: connected ? COLORS.highlightEdge : COLORS.fadedEdge }, width: connected ? 2 : 1 });
+  });
+  edgesDataset.update(edgeUpdates);
+}
+
+function highlightCircular() {
+  const circularNodes = new Set();
+  const circularEdgePairs = new Set();
+  (GRAPH_DATA.stats.circular || []).forEach(cycle => {
+    for (let i = 0; i < cycle.length; i++) {
+      circularNodes.add(cycle[i]);
+      if (i < cycle.length - 1) circularEdgePairs.add(cycle[i] + '\u2192' + cycle[i+1]);
+    }
+  });
+
+  const nodeUpdates = [];
+  nodesDataset.forEach(n => {
+    nodeUpdates.push({ id: n.id, opacity: circularNodes.has(n.id) ? 1.0 : 0.15 });
+  });
+  nodesDataset.update(nodeUpdates);
+
+  const edgeUpdates = [];
+  edgesDataset.forEach(e => {
+    const isCircular = circularEdgePairs.has(e.from + '\u2192' + e.to);
+    edgeUpdates.push({ id: e.id, color: { color: isCircular ? COLORS.circularEdge : COLORS.fadedEdge }, width: isCircular ? 3 : 1 });
+  });
+  edgesDataset.update(edgeUpdates);
+}
+
+function clearHighlight() {
+  const nodeUpdates = [];
+  nodesDataset.forEach(n => {
+    const orig = allNodes.find(an => an.id === n.id);
+    const c = orig ? getNodeColor(orig) : COLORS.defaultNode;
+    nodeUpdates.push({ id: n.id, opacity: 1.0, color: { background: c, border: c } });
+  });
+  nodesDataset.update(nodeUpdates);
+
+  const edgeUpdates = [];
+  edgesDataset.forEach(e => {
+    edgeUpdates.push({ id: e.id, color: { color: COLORS.dimEdge, highlight: COLORS.highlightEdge }, width: 1 });
+  });
+  edgesDataset.update(edgeUpdates);
+}
+
+function showNodeDetail(nodeId) {
+  const detail = document.getElementById('node-detail');
+  detail.classList.add('active');
+  document.getElementById('node-name').textContent = nodeId;
+  const orig = allNodes.find(n => n.id === nodeId);
+  const roleEl = document.getElementById('node-role');
+  if (orig && orig._role) {
+    const c = GRAPH_DATA.roles?.[orig._role]?.color || '';
+    roleEl.innerHTML = `<span class="filter-color" style="background:${c};display:inline-block;vertical-align:middle;margin-right:4px"></span>${escapeHTML(orig._role)} / ${escapeHTML(orig._dir)}`;
+  } else {
+    roleEl.textContent = '';
+  }
+
+  const imports = edgesDataset.get().filter(e => e.from === nodeId).map(e => e.to);
+  const importedBy = edgesDataset.get().filter(e => e.to === nodeId).map(e => e.from);
+
+  renderDepList('node-imports', imports);
+  renderDepList('node-importedby', importedBy);
+}
+
+function renderDepList(elementId, files) {
+  const ul = document.getElementById(elementId);
+  ul.innerHTML = '';
+  if (files.length === 0) {
+    ul.innerHTML = '<li style="color:var(--text-secondary);cursor:default">None</li>';
+    return;
+  }
+  files.forEach(f => {
+    const li = document.createElement('li');
+    li.textContent = f;
+    li.addEventListener('click', () => focusNode(f));
+    ul.appendChild(li);
+  });
+}
+
+function focusNode(nodeId) {
+  network.focus(nodeId, { scale: 1.2, animation: { duration: 400 } });
+  network.selectNodes([nodeId]);
+  highlightConnected(nodeId);
+  showNodeDetail(nodeId);
+}
+
+// --- Start ---
+init();
+</script>
+</body>
+</html>
