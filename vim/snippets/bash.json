@@ -1,0 +1,22 @@
+{
+  "fun": {
+    "prefix": "fun",
+    "body": "$1() {\n  $0\n}"
+  },
+  "if": {
+    "prefix": "if",
+    "body": "if [[ $1 ]]; then\n  $0\nfi"
+  },
+  "ife": {
+    "prefix": "ife",
+    "body": "if [[ $1 ]]; then\n  $2\nelse\n  $0\nfi"
+  },
+  "for": {
+    "prefix": "for",
+    "body": "for $1 in $2; do\n  $0\ndone"
+  },
+  "log": {
+    "prefix": "log",
+    "body": "echo \"$0\""
+  }
+}

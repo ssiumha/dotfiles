@@ -1,0 +1,10 @@
+{
+  "contributes": {
+    "snippets": [
+      { "language": ["typescript", "typescriptreact", "javascript", "javascriptreact"], "path": "./typescript.json" },
+      { "language": ["python"], "path": "./python.json" },
+      { "language": ["ruby"], "path": "./ruby.json" },
+      { "language": ["sh", "bash", "zsh"], "path": "./bash.json" }
+    ]
+  }
+}

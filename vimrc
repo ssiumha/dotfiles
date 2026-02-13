@@ -67,11 +67,9 @@ set iskeyword+=\-,$
 set completeopt=menu,menuone,longest
 set wildignorecase
 "set wildoptions+=fuzzy
+set grepprg=rg\ --vimgrep
+set grepformat=%f:%l:%c:%m
 
-set cursorcolumn
-
-"set spell spellfile=$HOME/dots/vim/spell/en.utf-8.add
-" highlight SpellBad cterm=underline ctermbg=88 gui=underline guibg=#902020 guisp=NvimLightRed
 
 " terminal
 
@@ -79,7 +77,7 @@ if has('nvim')
   set signcolumn=yes
   set scrollback=50000
   set laststatus=3 " global status line
-  set cmdheight=0
+  set cmdheight=1
 endif
 
 "----------------
@@ -93,11 +91,6 @@ let g:netrw_keepdir = 1 " disable auto cd
 "----------------
 " fold
 "----------------
-
-" highlight Folded ctermfg=145 ctermbg=236 gui=italic guifg=#a0a8b0 guibg=#384048
-autocmd ColorScheme * highlight Folded cterm=NONE ctermbg=236 ctermfg=145 gui=italic guibg=NONE guifg=#a0a8b0
-
-" highlight FoldColumn cterm=NONE ctermbg=NONE guibg=NONE
 
 set foldminlines=3
 set fillchars=fold:\ ,vert:│
@@ -130,11 +123,86 @@ set packpath^=~/dots/vim
 "----------------
 " complete
 "----------------
-set dictionary+=$HOME/.firm/dict.txt
+set dictionary+=$HOME/dots/vim/dict.txt
 iab destory destroy
 iab functino function
 iab lien line
 iab exmaple example
+
+function! SnippetComplete(findstart, base) abort
+  if a:findstart
+    let col = col('.') - 1
+    let line = getline('.')
+    while col > 0 && line[col-1] =~ '\S'
+      let col -= 1
+    endwhile
+    return col
+  endif
+  let items = [
+    \ {'word': 'today',     'menu': strftime('%Y-%m-%d'),     'user_data': strftime('%Y-%m-%d')},
+    \ {'word': 'now',       'menu': strftime('%H:%M'),        'user_data': strftime('%H:%M')},
+    \ {'word': 'yesterday', 'menu': strftime('%Y-%m-%d', localtime()-86400), 'user_data': strftime('%Y-%m-%d', localtime()-86400)},
+    \ {'word': 'tomorrow',  'menu': strftime('%Y-%m-%d', localtime()+86400), 'user_data': strftime('%Y-%m-%d', localtime()+86400)},
+    \ {'word': 'week',      'menu': strftime('%Y-%m-%d', localtime() - (strftime('%w') - 1) * 86400), 'user_data': strftime('%Y-%m-%d', localtime() - (strftime('%w') - 1) * 86400)},
+    \ {'word': 'month',     'menu': strftime('%Y-%m'),        'user_data': strftime('%Y-%m')},
+    \ {'word': 'year',      'menu': strftime('%Y'),           'user_data': strftime('%Y')},
+    \ {'word': 'ts',        'menu': strftime('%Y-%m-%dT%H:%M:%S'), 'user_data': strftime('%Y-%m-%dT%H:%M:%S')},
+    \ {'word': 'uuid',      'menu': 'UUID',                   'user_data': trim(system('uuidgen'))},
+    \ {'word': 'file',      'menu': expand('%:p'),            'user_data': expand('%:p')},
+    \ ]
+  return filter(items, 'v:val.word =~ "^" . a:base')
+endfunction
+
+autocmd CompleteDone * call s:SnippetReplace()
+function! s:SnippetReplace() abort
+  let item = v:completed_item
+  if empty(item) || !has_key(item, 'user_data') || empty(item.user_data)
+    return
+  endif
+  let word = item.word
+  let val = item.user_data
+  if word ==# val | return | endif
+  let start = col('.') - 1 - len(word)
+  let line = getline('.')
+  let before = start > 0 ? line[:start - 1] : ''
+  let after = line[start + len(word):]
+  call setline('.', before . val . after)
+  call cursor('.', start + len(val) + 1)
+endfunction
+
+function! ChainedComplete(findstart, base) abort
+  let chain = get(b:, 'complete_chain', get(g:, 'complete_chain', []))
+  if a:findstart
+    let s:chain_starts = {}
+    let min_start = col('.') - 1
+    for name in chain
+      try
+        let start = function(name)(1, '')
+        if start >= 0
+          let s:chain_starts[name] = start
+          let min_start = min([min_start, start])
+        endif
+      catch
+      endtry
+    endfor
+    return min_start
+  endif
+  let line = getline('.')
+  let results = []
+  for name in chain
+    if has_key(s:chain_starts, name)
+      let base = line[s:chain_starts[name] : col('.')-2]
+      try
+        let results += function(name)(0, base)
+      catch
+      endtry
+    endif
+  endfor
+  return results
+endfunction
+
+let g:complete_chain = ['SnippetComplete']
+set completefunc=ChainedComplete
 
 "----------------
 " plug
@@ -193,6 +261,7 @@ Plug 'junegunn/fzf.vim'
       \ }))
   endfunction
   command! Cw call FzfQuickfix()
+
 
   nnoremap <space>p  <esc>:Files<cr>
   nnoremap <space>pp <esc>:Files<cr>
@@ -295,28 +364,29 @@ Plug 'voldikss/vim-floaterm'
         \   { path -> execute('read ' . path) }, 'filepath')
   nnoremap <space>f <esc>:MySnip<cr>
 
-Plug 'mileszs/ack.vim', { 'on': ['Ack', 'Ack!'] }
-  nnoremap <space>a :Ack!<space>
-  let g:ackprg = 'rg --vimgrep --smart-case --color=never'
+" Plug 'mileszs/ack.vim', { 'on': ['Ack', 'Ack!'] }  " → :Rg (fzf.vim)
+"   let g:ackprg = 'rg --vimgrep --smart-case --color=never'
+  nnoremap <silent> <space>a <Cmd>Rg<CR>
 
-Plug 'tpope/vim-fugitive', { 'on': ['Git'] }
+Plug 'tpope/vim-fugitive'
+Plug 'rbong/vim-flog', { 'on': ['Flog', 'Flogsplit', 'Floggit'] }
+  nnoremap <space>gl :Flog -all<cr>
+  nnoremap <space>gL :Flog -all -path=%<cr>
 Plug 'vim-test/vim-test', { 'on': ['TestNearest', 'TestFile', 'TestSuite', 'TestLast'] }
 
 " UI
-" TODO: https://github.com/dense-analysis/ale?tab=readme-ov-file#how-can-i-customise-the-statusline
 Plug 'itchyny/lightline.vim'
   let g:lightline = {}
   let g:lightline.active = {
-        \ 'left': [ [ 'mode', 'paste' ],
-        \           [ 'readonly', 'filename', 'modified', 'method' ],
-        \           [] ],
+        \ 'left': [ [ 'mymode', 'paste' ],
+        \           [ 'readonly', 'filename', 'modified' ],
+        \           [ 'gitbranch' ] ],
         \ 'right': [ [ 'lineinfo' ],
-        \            [ 'percent' ],
-        \            [ 'fileformat', 'fileencoding', 'filetype' ] ] }
+        \            [ 'diagnostics' ],
+        \            [ 'filetype' ] ] }
   let g:lightline.inactive = {
         \ 'left':  [ [ 'filename' ] ],
-        \ 'right': [ [ 'lineinfo' ],
-        \            [ 'percent' ] ] }
+        \ 'right': [ [ 'lineinfo' ] ] }
   let g:lightline.tabline = {
         \ 'left':  [ [ 'tabs' ] ],
         \ 'right': [ [ 'close' ] ] }
@@ -327,10 +397,19 @@ Plug 'itchyny/lightline.vim'
         \  'filedir': 'LightlineFiledir',
         \ }
   let g:lightline.component_function = {
+        \   'mymode': 'LightlineMode',
         \   'filename': 'LightlineFilename',
-        \   'treesitter': 'LightlineTreesitter',
-        \   'method': 'NearestMethodOrFunction'
+        \   'gitbranch': 'LightlineGitbranch',
+        \   'diagnostics': 'LightlineDiagnostics',
         \ }
+
+  function! LightlineMode() abort
+    let l:m = mode()
+    let l:map = { 'n': 'N', 'i': 'I', 'v': 'V', 'V': 'VL', "\<C-v>": 'VB',
+          \ 'R': 'R', 's': 'S', 'S': 'SL', "\<C-s>": 'SB',
+          \ 'c': 'C', 't': 'T' }
+    return get(l:map, l:m, l:m)
+  endfunction
 
   function! LightlineFiledir(n) abort
     let buflist = tabpagebuflist(a:n)
@@ -343,60 +422,52 @@ Plug 'itchyny/lightline.vim'
   endfunction
 
   function! LightlineFilename()
+    let full = expand('%:p')
     let root = fnamemodify(get(b:, 'git_dir'), ':h')
-    let path = expand('%:p')
-    if path[:len(root)-1] ==# root
-      return path[len(root)+1:]
+    if full[:len(root)-1] ==# root
+      let path = full[len(root)+1:]
+    else
+      let home = expand('~')
+      if full[:len(home)-1] ==# home
+        let path = '~' . full[len(home):]
+      else
+        let path = expand('%:.')
+      endif
     endif
-    return expand('%')
+    if winwidth(0) < 80
+      return pathshorten(path)
+    endif
+    return path
   endfunction
 
-  " TODO yaml
-  " InspectTree
-  " echo nvim_treesitter#statusline({ "type_patterns": ['flow_node'] })
-
-  function! LightlineTreesitter()
-    try
-      return nvim_treesitter#statusline(100)
-    catch
-      return ""
-    endtry
+  function! LightlineGitbranch() abort
+    if winwidth(0) < 60 | return '' | endif
+    if exists('*FugitiveHead')
+      let l:b = FugitiveHead()
+      return l:b !=# '' ? l:b : ''
+    endif
+    return ''
   endfunction
 
-Plug 'liuchengxu/vista.vim', { 'on': ['Vista', 'Vista!'] }
-  " let g:vista_fzf_opts = []
-  " let g:vista_fzf_preview = ['right:50%']
-  if has('nvim-0.6.0')
-    let g:vista_default_executive = 'nvim_lsp'
-  endif
-  let g:vista_keep_fzf_colors = 1
-  nnoremap <space>vv :Vista<cr>
-  nnoremap <space>vf :Vista finder<cr>
-  " augroup vista
-  "   autocmd!
-  "   autocmd TabEnter * silent! if &modifiable | Vista | endif
-  "   autocmd TabLeave * silent! if &modifiable | Vista! | endif
-  " augroup END
+  function! LightlineDiagnostics() abort
+    if !has('nvim') | return '' | endif
+    let l:n = luaeval('#vim.lsp.get_clients({bufnr=0})')
+    if l:n == 0 | return '' | endif
+    let l:e = luaeval('#vim.diagnostic.get(0, {severity=vim.diagnostic.severity.ERROR})')
+    let l:w = luaeval('#vim.diagnostic.get(0, {severity=vim.diagnostic.severity.WARN})')
+    return 'E:' . l:e . ' W:' . l:w
+  endfunction
+
 
 Plug 'nanotech/jellybeans.vim'
 
 " Utils
-Plug 'kana/vim-metarw' " TODO: webdav
-
 Plug 'tpope/vim-dadbod', { 'on': ['DB'] }
 Plug 'kristijanhusak/vim-dadbod-ui', { 'on': ['DBUI', 'DBUIToggle'] }
 Plug 'kristijanhusak/vim-dadbod-completion'
   let g:db_ui_table_helpers = {}
   let g:db_ui_table_helpers['postgres'] = {}
   let g:db_ui_table_helpers['postgres']['Show Databases'] = 'SELECT datname FROM pg_database WHERE datistemplate = false;'
-
-
-Plug 'hrsh7th/vim-vsnip'
-  let g:vsnip_snippet_dir = expand('$HOME/dots/vim/snippets')
-  let g:vsnip_filetypes = {}
-  let g:vsnip_filetypes.typescriptreact = ['typescript']
-  imap <C-s> <Plug>(vsnip-expand-or-jump)
-  smap <C-s> <Plug>(vsnip-expand-or-jump)
 
 Plug 'powerman/vim-plugin-AnsiEsc'
 Plug 'michaeljsmith/vim-indent-object'
@@ -406,44 +477,59 @@ Plug 'justinmk/vim-sneak'
   " nmap <m-c-s> <Plug>Sneak_S
   " nmap <c-s> <Plug>Sneak_s
 
-Plug 'jpalardy/vim-slime', { 'on': ['SlimeSend', 'SlimeSend1', '<Plug>SlimeRegionSend', '<Plug>SlimeParagraphSend'] }
+Plug 'jpalardy/vim-slime'
   let g:slime_target = 'tmux'
   let g:slime_paste_file = tempname()
-  " let g:slime_no_mappings = 1
-  func! s:slime_wrapper()
-    " TODO C-c wrapper
-    " let b:slime_config["socket_name"] = "default"
-    " let b:slime_config["target_pane"] = "%1" -> complete fzf
-  endfunc
+  let g:slime_no_mappings = 1
+  function! SlimeSendWithPick() abort
+    if !exists('b:slime_config')
+      call SlimePickPane()
+      return
+    endif
+    call feedkeys("\<Plug>SlimeParagraphSend", 'm')
+  endfunction
+  xnoremap <C-c><C-c> <Plug>SlimeRegionSend
+  nnoremap <C-c><C-c> :call SlimeSendWithPick()<CR>
+  function! SlimePickPane() abort
+    let current = trim(system('tmux display-message -p "#{pane_id}"'))
+    let fmt = '#{pane_id} #{session_name}:#{window_index}.#{pane_index} [#{pane_current_command}]'
+    let panes = systemlist('tmux list-panes -a -F "' . fmt . '"')
+    call filter(panes, 'v:val !~# "^" . current')
+    let top = []
+    let last_tmux = trim(system('tmux display-message -t "{last}" -p "#{pane_id}" 2>/dev/null'))
+    if last_tmux != '' && last_tmux != current
+      let match = filter(copy(panes), 'v:val =~# "^" . last_tmux')
+      if len(match)
+        let top += map(match, 'v:val . " [last]"')
+        call filter(panes, 'v:val !~# "^" . last_tmux')
+      endif
+    endif
+    let slime_prev = get(get(b:, 'slime_config', {}), 'target_pane', '')
+    if slime_prev != '' && slime_prev != last_tmux
+      let match = filter(copy(panes), 'v:val =~# "^" . slime_prev')
+      if len(match)
+        let top += map(match, 'v:val . " [prev]"')
+        call filter(panes, 'v:val !~# "^" . slime_prev')
+      endif
+    endif
+    call fzf#run(fzf#wrap({
+      \ 'source': top + panes,
+      \ 'options': ['--prompt', 'Slime> ', '--preview', 'tmux capture-pane -t {1} -p -S -20', '--preview-window', 'right:50%'],
+      \ 'sink': function('s:slime_pick_sink'),
+      \ }))
+  endfunction
+  function! s:slime_pick_sink(line) abort
+    let pane_id = split(a:line)[0]
+    let b:slime_config = {'socket_name': 'default', 'target_pane': pane_id}
+    echo 'Slime target: ' . pane_id
+  endfunction
+  command! SlimePickPane call SlimePickPane()
 
 Plug 'junegunn/vim-easy-align'
   xmap <space>ga <Plug>(LiveEasyAlign)
   nmap <space>ga <Plug>(LiveEasyAlign)
 
-"Plug 'rhysd/vim-lsp-ale'
-Plug 'dense-analysis/ale'
-  let g:ale_linters = {}
-  let g:ale_fixers = {}
-
-  let g:ale_enabled = 1
-  let g:ale_completion_autoimport = 1
-  let g:ale_disable_lsp = 1
-  let g:ale_fix_on_save = 1
-  let g:ale_lint_on_save = 1
-  let g:ale_linters_explicit = 1
-
-  let g:ale_virtualtext = 1
-  let g:ale_virtualtext_cursor = 1
-  let g:ale_virtualtext_prefix = '>>'
-
-  let g:ale_set_loclist = 0
-  let g:ale_set_quickfix = 0
-  if has('nvim-0.6.0')
-    let g:ale_use_neovim_diagnostics_api = 1
-  endif
-  " let g:ale_disable_lsp = 'auto'
-  " let g:ale_completion_enabled = 1
-  " set omnifunc=ale#completion#OmniFunc
+" Plug 'dense-analysis/ale'  " → conform.nvim + LSP (vimrc.lua)
 
 " TODO
 " Plug 'tpope/vim-endwise'
@@ -459,6 +545,7 @@ Plug 'tpope/vim-surround'
   let g:surround_40 = "(\r)"
   let g:surround_91 = "[\r]"
 
+Plug 'tpope/vim-vinegar'
 Plug 'tpope/vim-abolish'
 Plug 'AndrewRadev/tagalong.vim' " auto fix matched tag
 Plug 'cohama/lexima.vim' " auto close parentheses
@@ -471,21 +558,20 @@ Plug 'stefandtw/quickfix-reflector.vim'
   " let g:qf_write_changes = 0
 Plug 'thinca/vim-qfreplace'
 
-Plug 'dhruvasagar/vim-table-mode', { 'on': ['TableModeToggle', 'TableModeEnable'] }
+Plug 'dhruvasagar/vim-table-mode'
   let g:table_mode_always_active = 0
   let g:table_mode_auto_align = 1
+  let g:table_mode_corner = '|'
+Plug 'junegunn/vim-easy-align'
+  xmap ga <Plug>(EasyAlign)
+  nmap ga <Plug>(EasyAlign)
+" Plug 'godlygeek/tabular' " → vim-easy-align (ga operator)
 
-Plug 'godlygeek/tabular'
-
-Plug 'mattn/emmet-vim'
-  let g:user_emmet_leader_key = '<c-y>'
-  let g:user_emmet_install_global = 0
-  inoremap <C-y><c-y> <plug>(emmet-expand-abbr)
-  autocmd FileType html,css,typescriptreact EmmetInstall
-
-  " TODO
-  " let g:user_emmet_settings = {}
-  " let g:user_emmet_settings.perl = { 'aliases': { 'req': "require '|'" }, 'snippets': { 'w': "warn \"${cursor}\";" } }
+" Plug 'mattn/emmet-vim'  " → emmet_language_server (vimrc.lua)
+"   let g:user_emmet_leader_key = '<c-y>'
+"   let g:user_emmet_install_global = 0
+"   inoremap <C-y><c-y> <plug>(emmet-expand-abbr)
+"   autocmd FileType html,css,typescriptreact EmmetInstall
 
 " Lang
 Plug 'tpope/vim-rails', { 'for': 'ruby' }
@@ -509,8 +595,6 @@ Plug 'github/copilot.vim'
         \ }
   " let g:copilot_no_tab_map = v:true
   " imap <silent><script><expr> <tab> copilot#Accept("\<CR>")
-
-Plug 'flazz/vim-colorschemes'
 call plug#end()
 
 "----------------
@@ -518,47 +602,16 @@ call plug#end()
 "----------------
 colorscheme jellybeans
 
-highlight TreesitterContext guibg=gray ctermbg=8
-
-highlight IndentLevel1 guibg=#ff0000 ctermbg=red
-highlight IndentLevel2 guibg=#ffff00 ctermbg=yellow
-highlight IndentLevel3 guibg=#ffa500 ctermbg=blue
-highlight IndentLevel4 guibg=#00ff00 ctermbg=green
-" syntax match IndentLevel1 /^ \{2}/ containedin=ALL
-" syntax match IndentLevel2 /^ \{2}\zs \{2}\ze/ containedin=ALL
-" syntax match IndentLevel3 /^ \{4}\zs \{2}\ze/ containedin=ALL
-" syntax match IndentLevel4 /^ \{6} \{2}/ containedin=ALL contained
-" call matchadd('IndentLevel2', "^ ")
-
-autocmd FileType yaml
-      \ setlocal nofoldenable foldmethod=expr foldexpr=nvim_treesitter#foldexpr()
+" foldexpr is set globally via vim.treesitter.foldexpr() in vimrc.lua
+autocmd FileType yaml setlocal nofoldenable
+autocmd FileType json,yaml nnoremap <buffer> ) :call search('^'.matchstr(getline('.'),'^\s*').'\S','W')<CR>
+autocmd FileType json,yaml nnoremap <buffer> ( :call search('^'.matchstr(getline('.'),'^\s*').'\S','bW')<CR>
 
 if has('nvim-0.7.0')
   lua require 'vimrc'
 endif
 
-"----------------
-" plug:after ale
-"----------------
-let g:ale_linters['*'] = ['codespell']
-
-let g:ale_linters['typescript'] = ['biome']
-let g:ale_fixers['typescript'] = ['my_biome']
-
-let g:ale_linters['typescriptreact'] = ['biome']
-let g:ale_fixers['typescriptreact'] = ['my_biome']
-
-" let g:ale_biome_options = '--no-ignore'
-" let g:ale_biome_fixer_apply_unsafe = 1
-func! MyAleFixBiome(buffer) abort
-    let l:executable = ale#handlers#biome#GetExecutable(a:buffer)
-    let l:cmd = printf('%s check --apply %%t', ale#Escape(l:executable))
-    return {  'command': l:cmd, 'read_temporary_file': 1 }
-endfunc
-call ale#fix#registry#Add('my_biome', 'MyAleFixBiome', ['typescript'], 'my custom biome')
-
-let g:ale_linters['sh'] = ['shellcheck']
-let g:ale_linters['bash'] = ['shellcheck']
+" ALE removed → conform.nvim + LSP diagnostics (vimrc.lua)
 
 "----------------
 " commands
@@ -567,16 +620,6 @@ func! s:stripAnsiColorCode()
   execute "%!perl -MTerm::ANSIColor=colorstrip -ne 'print colorstrip $_'"
 endfunc
 command! AnsiStrip :call s:stripAnsiColorCode()
-
-" TODO
-inoremap </ </<C-r>=MatchTag()<CR>
-function! MatchTag()
-  " let l:line = getline('.')
-  " let l:before_cursor = strpart(l:line, 0, col('.') - 2) " 현재 줄에서 </ 전까지 텍스트 가져오기
-  " let l:match = matchstr(l:before_cursor, '<\zs\w\+\ze[^>]*$') " 열린 태그 찾기
-  " return empty(l:match) ? '' : l:match . '>'
-  return ""
-endfunction
 
 "----------------
 " note

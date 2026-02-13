@@ -1,0 +1,22 @@
+{
+  "fun": {
+    "prefix": "fun",
+    "body": "def $1($2)\n  $0\nend"
+  },
+  "if": {
+    "prefix": "if",
+    "body": "if $1\n  $0\nend"
+  },
+  "ife": {
+    "prefix": "ife",
+    "body": "if $1\n  $2\nelse\n  $0\nend"
+  },
+  "for": {
+    "prefix": "for",
+    "body": "$1.each do |$2|\n  $0\nend"
+  },
+  "log": {
+    "prefix": "log",
+    "body": "puts $0"
+  }
+}

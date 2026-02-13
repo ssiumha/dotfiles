@@ -1,0 +1,12 @@
+authentication
+authorization
+configuration
+infrastructure
+kubernetes
+microservice
+idempotent
+middleware
+serialization
+deserialization
+asynchronous
+synchronous

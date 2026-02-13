@@ -128,7 +128,7 @@ augroup MyMarkdown
   autocmd FileType markdown inoremap <buffer> <C-c>. <c-o>:PickDateAtCursor<CR>
 
   autocmd FileType markdown inoremap <buffer> [[ <C-o>:call LocalLinkFzf()<CR>
-  autocmd FileType markdown setlocal completefunc=NoteComplete
+  autocmd FileType markdown let b:complete_chain = ['NoteComplete', 'SnippetComplete']
   autocmd FileType markdown inoremap <buffer><expr> <C-n> NoteSmartCN()
   autocmd FileType markdown inoremap <buffer><expr> <C-p> NoteSmartCP()
 
