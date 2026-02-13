@@ -6,6 +6,7 @@
 ################
 **/*.local*
 tmp
+.tmp
 
 ################
 # TOOLS
@@ -31,10 +32,10 @@ claude-swarm.yml
 .direnv/
 .editorconfig
 .envrc
-mise.toml
-.mise.toml
-.mise/
-.mise
+# mise.toml
+# .mise.toml
+# .mise/
+# .mise
 .tool-versions
 
 ## vim

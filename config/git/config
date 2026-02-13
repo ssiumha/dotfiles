@@ -70,6 +70,7 @@
   rm-untracked = !$HOME/.config/git/alias/rm-untracks
   gr = !$HOME/.config/git/alias/gr
   gra = !$HOME/.config/git/alias/gr --all
+  graf = !$HOME/.config/git/alias/gr --all --fzf
   grm = !$HOME/.config/git/alias/grm
   grma = !$HOME/.config/git/alias/grm --all
 

@@ -2,6 +2,17 @@
 
 git rev-parse --git-dir > /dev/null 2>&1 || { echo "Not a git repository"; exit 1; }
 
+# ==== Parse --fzf flag ====
+use_fzf=false
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --fzf) use_fzf=true ;;
+    *) args+=("$arg") ;;
+  esac
+done
+set -- "${args[@]}"
+
 # ==== Helper commands (for fzf subshell) ====
 get_hash='grep -oE "[a-f0-9]{7,}" | head -1'
 show_stat='git show --color --format=fuller --stat'
@@ -49,18 +60,22 @@ awk_fmt='{ printf "%-6s\t%s\t%s %s %s %s\t%s\n", $1, $2, $3, $4, $5, $6, $7 }'
 export log_cmd awk_fmt
 
 # ==== Main ====
-eval "$log_cmd" | awk -F '\t' "$awk_fmt" \
-  | fzf --ansi --tmux 100% --disabled --no-sort --layout=reverse \
-        --prompt '> ' \
-        --header "$header_browse" \
-        --preview 'h=$(echo {} | '"$get_hash"'); '"$show_stat"' $h' \
-        --preview-window 'up:50%' \
-        --bind 'q:abort' \
-        --bind 'ctrl-s:change-preview(h=$(echo {} | '"$get_hash"'); '"$show_stat"' $h)' \
-        --bind 'ctrl-d:change-preview(h=$(echo {} | '"$get_hash"'); '"$show_patch"' $h)' \
-        --bind 'ctrl-e:execute(h=$(echo {} | '"$get_hash"') && git show $h > /tmp/git-show-$h.diff && nvim /tmp/git-show-$h.diff)' \
-        --bind 'ctrl-b:execute(h=$(echo {} | '"$get_hash"'); git br $h)' \
-        --bind 'ctrl-f:change-header(⏳ Fetching...)+execute-silent(git fetch --all)+reload(eval "$log_cmd" | awk -F "\t" "$awk_fmt")+change-header('"$header_browse"')' \
-        --bind 'ctrl-g:execute('"$pr_create"')' \
-        --bind 'ctrl-/:toggle-search+transform-header:echo "{fzf:header}" | grep -q "^\[BROWSE\]" && echo "'"$header_search"'" || echo "'"$header_browse"'"' \
-        --bind 'esc:disable-search+clear-query+change-header('"$header_browse"')'
+if [ "$use_fzf" = true ]; then
+  eval "$log_cmd" | awk -F '\t' "$awk_fmt" \
+    | fzf --ansi --tmux 100% --disabled --no-sort --layout=reverse \
+          --prompt '> ' \
+          --header "$header_browse" \
+          --preview 'h=$(echo {} | '"$get_hash"'); '"$show_stat"' $h' \
+          --preview-window 'up:50%' \
+          --bind 'q:abort' \
+          --bind 'ctrl-s:change-preview(h=$(echo {} | '"$get_hash"'); '"$show_stat"' $h)' \
+          --bind 'ctrl-d:change-preview(h=$(echo {} | '"$get_hash"'); '"$show_patch"' $h)' \
+          --bind 'ctrl-e:execute(h=$(echo {} | '"$get_hash"') && git show $h > /tmp/git-show-$h.diff && nvim /tmp/git-show-$h.diff)' \
+          --bind 'ctrl-b:execute(h=$(echo {} | '"$get_hash"'); git br $h)' \
+          --bind 'ctrl-f:change-header(⏳ Fetching...)+execute-silent(git fetch --all)+reload(eval "$log_cmd" | awk -F "\t" "$awk_fmt")+change-header('"$header_browse"')' \
+          --bind 'ctrl-g:execute('"$pr_create"')' \
+          --bind 'ctrl-/:toggle-search+transform-header:echo "{fzf:header}" | grep -q "^\[BROWSE\]" && echo "'"$header_search"'" || echo "'"$header_browse"'"' \
+          --bind 'esc:disable-search+clear-query+change-header('"$header_browse"')'
+else
+  eval "$log_cmd" | awk -F '\t' "$awk_fmt"
+fi
