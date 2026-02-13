@@ -98,6 +98,32 @@ if readonly
   DB.run("SET default_transaction_read_only = on")
 end
 
+# Sequel::Model 확장 (scope DSL + YAML export)
+class Sequel::Model
+  def self.scope(name, body)
+    define_singleton_method(name) { |*args| dataset.instance_exec(*args, &body) }
+  end
+
+  def self.default_scope(&block)
+    set_dataset(dataset.instance_exec(&block))
+  end
+
+  def to_yaml(path = nil)
+    require 'yaml'
+    yaml = self.values.to_yaml
+    path ? (File.write(File.expand_path(path), yaml); puts "Saved to #{path}") : puts(yaml)
+  end
+end
+
+class Sequel::Dataset
+  def to_yaml(path = nil)
+    require 'yaml'
+    data = self.all
+    yaml = data.to_yaml
+    path ? (File.write(File.expand_path(path), yaml); puts "Saved to #{path} (#{data.size} rows)") : puts(yaml)
+  end
+end
+
 # 테이블별 Model 클래스 자동 생성
 DB.tables.each do |table_name|
   begin
@@ -106,6 +132,59 @@ DB.tables.each do |table_name|
   rescue
     # schema_migrations 등 모델화 불가능한 테이블 무시
   end
+end
+
+# FK 기반 자동 association 설정 (belongs_to + has_many)
+def table_to_class(table_name)
+  Object.const_get(table_name.to_s.split('_').map(&:capitalize).join)
+rescue NameError
+  nil
+end
+
+DB.tables.each do |table_name|
+  model = table_to_class(table_name)
+  next unless model
+
+  DB.foreign_key_list(table_name).each do |fk|
+    assoc_name = fk[:columns].first.to_s.sub(/_id$/, '').to_sym
+    ref_class = table_to_class(fk[:table])
+    next unless ref_class
+    model.many_to_one assoc_name, class: ref_class  # belongs_to
+    ref_class.one_to_many table_name, class: model  # has_many
+  end
+end
+
+# _id 컬럼 기반 추론 (FK 없는 경우 fallback)
+all_tables = DB.tables.map(&:to_s)
+DB.tables.each do |table_name|
+  model = table_to_class(table_name)
+  next unless model
+
+  DB[table_name].columns.each do |col|
+    col_s = col.to_s
+    next unless col_s.end_with?('_id')
+    assoc_name = col_s.sub(/_id$/, '')
+    next if model.associations.include?(assoc_name.to_sym)  # 이미 FK로 설정됨
+
+    # 테이블명 추론: user -> users, category -> categories
+    ref_table = all_tables.find do |t|
+      t == "#{assoc_name}s" || t == "#{assoc_name}es" ||
+      t == assoc_name.sub(/y$/, 'ies') || t == assoc_name
+    end
+    ref_class = table_to_class(ref_table) if ref_table
+    next unless ref_class
+
+    model.many_to_one assoc_name.to_sym, class: ref_class, key: col
+    ref_class.one_to_many table_name, class: model, key: col
+  end
+end
+
+# 프로젝트별 설정 로드 (.db-irb.rb)
+project_dir = ENV['MISE_PROJECT_ROOT'] || ENV['PWD'] || Dir.pwd
+local_config = File.join(project_dir, '.db-irb.rb')
+if File.exist?(local_config)
+  load local_config
+  puts "\e[36mLoaded #{local_config}\e[0m"
 end
 
 # Export 함수들
@@ -147,15 +226,12 @@ def to_clip(dataset)
   puts "Copied to clipboard (#{data.size} rows)"
 end
 
-# Import 함수들 (readonly 체크는 READONLY 상수 사용)
-def from_csv(table, path, run: false)
+# Import 함수들
+def import_data(table, data, run:)
   if defined?(READONLY) && READONLY
     puts "\e[31mRead-only mode. Restart with --write\e[0m"
     return
   end
-  require 'csv'
-
-  data = CSV.read(File.expand_path(path), headers: true).map(&:to_h)
   return puts "Empty file" if data.empty?
 
   # 컬럼 검증
@@ -178,35 +254,17 @@ def from_csv(table, path, run: false)
   puts "\e[32mInserted #{data.size} rows\e[0m"
 end
 
-def from_json(table, path, run: false)
-  if defined?(READONLY) && READONLY
-    puts "\e[31mRead-only mode. Restart with --write\e[0m"
-    return
-  end
-  require 'json'
+def from_csv(table, path, run: false)
+  require 'csv'
+  data = CSV.read(File.expand_path(path), headers: true).map(&:to_h)
+  import_data(table, data, run: run)
+end
 
+def from_json(table, path, run: false)
+  require 'json'
   data = JSON.parse(File.read(File.expand_path(path)))
   data = [data] unless data.is_a?(Array)
-  return puts "Empty file" if data.empty?
-
-  # 컬럼 검증
-  table_cols = DB[table].columns.map(&:to_s)
-  file_cols = data.first.keys
-  missing = file_cols - table_cols
-  puts "\e[33mWarning: unknown columns #{missing}\e[0m" if missing.any?
-
-  # 미리보기
-  puts "#{data.size} rows to insert into :#{table}"
-  puts "Sample: #{data.first.inspect}"
-
-  unless run
-    puts "\e[36mDry-run. Add 'run: true' to execute\e[0m"
-    return
-  end
-
-  valid_data = data.map { |h| h.select { |k, _| table_cols.include?(k) } }
-  DB[table].multi_insert(valid_data.map { |h| h.transform_keys(&:to_sym) })
-  puts "\e[32mInserted #{data.size} rows\e[0m"
+  import_data(table, data, run: run)
 end
 
 # Schema helper - 보기 좋게 포맷팅
@@ -277,11 +335,26 @@ def help
     to_csv  User.all, "~/a.csv"   # 파일 저장
     to_json User.limit(10)        # JSON 출력
     to_clip User.first(5)         # 클립보드 복사
+    User.first.to_yaml            # YAML 출력 (단일)
+    User.limit(5).to_yaml "~/a.yml"  # YAML 파일 저장
 
     [Import] (--write 필요 for prod)
     from_csv :users, "~/a.csv"              # dry-run
     from_csv :users, "~/a.csv", run: true   # 실제 insert
     from_json :users, "~/a.json", run: true
+
+    [Custom Scope]
+    .db-irb.rb 파일에 정의:
+      class Asset
+        default_scope { order(Sequel.desc(:created_at)).limit(100) }
+        scope :video, -> { where(asset_type: 'VIDEO') }
+      end
+    사용: Asset.video.all
+
+    [Association] (FK 기반 자동 설정)
+    asset.user          # belongs_to (user_id FK)
+    user.assets         # has_many (역방향)
+    Asset.associations  # 설정된 association 목록
   HELP
 end
 
@@ -298,39 +371,26 @@ readonly_msg = readonly ? " \e[33m[READ-ONLY]\e[0m" : ""
 
 # -e 모드: 코드 실행 후 종료
 if exec_code
+  def print_table(rows)
+    return puts "No rows" if rows.empty?
+    cols = rows.first.keys
+    widths = cols.map { |c| [c.to_s.length, rows.map { |r| r[c].to_s.length }.max].max }
+    puts cols.zip(widths).map { |c, w| c.to_s.ljust(w) }.join("  ")
+    puts widths.map { |w| "-" * w }.join("  ")
+    rows.each { |r| puts cols.zip(widths).map { |c, w| r[c].to_s.ljust(w) }.join("  ") }
+    puts "(#{rows.size} rows)"
+  end
+
   def print_result(result)
     case result
-    when Sequel::Dataset
-      rows = result.all
-      return puts "No rows" if rows.empty?
-
-      cols = rows.first.keys
-      widths = cols.map { |c| [c.to_s.length, rows.map { |r| r[c].to_s.length }.max].max }
-
-      # 헤더
-      puts cols.zip(widths).map { |c, w| c.to_s.ljust(w) }.join("  ")
-      puts widths.map { |w| "-" * w }.join("  ")
-      # 데이터
-      rows.each { |r| puts cols.zip(widths).map { |c, w| r[c].to_s.ljust(w) }.join("  ") }
-      puts "(#{rows.size} rows)"
+    when Sequel::Dataset then print_table(result.all)
     when Array
-      if result.empty?
-        puts "[]"
-      elsif result.first.is_a?(Hash)
-        # Hash 배열도 테이블로
-        cols = result.first.keys
-        widths = cols.map { |c| [c.to_s.length, result.map { |r| r[c].to_s.length }.max].max }
-        puts cols.zip(widths).map { |c, w| c.to_s.ljust(w) }.join("  ")
-        puts widths.map { |w| "-" * w }.join("  ")
-        result.each { |r| puts cols.zip(widths).map { |c, w| r[c].to_s.ljust(w) }.join("  ") }
-        puts "(#{result.size} rows)"
-      else
-        pp result
+      if result.empty? then puts "[]"
+      elsif result.first.is_a?(Hash) then print_table(result)
+      else pp result
       end
-    when nil
-      # 출력 안 함
-    else
-      pp result
+    when nil then nil
+    else pp result
     end
   end
 
@@ -365,6 +425,24 @@ prompt_prefix = "#{prompt_color}[#{env_label}:#{db_name}#{ro_indicator}]\e[0m"
 ENV['IRB_USE_AUTOCOMPLETE'] = 'false'
 
 IRB.setup(nil)
+
+# History 설정 (프로젝트별 분리)
+history_file = File.join(project_dir, '.db-irb_history')
+IRB.conf[:SAVE_HISTORY] = 1000
+IRB.conf[:HISTORY_FILE] = history_file
+
+# History 로드
+if File.exist?(history_file)
+  File.readlines(history_file).each { |line| Reline::HISTORY << line.chomp }
+end
+
+# History 저장 (종료 시)
+at_exit do
+  File.open(history_file, 'w') do |f|
+    Reline::HISTORY.to_a.last(1000).each { |line| f.puts line }
+  end
+end
+
 IRB.conf[:PROMPT][:SEQUEL] = {
   PROMPT_I: "#{prompt_prefix} > ",
   PROMPT_S: "#{prompt_prefix} %l> ",
