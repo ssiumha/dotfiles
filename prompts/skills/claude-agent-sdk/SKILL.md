@@ -1,6 +1,6 @@
 ---
 name: claude-agent-sdk
-description: Python으로 Claude Agent SDK 에이전트를 구축할 때 사용. 커스텀 도구, 훅, 서브에이전트, MCP 연동 코드를 생성합니다.
+description: Builds Claude Agent SDK agents in Python. Use when creating custom tools, hooks, sub-agents, or MCP integrations with the Agent SDK. Python 에이전트 구축 시 사용.
 ---
 
 # Claude Agent SDK

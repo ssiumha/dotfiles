@@ -1,9 +1,7 @@
 ---
 name: code-metrics
 description: Measures code structure metrics (coupling, cohesion, complexity, call graph). Use when analyzing code quality quantitatively, checking architectural health, or reviewing structural changes.
-invocable: true
-invocable_description: Analyzes code structure metrics for changed or specified files. Use to measure coupling, cohesion, complexity, and call relationships.
-arguments: "[--scope=changed|staged|all|<path>]"
+argument-hint: "[--scope=changed|staged|all|<path>]"
 ---
 
 # Code Metrics

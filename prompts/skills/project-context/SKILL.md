@@ -1,6 +1,6 @@
 ---
 name: project-context
-description: Generates project context (code structure + architecture intent). Use when starting sessions, after major refactoring, or when delegating complex work to agents.
+description: Generates project context (code structure + architecture intent). Use when starting sessions, understanding codebase structure, onboarding to a project, after major refactoring, or delegating complex work to agents.
 ---
 
 # Project Context

@@ -1,6 +1,6 @@
 ---
 name: vuln-assessment
-description: KISA/금융보안원 기술적 취약점 점검항목 제공. 서버(Unix/Windows), 웹 모의해킹 점검 시 사용.
+description: KISA/금융보안원 기술적 취약점 점검항목 제공. Use when performing vulnerability assessments, server security audits (Unix/Windows), or web penetration testing checklists.
 user_invocable: true
 ---
 

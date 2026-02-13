@@ -1,6 +1,6 @@
 ---
 name: tdd-practices
-description: Applies TDD workflow to development. Use when implementing features, fixing bugs, or refactoring with test-first approach. Detects AI anti-patterns.
+description: Applies TDD workflow to development. Use when writing tests before code, implementing features test-first, fixing bugs via failing test, or refactoring with test coverage. Detects AI anti-patterns.
 ---
 
 # TDD Practices

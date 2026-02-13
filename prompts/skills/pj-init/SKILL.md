@@ -1,8 +1,6 @@
 ---
 name: pj-init
 description: Initializes multi-repo workspace CLAUDE.md. Use when managing multiple repositories as a single project.
-invocable: true
-invocable_description: Initializes CLAUDE.md for multi-repo workspace. Use when setting up new ~/pj/{project}/ workspace or updating repository structure.
 ---
 
 # PJ Init

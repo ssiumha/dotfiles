@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: 방향 수정 신호 감지 및 세션 전체 회고. "아니/잠깐/근데" 감지 시 자동 트리거, /reflect 또는 "회고해줘"로 세션 회고.
+description: 방향 수정 신호 감지 및 세션 전체 회고. Use when detecting course correction signals ("아니/잠깐/근데"), session retrospective, or reviewing overall progress. /reflect 또는 "회고해줘"로 수동 호출.
 ---
 
 # Reflect

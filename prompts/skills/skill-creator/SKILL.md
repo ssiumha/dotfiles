@@ -243,9 +243,60 @@ Skill 생성 전 **구체적 사용 예시**를 수집하십시오. 예시가 �
    ---
    ```
 
-   **예시**:
+   **description 예시**:
    - `description: Generates API documentation. Use when documenting endpoints or creating OpenAPI specs.`
    - `description: Resolves Git rebase conflicts. Use when encountering merge conflicts during rebase operations.`
+
+   **선택 필드** — 필요한 경우에만 추가:
+
+   **`argument-hint`** — `/` 자동완성 시 인자 힌트. 본문에서 `$ARGUMENTS` (전체) 또는 `$0`, `$1` (개별)로 참조.
+   ```yaml
+   argument-hint: "[issue-number]"
+   # 본문: Fix GitHub issue $ARGUMENTS following our standards.
+   ```
+
+   **`disable-model-invocation: true`** — Claude 자동 호출 차단, 사용자 `/`만 허용. description이 컨텍스트에 로드되지 않음. 배포, 커밋 등 부작용이 큰 작업용.
+   ```yaml
+   disable-model-invocation: true
+   ```
+
+   **`user-invocable: false`** — `/` 메뉴에서 숨김, Claude만 자동 호출. description은 컨텍스트에 로드됨. Claude용 배경 지식/레퍼런스용.
+   ```yaml
+   user-invocable: false
+   ```
+
+   **`allowed-tools`** — skill 실행 중 사용 가능한 도구 제한. 와일드카드 지원.
+   ```yaml
+   allowed-tools: Read, Grep, Glob              # 읽기 전용
+   allowed-tools: Bash(git *), Read, Grep, Glob  # Git만 허용
+   ```
+
+   **`model`** — skill 실행 시 모델 오버라이드. 종료 후 원래 모델 복귀.
+   ```yaml
+   model: claude-haiku-4-5-20251001   # 간단한 작업은 저비용
+   model: claude-opus-4-6             # 복잡한 분석은 고성능
+   ```
+
+   **`context: fork`** + **`agent`** — 독립 서브에이전트에서 격리 실행. 메인 대화 이력 미접근, 컨텍스트 보호.
+   ```yaml
+   context: fork
+   agent: Explore    # Explore, Plan, general-purpose, 또는 커스텀
+   ```
+
+   **`hooks`** — skill 실행 중에만 활성화되는 훅. 종료 시 해제.
+   ```yaml
+   hooks:
+     - matcher: Bash
+       hooks:
+         - type: command
+           command: "~/.claude/hooks/check-secrets.sh"
+           timeout: 30
+   ```
+
+   **동적 컨텍스트** — 본문에서 `` !`command` `` 으로 셸 명령 전처리 (Claude 이전 실행, 출력 삽입):
+   ```markdown
+   PR diff: !`gh pr diff`
+   ```
 
    **핵심 철학** (선택, 여러 방법 중 선택 시):
    ```markdown

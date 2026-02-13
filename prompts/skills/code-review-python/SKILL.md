@@ -1,6 +1,6 @@
 ---
 name: code-review-python
-description: Python type hints and typing review checklist. Injected into code-reviewer agent for Python projects.
+description: Python type hints and typing review checklist. Injected into code-reviewer agent for Python projects. Use when reviewing Python code for type safety or auditing type annotations.
 ---
 
 # Python Type Safety Review

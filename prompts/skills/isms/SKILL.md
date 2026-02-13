@@ -1,6 +1,6 @@
 ---
 name: isms
-description: ISMS-P 인증 준비 지원. 항목 조회, 체크리스트 생성, 이행 계획 수립.
+description: ISMS-P certification preparation. Use when preparing for ISMS-P audit, checking compliance items, creating checklists, or planning implementation. 인증 준비, 항목 조회.
 user_invocable: true
 ---
 

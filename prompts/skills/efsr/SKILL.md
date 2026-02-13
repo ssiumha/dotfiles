@@ -1,6 +1,6 @@
 ---
 name: efsr
-description: 전자금융감독규정 인증 준비 지원. 조항 조회, 체크리스트 생성, 이행 계획 수립.
+description: 전자금융감독규정(EFSR) compliance preparation. Use when preparing for electronic financial regulation audit, 조항 조회, 체크리스트 생성, or 이행 계획 수립.
 user_invocable: true
 ---
 

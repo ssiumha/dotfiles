@@ -93,6 +93,26 @@ Write {위치}/{name}.md
 
 ## Critical Design Principles
 
+### 0. 역할 설계: SRP + OCP
+
+**SRP (Single Responsibility)**: 하나의 agent는 하나의 책임만 갖는다.
+- 책임이 둘 이상이면 agent를 나눈다
+- "~도 하고 ~도 한다"면 분리 신호
+
+**OCP (Open/Closed)**: 새 능력이 필요하면 기존 agent를 수정하지 말고 새로 만들어 조합한다.
+- 기존 agent에 역할을 추가하기보다 새 agent를 만든다
+- 기존 agent 확장은 같은 책임의 깊이를 더할 때만 (예: code-reviewer에 DB 호환성 체크 추가)
+
+```
+# 좋은 예: 각자 하나의 책임
+code-explorer  → 탐색
+code-reviewer  → 리뷰
+test-verifier  → 테스트 검증
+
+# 나쁜 예: 하나가 여러 책임
+code-helper    → 탐색 + 리뷰 + 테스트 + 커밋 정리
+```
+
 ### 1. description이 핵심
 
 description은 **automatic delegation**의 트리거입니다:

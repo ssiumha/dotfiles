@@ -1,6 +1,6 @@
 ---
 skill: skill-installer
-description: 프로젝트별 외부 skill 설치 및 관리
+description: 프로젝트별 외부 skill 설치 및 관리. Use when installing external skills, importing skills from other projects, or managing skill dependencies.
 version: 1.0.0
 author: Claude Code
 created: 2026-01-19

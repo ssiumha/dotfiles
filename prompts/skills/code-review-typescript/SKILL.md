@@ -1,6 +1,6 @@
 ---
 name: code-review-typescript
-description: TypeScript type safety review checklist. Injected into code-reviewer agent for TypeScript/TSX projects.
+description: TypeScript type safety review checklist. Injected into code-reviewer agent for TypeScript/TSX projects. Use when reviewing TypeScript code for type safety or auditing type definitions.
 ---
 
 # TypeScript Type Safety Review

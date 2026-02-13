@@ -17,12 +17,12 @@ status: planning  # planning | in-progress | completed
 
 ## Tasks
 
-| ID | Task | Why | Verify | 의존성 | 리스크 | Docs |
-|----|------|-----|--------|--------|--------|------|
-| task-1 | {title} | {why} | {verify} | - | low | |
-| task-2 | {title} | {why} | {verify} | task-1 | medium | ✓ |
-| task-3 | {title} | {why} | {verify} | - | low | |
-| task-4 | {title} | {why} | {verify} | task-2, task-3 | low | |
+| ID | Task | Why | Verify | Skills | 의존성 | 리스크 | Docs |
+|----|------|-----|--------|--------|--------|--------|------|
+| task-1 | {title} | {why} | {verify} | - | - | low | |
+| task-2 | {title} | {why} | {verify} | tdd-practices, review-security | task-1 | medium | ✓ |
+| task-3 | {title} | {why} | {verify} | - | - | low | |
+| task-4 | {title} | {why} | {verify} | lint-audit | task-2, task-3 | low | |
 
 ## 의존성 그래프
 

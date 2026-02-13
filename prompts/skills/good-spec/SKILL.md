@@ -1,6 +1,6 @@
 ---
 name: good-spec
-description: Provides spec writing guidelines with 6 core areas and boundary system. Use when writing SPEC.md, defining requirements, or creating project specifications.
+description: Provides spec writing guidelines with 6 core areas and boundary system. Use when writing SPEC.md, defining requirements, creating project specifications, 요구사항 정의, or 스펙 작성.
 ---
 
 # Good Spec

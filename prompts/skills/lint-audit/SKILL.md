@@ -1,8 +1,6 @@
 ---
 name: lint-audit
 description: Audits lint errors, type checks, dead code, and commit hygiene. Use when checking project health, running lint/type checks, or finding unused code.
-invocable: true
-invocable_description: Runs lint audit and generates actionable report. Use to check lint errors, type coverage, dead code, and commit hygiene.
 ---
 
 # Lint Audit

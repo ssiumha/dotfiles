@@ -1,6 +1,6 @@
 ---
 name: plan-creator
-description: Creates dependency-based task execution plans with parallel orchestration. Use when 3+ tasks with dependencies, unclear execution order, or parallel work identification needed.
+description: Creates dependency-based task execution plans with parallel orchestration. Use when planning complex tasks, breaking down work into steps, 계획 수립, 3+ tasks with dependencies, unclear execution order, or parallel work identification needed.
 ---
 
 # Plan Creator
@@ -56,10 +56,17 @@ description: Creates dependency-based task execution plans with parallel orchest
    - 각 task는 독립적으로 검증 가능
    - 이름은 동사로 시작
 
-2. **각 Task 작성 시 ✓ Task 검증** (매 task마다)
+2. **Skill 매핑** (system-reminder의 available skills 참조)
+   - 각 task에 적용할 skill을 탐색하여 `skills:` 필드에 기록
+   - system-reminder에 로드된 skill 목록에서 description 기반으로 매칭
+   - 매칭 skill이 없으면 생략 (빈 배열)
+   - 실행 시 `/skill-name`으로 호출하는 가이드 역할
+
+3. **각 Task 작성 시 ✓ Task 검증** (매 task마다)
    - [ ] `why`: 이 task가 필요한 이유
    - [ ] `verify`: 완료 확인 방법 (측정 가능하게)
    - [ ] `blockedBy`: 논리적인가? (실제 선행 필요한 task만)
+   - [ ] `skills`: 매칭 skill이 적절한가?
    - [ ] `risk`: 적절한가?
    - [ ] `docs`: 문서 갱신 필요 여부 (선택)
 
@@ -97,8 +104,8 @@ description: Creates dependency-based task execution plans with parallel orchest
 
 실행 플로우:
   Group 1: [task-1, task-3] → ✓ 검증 → 커밋
-  Group 2: [task-2] → ✓ 검증 → 커밋
-  Group 3: [task-4] → ✓ 검증 → 커밋 (최종)
+  Group 2: [task-2] → /tdd-practices → /review-security → ✓ 검증 → 커밋
+  Group 3: [task-4] → /lint-audit → ✓ 검증 → 커밋 (최종)
 
 크리티컬 패스: task-1 → task-2 → task-4
 ⚠️ 리스크: task-2 (medium)
@@ -152,26 +159,29 @@ tasks:
   - id: schema
     title: "DB 스키마 설계"
     why: "데이터 구조 정의 필요"
+    skills: []
     risk: low
 
   - id: api
     title: "API 라우트 구현"
     why: "CRUD 기능 핵심"
     blockedBy: [schema]
+    skills: [review-security]
     risk: medium
 
   - id: test
     title: "테스트 작성"
     why: "완료 조건 충족"
     blockedBy: [api]
+    skills: [tdd-practices]
     risk: low
 
 === GUIDANCE ===
 📋 계획 완료: todo-api
 실행 플로우:
   Group 1: [schema] → ✓ 검증 → 커밋
-  Group 2: [api] → ✓ 검증 → 커밋
-  Group 3: [test] → ✓ 검증 → 커밋 (최종)
+  Group 2: [api] → /review-security → ✓ 검증 → 커밋
+  Group 3: [test] → /tdd-practices → ✓ 검증 → 커밋 (최종)
 크리티컬 패스: schema → api → test
 ```
 
@@ -184,25 +194,29 @@ User: /plan-creator 마이크로서비스 분리
 tasks:
   - id: define-boundaries
     title: "서비스 경계 정의"
+    skills: [ddd-design-docs]
     blockedBy: []
 
   - id: setup-user-service
     title: "User 서비스 설정"
     blockedBy: [define-boundaries]
+    skills: [devops-docker]
 
   - id: setup-order-service
     title: "Order 서비스 설정"
     blockedBy: [define-boundaries]
+    skills: [devops-docker]
 
   - id: setup-gateway
     title: "API Gateway 설정"
     blockedBy: [setup-user-service, setup-order-service]
+    skills: [review-security]
 
 === GUIDANCE ===
 실행 플로우:
-  Group 1: [define-boundaries] → ✓ 검증 → 커밋
-  Group 2: [setup-user-service, setup-order-service] → ✓ 검증 → 커밋 (동시 가능!)
-  Group 3: [setup-gateway] → ✓ 검증 → 커밋 (최종)
+  Group 1: [define-boundaries] → /ddd-design-docs → ✓ 검증 → 커밋
+  Group 2: [setup-user-service, setup-order-service] → /devops-docker → ✓ 검증 → 커밋 (동시 가능!)
+  Group 3: [setup-gateway] → /review-security → ✓ 검증 → 커밋 (최종)
 ```
 
 ## Technical Details
