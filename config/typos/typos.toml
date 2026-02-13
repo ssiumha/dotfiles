@@ -1,0 +1,7 @@
+[default]
+extend-ignore-re = [
+  "[A-Z][A-Z_]+=.*",      # ENV_VAR="value" 패턴 무시
+  "[a-zA-Z0-9+/=]{20,}",  # base64/credential 문자열 무시
+]
+
+[default.extend-words]
