@@ -30,7 +30,13 @@ endsnippet
 snippet env ""
 TEST="{{ env.HOME }}/test"
 TEST2="{{ get_env(name='TEST', default='20') }}/test"
-TEST2="{{ cwd | basename }}/test"
+FROM_RUN_PATH="{{ cwd | basename }}/test"
+BASE_CONFIG_FILE="{{ config_root }}/test"
+endsnippet
+
+snippet monorepo ""
+[settings]
+experimental_monorepo_root = true
 endsnippet
 
 snippet template_filter "using tera"
