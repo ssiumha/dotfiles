@@ -1,0 +1,18 @@
+#!/bin/bash
+# tmux-sysinfo: cached system info for tmux status bar
+# Expensive commands run every INTERVAL seconds, otherwise returns cache.
+CACHE=/tmp/tmux-sysinfo
+INTERVAL=5
+
+if [[ -f "$CACHE" ]] && (( $(date +%s) - $(stat -f %m "$CACHE") < INTERVAL )); then
+  cat "$CACHE"
+  exit 0
+fi
+
+cpu=$(uptime | awk '{print $(NF-2)}')
+ncpu=$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+mem=$(mise run osx:memory 2>/dev/null)
+disk=$(df -h ~ | tail -1 | awk '{print $4}')
+
+printf 'CPU:%s/%s MEM:%s DISK:%s' "$cpu" "$ncpu" "$mem" "$disk" > "$CACHE"
+cat "$CACHE"

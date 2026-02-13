@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# tmux-pick: extract urls, paths, hashes, IPs from all visible panes and pick via fzf
+# Usage: tmux-pick [capture|extract|debug|filter|pick(default)]
+set -euo pipefail
+
+# --- config ---
+
+cwd=$(tmux display-message -p '#{pane_current_path}')
+
+patterns=(
+  'https?://[^ )"'"'"'>]+'                                            # URL
+  '[a-zA-Z0-9_./-]{2,}\.[a-zA-Z0-9]{1,10}:[0-9]+(:[0-9]+)?'         # file:line:col
+  '~?/[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)+'                            # file path (2+ segments, supports ~/)
+  '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?'        # IP(:port)
+)
+
+# --- functions ---
+
+capture() {
+  local content=""
+  while IFS= read -r pane_id; do
+    content+=$(tmux capture-pane -p -t "$pane_id")
+    content+=$'\n'
+  done < <(tmux list-panes -F '#{pane_id}')
+  printf '%s' "$content"
+}
+
+extract() {
+  local combined
+  combined=$(IFS='|'; echo "${patterns[*]}")
+  rg -oN "$combined" | awk '!seen[$0]++'
+}
+
+resolve_path() {
+  local p="$1"
+  [[ "$p" == '~/'* ]] && p="${HOME}/${p:2}"
+  [[ "$p" != /* ]] && p="${cwd}/${p}"
+  echo "$p"
+}
+
+classify() {
+  local m="$1"
+  if [[ "$m" == http://* || "$m" == https://* ]]; then
+    echo "url"
+  elif [[ "$m" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3} ]]; then
+    echo "ip"
+  else
+    echo "path"
+  fi
+}
+
+do_filter() {
+  while IFS= read -r m; do
+    [ -z "$m" ] && continue
+    local kind
+    kind=$(classify "$m")
+    if [[ "$kind" == "path" ]]; then
+      local file_part="${m%%:*}"
+      local resolved
+      resolved=$(resolve_path "$file_part")
+      [ -e "$resolved" ] && echo "$m"
+    else
+      echo "$m"
+    fi
+  done
+}
+
+do_debug() {
+  while IFS= read -r m; do
+    [ -z "$m" ] && continue
+    local kind
+    kind=$(classify "$m")
+    if [[ "$kind" == "path" ]]; then
+      local file_part="${m%%:*}"
+      local resolved
+      resolved=$(resolve_path "$file_part")
+      if [ -e "$resolved" ]; then
+        printf '[%s] PASS  %s → %s\n' "$kind" "$m" "$resolved"
+      else
+        printf '[%s] FAIL  %s → %s (not found)\n' "$kind" "$m" "$resolved"
+      fi
+    else
+      printf '[%s] PASS  %s\n' "$kind" "$m"
+    fi
+  done
+}
+
+do_pick() {
+  local matches
+  matches=$(capture | extract | do_filter) || true
+  [ -z "$matches" ] && { tmux display-message "No matches found"; exit 0; }
+
+  local preview_cmd='
+    m={}
+    file="${m%%:*}"
+    [[ "$file" == "~/"* ]] && file="'"${HOME}"'/${file:2}"
+    [[ "$file" != /* ]] && file="'"${cwd}"'/${file}"
+    if [[ -f "$file" ]]; then
+      line=0
+      [[ "$m" == *:* ]] && line="${m#*:}" && line="${line%%:*}"
+      bat --color=always --style=numbers --highlight-line "$line" "$file" 2>/dev/null
+    elif [[ -d "$file" ]]; then
+      eza --tree --level=2 --icons "$file" 2>/dev/null || ls -la "$file"
+    else
+      echo "$m"
+    fi
+  '
+
+  local selected
+  selected=$(echo "$matches" | fzf --tmux 80%,60% \
+    --header "enter:copy  ctrl-o:open  ctrl-v:vim(tab)" \
+    --expect "ctrl-o,ctrl-v" \
+    --preview "$preview_cmd" \
+    --preview-window "bottom,60%") || true
+
+  [ -z "$selected" ] && exit 0
+
+  local key pick
+  key=$(echo "$selected" | head -1)
+  pick=$(echo "$selected" | tail -1)
+  [ -z "$pick" ] && exit 0
+
+  local file
+  case "$key" in
+    ctrl-o)
+      open "$pick"
+      ;;
+    ctrl-v)
+      file=$(resolve_path "${pick%%:*}")
+      local sock
+      sock=$(find /tmp -maxdepth 2 -name '*.0' -path '*/nvim.*' 2>/dev/null | head -1)
+      if [ -n "$sock" ]; then
+        if [[ "$pick" == *:* ]]; then
+          local line="${pick#*:}"; line="${line%%:*}"
+          nvim --server "$sock" --remote-send "<Esc>:tabedit +${line} ${file}<CR>"
+        else
+          nvim --server "$sock" --remote-send "<Esc>:tabedit ${file}<CR>"
+        fi
+      else
+        if [[ "$pick" == *:* ]]; then
+          local line="${pick#*:}"; line="${line%%:*}"
+          tmux new-window "nvim +${line} ${file}"
+        else
+          tmux new-window "nvim ${file}"
+        fi
+      fi
+      ;;
+    *)
+      echo -n "$pick" | pbcopy
+      tmux display-message "Copied: $pick"
+      ;;
+  esac
+}
+
+# --- main ---
+
+cmd="${1:-pick}"
+case "$cmd" in
+  capture) capture ;;
+  extract) capture | extract ;;
+  debug)   capture | extract | do_debug ;;
+  filter)  capture | extract | do_filter ;;
+  pick)    do_pick ;;
+  *)       echo "Usage: tmux-pick [capture|extract|debug|filter|pick]"; exit 1 ;;
+esac
