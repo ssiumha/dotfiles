@@ -54,6 +54,13 @@ task 'install:rc' do
   FileUtils.mkdir_p File.join(DOT_CACHE, 'vim/undo')
   FileUtils.mkdir_p File.join(DOT_CACHE, 'vim/swap')
   FileUtils.mkdir_p File.join(DOT_CACHE, 'vim/backup')
+
+  # XDG directories (defined in zshrc)
+  %w[.local/share .local/state .local/run].each do |dir|
+    path = File.join(Dir.home, dir)
+    FileUtils.mkdir_p(path)
+    puts "created #{dir}" unless Dir.exist?(path)
+  end
 end
 
 desc 'symlink configs'
@@ -225,6 +232,7 @@ task 'install:claude' do
     'prompts/AGENTS.md' => 'CLAUDE.md',
     'prompts/commands' => 'commands',
     'prompts/hooks' => 'hooks',
+    'prompts/rules' => 'rules',
     'prompts/skills' => 'skills',
   }
 
@@ -276,10 +284,15 @@ task 'install:claude' do
     'ast-grep/claude-skill' => 'ast-grep',
   }
 
+  # 공식 마켓플레이스 플러그인 (anthropics/claude-plugins-official)
+  official_plugins = %w[typescript-lsp pyright-lsp]
+
   installed_plugins_path = File.join(DOT_CLAUDE, 'plugins/installed_plugins.json')
-  installed_plugins = if File.exist?(installed_plugins_path)
-                        JSON.parse(File.read(installed_plugins_path))['plugins']&.keys || []
-                      else
+  installed_plugins = begin
+                        data = JSON.parse(File.read(installed_plugins_path))
+                        data['plugins']&.keys || []
+                      rescue JSON::ParserError, Errno::ENOENT => e
+                        puts "plugins        : failed to read installed_plugins.json (#{e.message})"
                         []
                       end
 
@@ -302,6 +315,19 @@ task 'install:claude' do
     end
 
     puts "plugin         : installing #{plugin}"
+    unless system("claude plugin install #{plugin}")
+      puts "plugin         : failed to install #{plugin}"
+    end
+  end
+
+  # 공식 마켓플레이스 플러그인 설치
+  official_plugins.each do |plugin|
+    if installed_plugins.any? { |k| k.start_with?("#{plugin}@") }
+      puts "plugin         : #{plugin} already installed"
+      next
+    end
+
+    puts "plugin         : installing #{plugin} (official)"
     unless system("claude plugin install #{plugin}")
       puts "plugin         : failed to install #{plugin}"
     end
