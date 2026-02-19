@@ -70,6 +70,7 @@ local presets = {}
 ---@param preset StargazerPreset
 function M.register_preset(name, preset)
   presets[name] = preset
+  _merged_preset_cache = nil
 end
 
 -------------------------------------------------------------------------------
@@ -175,6 +176,30 @@ M.register_preset('nestjs', {
     { glob = '**/*.ts', pattern = '@(Injectable|Controller)\\(' },
   },
 })
+
+-------------------------------------------------------------------------------
+-- Merged Preset (모든 프리셋 합산 — preset 미감지 시 fallback)
+-------------------------------------------------------------------------------
+
+local _merged_preset_cache = nil
+
+--- 등록된 모든 프리셋의 패턴을 병합하여 범용 프리셋 생성
+---@return StargazerPreset
+local function build_merged_preset()
+  if _merged_preset_cache then return _merged_preset_cache end
+  local merged = { router = {}, model = {}, domain = {} }
+  for _, preset in pairs(presets) do
+    for _, key in ipairs({ 'router', 'model', 'domain' }) do
+      if preset[key] then
+        for _, entry in ipairs(preset[key]) do
+          merged[key][#merged[key] + 1] = entry
+        end
+      end
+    end
+  end
+  _merged_preset_cache = merged
+  return merged
+end
 
 -------------------------------------------------------------------------------
 -- Framework Detection
@@ -286,12 +311,15 @@ local RG_EXCLUDE = table.concat({
   '--glob !dist/',
   '--glob !node_modules/',
   '--glob !.git/',
+  '--glob !**/logs/',
   '--glob !*.xml',
   '--glob !*.md',
   '--glob !*.json',
+  '--glob !*.jsonl',
   '--glob !*.yaml',
   '--glob !*.yml',
   '--glob !*.lock',
+  '--glob !*.log',
   '--glob !*.min.*',
 }, ' ')
 
@@ -325,7 +353,11 @@ local function build_rg_cmd(entries, filter)
   local cmd = table.concat(parts, '; ')
 
   if filter and filter ~= '' then
-    cmd = string.format('{ %s; } | grep -i %s', cmd, vim.fn.shellescape(filter))
+    -- content-only 필터: filepath:linenum: 이후만 매칭 (경로 오탐 방지)
+    cmd = string.format(
+      "{ %s; } | awk -v q=%s 'match($0,/:[0-9]+:/){if(index(tolower(substr($0,RSTART+RLENGTH)),q)>0)print}'",
+      cmd, vim.fn.shellescape(filter:lower())
+    )
   end
 
   return cmd
@@ -600,24 +632,26 @@ M.register_mode({
     local q = parsed.query
     local parts = {}
 
-    -- 1. 구조적 정의 검색
-    parts[#parts + 1] = string.format(
-      '%s %s',
-      RG_SEARCH,
-      vim.fn.shellescape('(class|interface|type|enum|entity|schema|model)\\s+.*' .. q)
-    )
-
-    -- 2. 프리셋 model 패턴
+    -- 1. model 패턴 (가장 specific — 정의 위치)
     if ctx.preset and ctx.preset.model then
       parts[#parts + 1] = build_rg_cmd(ctx.preset.model, q)
     end
 
-    -- 3. 프리셋 domain 패턴
+    -- 2. domain 패턴 (service, repository 등)
     if ctx.preset and ctx.preset.domain then
       parts[#parts + 1] = build_rg_cmd(ctx.preset.domain, q)
     end
 
-    return '{ ' .. table.concat(parts, '; ') .. '; } | sort -t: -k1,1 -k2,2n -u'
+    -- 3. 구조적 정의 (가장 broad — fallback)
+    parts[#parts + 1] = string.format(
+      '%s %s',
+      RG_SEARCH,
+      vim.fn.shellescape('(class|interface|type|enum)\\s+.*' .. q)
+    )
+
+    -- order-preserving dedup: parts 순서 = relevance tier
+    return "{ " .. table.concat(parts, '; ')
+      .. "; } | awk -F: '!seen[$1\":\"$2]++'"
   end,
 })
 
@@ -676,6 +710,14 @@ end
 local function build_context(root)
   root = root or vim.fn.getcwd()
   local preset_name, preset = detect_framework(root)
+
+  -- preset 미감지 시 모든 프리셋 합산 fallback (shallow copy로 캐시 보호)
+  if not preset then
+    preset_name = '_merged'
+    local merged = build_merged_preset()
+    preset = { router = merged.router, model = merged.model, domain = merged.domain }
+  end
+
   local user_config = load_user_config(root)
 
   -- 유저 설정이 프리셋을 오버라이드
