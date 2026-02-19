@@ -1,0 +1,8 @@
+src/service/WalletService.java:3:1:@Service
+src/model/Wallet.java:5:1:@Table(name = "wallets")
+src/model/Wallet.java:10:1:public class Wallet extends BaseEntity {
+src/model/Wallet.java:10:1:public class Wallet extends BaseEntity {
+src/client/WalletsClient.java:8:1:public class WalletsClient implements Client {
+src/util/WalletHelper.java:15:1:import Wallet
+src/config/AppConfig.java:20:1:public class AppConfig {
+src/model/Wallet.java:3:1:@Entity

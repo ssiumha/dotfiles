@@ -487,6 +487,7 @@ M.keyword_matcher = keyword_matcher
 M.prefix_keyword_match = prefix_keyword_match
 
 -- Testing
+M._build_rank_awk = build_rank_awk
 M._detect_framework = detect_framework
 M._modes = modes
 M._presets = presets
