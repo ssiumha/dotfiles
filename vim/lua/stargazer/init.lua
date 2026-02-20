@@ -30,6 +30,9 @@ local function help_cmd()
   local lines = {
     '\027[1m── Stargazer ──\027[0m',
     '',
+    '\027[36m!\027[0m              git: changed & staged files',
+    '\027[36m! \027[90mquery\027[0m      git: search within changes',
+    '',
     '\027[36m&\027[0m              context: definitions in current domain',
     '\027[36m& \027[90mquery\027[0m      context: search within current domain',
     '',
@@ -44,7 +47,7 @@ local function help_cmd()
     '',
     '\027[33mPascalCase\027[0m     infer: find all related code',
     '',
-    '\027[90mpipe: query | filter  ─  keywords: model, service, route ...\027[0m',
+    '\027[90mpipe: query | filter  ─  folder: query @path/  ─  exclude: @!path/ or | !filter\027[0m',
   }
   return 'printf ' .. vim.fn.shellescape(table.concat(lines, '\n'))
 end
@@ -165,18 +168,5 @@ function M.setup(opts)
     end
   end
 end
-
--------------------------------------------------------------------------------
--- Expose internals for testing / composition
--------------------------------------------------------------------------------
-
-M._parse_query = M.parse_query
-M._detect_framework = M._detect_framework
-M._build_rg_cmd = M.build_rg_cmd
-M._build_sg_cmd = M.build_sg_cmd
-M._dispatch = M.dispatch
-M._build_context = M.build_context
-M._extract_domain = M.extract_domain
--- M._modes, M._presets — already on engine
 
 return M

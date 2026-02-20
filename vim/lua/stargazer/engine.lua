@@ -176,9 +176,27 @@ local function parse_query(raw)
 
   -- 파이프: "POST /health | wallet" → 모드 검색 + grep 체인
   local base, pipe_filter = raw:match('^(.-)%s*|%s*(.*)$')
+  local pipe_exclude
   if base and base ~= '' then
     raw = base
     if pipe_filter == '' then pipe_filter = nil end
+  end
+  -- negation: "| !filter" → exclude
+  if pipe_filter and pipe_filter:match('^!') then
+    pipe_exclude = true
+    pipe_filter = pipe_filter:sub(2):match('^%s*(.*)')
+    if pipe_filter == '' then pipe_filter = nil; pipe_exclude = nil end
+  end
+
+  -- folder filter: "@path/" → 결과를 특정 경로로 스코핑, "@!path/" → 제외
+  local folder_filter, folder_exclude
+  do
+    local before, neg, folder, after = raw:match('^(.-)@(!?)(%S+/%S*)(.*)$')
+    if folder then
+      raw = (before .. after):match('^%s*(.-)%s*$')
+      folder_filter = folder
+      if neg == '!' then folder_exclude = true end
+    end
   end
 
   local parsed
@@ -192,6 +210,9 @@ local function parse_query(raw)
 
   if not parsed then return nil end
   parsed.pipe_filter = pipe_filter
+  parsed.pipe_exclude = pipe_exclude
+  parsed.folder_filter = folder_filter
+  parsed.folder_exclude = folder_exclude
   return parsed
 end
 
@@ -391,9 +412,16 @@ local function dispatch(parsed, ctx)
     cmd = cmd .. build_rank_awk(mode_ref.rank, parsed.query)
   end
 
-  -- 파이프 체인: "POST /health | wallet" → 결과 내 grep
+  -- folder filter: 결과를 특정 경로로 스코핑 (@path/ / @!path/)
+  if parsed.folder_filter then
+    local flag = parsed.folder_exclude and '-v ' or ''
+    cmd = string.format('%s | grep %s%s', cmd, flag, vim.fn.shellescape('^' .. parsed.folder_filter))
+  end
+
+  -- 파이프 체인: "POST /health | wallet" / "| !filter" → 결과 내 grep / exclude
   if parsed.pipe_filter and parsed.pipe_filter ~= '' then
-    cmd = string.format('%s | grep -i %s', cmd, vim.fn.shellescape(parsed.pipe_filter))
+    local flag = parsed.pipe_exclude and '-v ' or ''
+    cmd = string.format('%s | grep %s-i %s', cmd, flag, vim.fn.shellescape(parsed.pipe_filter))
   end
   return cmd
 end

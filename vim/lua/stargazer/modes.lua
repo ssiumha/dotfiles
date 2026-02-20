@@ -14,7 +14,77 @@ local extract_domain = engine.extract_domain
 -- Default Modes (데이터 레지스트리 — register_mode으로 등록)
 -------------------------------------------------------------------------------
 
--- 1. Router mode (priority 10)
+-- 0. Git mode (priority 3) — git diff/staged 파일 검색
+local git_kw = keyword_matcher({ 'diff', 'staged', 'changed' })
+register_mode({
+  name = 'git',
+  priority = 3,
+  prefix = '!',
+  keywords = { 'diff', 'staged', 'changed' },
+  match = function(raw)
+    if raw:sub(1, 1) == '!' then
+      local rest = raw:sub(2):match('^%s*(.*)')
+      return { query = rest or '' }
+    end
+    local q = git_kw(raw)
+    if q then return { query = q } end
+    return nil
+  end,
+  build_cmd = function(parsed, _ctx)
+    local q = parsed.query
+    local git_files = [[{ git diff --name-only; git diff --cached --name-only; } 2>/dev/null | sort -u]]
+
+    if not q or q == '' then
+      -- No query: list changed/staged files with status
+      return [[git status --porcelain -uno 2>/dev/null | awk '{s=substr($0,1,2); f=substr($0,4); n=index(f," -> "); if(n>0) f=substr(f,n+4); gsub(/"/,"",f); print f":1:"s}']]
+    end
+
+    -- With query: search within changed/staged files
+    return string.format(
+      [[f=$(%s); [ -z "$f" ] && echo "[Stargazer] No git changes" || echo "$f" | tr '\n' '\0' | xargs -0 %s %s 2>/dev/null]],
+      git_files,
+      RG_SEARCH,
+      vim.fn.shellescape(q)
+    )
+  end,
+})
+
+-- 1. Context mode (priority 5) — 현재 파일의 도메인 기반 검색
+register_mode({
+  name = 'context',
+  priority = 5,
+  prefix = '&',
+  match = function(raw)
+    if raw:sub(1, 1) ~= '&' then return nil end
+    local rest = raw:sub(2):match('^%s*(.*)')
+    return { query = rest or '' }
+  end,
+  build_cmd = function(parsed, _ctx)
+    local domain = extract_domain()
+    if not domain then return 'echo "[Stargazer] context: 도메인을 추출할 수 없습니다"' end
+
+    local glob = string.format('**/%s/**', domain)
+    local q = parsed.query
+
+    if q and q ~= '' then
+      return string.format(
+        '%s --glob %s %s',
+        RG_SEARCH,
+        vim.fn.shellescape(glob),
+        vim.fn.shellescape(q)
+      )
+    end
+
+    return string.format(
+      '%s --glob %s %s',
+      RG_SEARCH,
+      vim.fn.shellescape(glob),
+      vim.fn.shellescape('(class|interface|def|function|type|export)\\s+\\w+')
+    )
+  end,
+})
+
+-- 2. Router mode (priority 10)
 local HTTP_METHODS = { GET = true, POST = true, PUT = true, DELETE = true, PATCH = true }
 local router_kw = keyword_matcher({ 'route', 'endpoint' })
 --- 프레임워크 미감지 시 공통 라우터 패턴
@@ -85,7 +155,7 @@ register_mode({
   end,
 })
 
--- 2. Model mode (priority 20)
+-- 3. Model mode (priority 20)
 local model_kw = keyword_matcher({ 'model', 'schema', 'entity', 'table' })
 register_mode({
   name = 'model',
@@ -106,7 +176,7 @@ register_mode({
   end,
 })
 
--- 3. Domain mode (priority 30)
+-- 4. Domain mode (priority 30)
 local domain_kw = keyword_matcher({ 'service', 'repository', 'repo', 'usecase', 'handler', 'middleware' })
 register_mode({
   name = 'domain',
@@ -130,7 +200,7 @@ register_mode({
   end,
 })
 
--- 4. Symbol mode (priority 40)
+-- 5. Symbol mode (priority 40)
 local symbol_kw = keyword_matcher({
   'def', 'fn', 'function', 'class', 'type', 'interface', 'enum', 'struct', 'trait', 'impl',
 })
@@ -158,41 +228,6 @@ register_mode({
       vim.fn.shellescape(
         '(function|class|def|fn|type|interface|enum|struct|trait|impl)\\s+' .. parsed.query
       )
-    )
-  end,
-})
-
--- 5. Context mode (priority 5) — 현재 파일의 도메인 기반 검색
-register_mode({
-  name = 'context',
-  priority = 5,
-  prefix = '&',
-  match = function(raw)
-    if raw:sub(1, 1) ~= '&' then return nil end
-    local rest = raw:sub(2):match('^%s*(.*)')
-    return { query = rest or '' }
-  end,
-  build_cmd = function(parsed, _ctx)
-    local domain = extract_domain()
-    if not domain then return 'echo "[Stargazer] context: 도메인을 추출할 수 없습니다"' end
-
-    local glob = string.format('**/%s/**', domain)
-    local q = parsed.query
-
-    if q and q ~= '' then
-      return string.format(
-        '%s --glob %s %s',
-        RG_SEARCH,
-        vim.fn.shellescape(glob),
-        vim.fn.shellescape(q)
-      )
-    end
-
-    return string.format(
-      '%s --glob %s %s',
-      RG_SEARCH,
-      vim.fn.shellescape(glob),
-      vim.fn.shellescape('(class|interface|def|function|type|export)\\s+\\w+')
     )
   end,
 })
