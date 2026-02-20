@@ -6,8 +6,10 @@ config/nvim/pack
 config/nvim/plugin
 config/zed
 config/claude/**
+config/raycast/**
 .netrwhist
 !config/zed/keymap.json
 !config/zed/settings.json
 !config/claude/commands/**
 !config/claude/roles/**
+!config/raycast/scripts/**

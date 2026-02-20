@@ -101,6 +101,7 @@ runtime note/dataview.vim
 runtime note/complete.vim
 runtime note/outline.vim
 runtime note/move.vim
+runtime note/bookmark.vim
 
 augroup MyMarkdown
   autocmd!
@@ -123,6 +124,7 @@ augroup MyMarkdown
   autocmd FileType markdown nnoremap <buffer> <c-c><c-o> :call MarkdownOutline()<cr>
   autocmd FileType markdown nnoremap <buffer> <c-c><c-w> :MoveFileFzf<cr>
   autocmd FileType markdown nnoremap <buffer> <c-c><c-t> :call TransformUrlFzf()<cr>
+  autocmd FileType markdown nnoremap <buffer> <M-b> :BookmarkPick<cr>
 
   autocmd FileType markdown nnoremap <buffer> <C-c>. :PickDateAtCursor<CR>
   autocmd FileType markdown inoremap <buffer> <C-c>. <c-o>:PickDateAtCursor<CR>
