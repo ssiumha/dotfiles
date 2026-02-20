@@ -63,6 +63,8 @@
 [format]
   pretty = basic
 [alias]
+  wt = worktree
+
   d = diff
   ds = diff --staged
   dss = !DELTA_FEATURES=+side-by-side git diff --staged
