@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# bmf - bookmark fzf: harvest and open links from ~/org markdown files
+# Usage:
+#   bmf              # interactive pick (default)
+#   bmf harvest      # dump all links (TSV)
+#   bmf --popup      # popup mode (for tmux display-popup)
+set -euo pipefail
+
+ORG_DIR="${ORG_DIR:-$HOME/org}"
+
+# --- options ---
+
+BMF_POPUP=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --popup) BMF_POPUP=1; shift ;;
+    *) break ;;
+  esac
+done
+
+if [[ "$BMF_POPUP" -eq 1 ]]; then
+  unset FZF_TMUX FZF_TMUX_OPTS FZF_TMUX_HEIGHT
+  export FZF_DEFAULT_OPTS="--layout=reverse --border $(echo "${FZF_DEFAULT_OPTS:-}" | sed -E 's/--tmux[= ][^ ]*//g; s/--tmux//g')"
+fi
+
+# --- harvest ---
+# Output: display\ttarget\tsource (tab-separated, deduped by target)
+
+harvest() {
+  local org="$ORG_DIR"
+  local t=$'\t'
+
+  {
+    # [name](https://url) — named external links (with line context)
+    rg -N '\[([^\]]+)\]\((https?://[^)]+)\)' \
+      --glob '*.md' "$org" 2>/dev/null \
+      | sed "s|^$org/||" \
+      | awk -v t="$t" '{
+          idx=index($0,":")
+          file=substr($0,1,idx-1)
+          line=substr($0,idx+1)
+          if(match(line,/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/)){
+            full=substr(line,RSTART,RLENGTH)
+            name=full; sub(/^\[/,"",name); sub(/\].*$/,"",name)
+            url=full; sub(/^[^(]*\(/,"",url); sub(/\)$/,"",url)
+            ctx=line
+            gsub(/\[[^\]]*\]\([^)]*\)/,"",ctx)
+            gsub(/- \[.\] /,"",ctx)
+            gsub(/🗓️[^ ]*/,"",ctx)
+            gsub(/➕[^ ]*/,"",ctx)
+            gsub(/^ +| +$/,"",ctx)
+            gsub(/^[-*>#|,. ]+$/,"",ctx)
+            if(length(name)<=8 && length(ctx)>0)
+              printf "%s" t "%s" t "%s\n", ctx, url, file
+            else
+              printf "%s" t "%s" t "%s\n", name, url, file
+          }
+        }' || true
+
+    # [name](local_path) — named local links (with line context, exclude http, anchors)
+    rg -N '\[([^\]]+)\]\(([^)#][^)]*)\)' \
+      --glob '*.md' "$org" 2>/dev/null \
+      | sed "s|^$org/||" \
+      | awk -v t="$t" '{
+          idx=index($0,":")
+          file=substr($0,1,idx-1)
+          line=substr($0,idx+1)
+          if(match(line,/\[([^\]]+)\]\(([^)#][^)]*)\)/)){
+            full=substr(line,RSTART,RLENGTH)
+            name=full; sub(/^\[/,"",name); sub(/\].*$/,"",name)
+            url=full; sub(/^[^(]*\(/,"",url); sub(/\)$/,"",url)
+            if(url ~ /^https?:\/\//) next
+            ctx=line
+            gsub(/\[[^\]]*\]\([^)]*\)/,"",ctx)
+            gsub(/- \[.\] /,"",ctx)
+            gsub(/🗓️[^ ]*/,"",ctx)
+            gsub(/➕[^ ]*/,"",ctx)
+            gsub(/^ +| +$/,"",ctx)
+            gsub(/^[-*>#|,. ]+$/,"",ctx)
+            if(length(name)<=8 && length(ctx)>0)
+              printf "%s" t "%s" t "%s\n", ctx, url, file
+            else
+              printf "%s" t "%s" t "%s\n", name, url, file
+          }
+        }' || true
+
+    # [[wikilink]] — wiki-style links
+    rg -oN '\[\[([^\]]+)\]\]' --replace $'$1\t$1.md' \
+      --glob '*.md' "$org" 2>/dev/null \
+      | sed "s|^$org/||" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
+
+    # onetab: url | title
+    rg -oN '^(https?://\S+)\s+\|\s*(.+)$' --replace $'$2\t$1' \
+      --glob '*.md' "$org" 2>/dev/null \
+      | sed "s|^$org/||" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
+
+    # onetab: url | (no title)
+    rg -oN '^(https?://\S+)\s+\|\s*$' --replace $'$1\t$1' \
+      --glob '*.md' "$org" 2>/dev/null \
+      | sed "s|^$org/||" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
+
+    # bare URLs (last — named links win dedup)
+    rg -oN 'https?://[^\s)>\]"]+' --glob '*.md' "$org" 2>/dev/null \
+      | sed "s|^$org/||" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\2${t}\\1|" || true
+
+  } | awk -F'\t' '!seen[$2]++ {
+    name = $1; target = $2; source = $3
+    domain = ""
+    if (target ~ /^https?:\/\//) {
+      domain = target
+      sub(/^https?:\/\//, "", domain)
+      sub(/\/.*/, "", domain)
+    }
+    if (domain != "" && name != target)
+      printf "%s  \033[2m%s\033[0m\t%s\t%s\n", name, domain, target, source
+    else
+      printf "%s\t%s\t%s\n", name, target, source
+  }'
+}
+
+# --- resolve ---
+
+resolve() {
+  local target="$1"
+  case "$target" in
+    http://*|https://*) echo "$target" ;;
+    ~/*) echo "${HOME}/${target:2}" ;;
+    /*) echo "$target" ;;
+    *) echo "$ORG_DIR/$target" ;;
+  esac
+}
+
+# --- pick ---
+
+pick() {
+  local mode_file cache_file
+  mode_file=$(mktemp)
+  cache_file=$(mktemp)
+  echo "all" > "$mode_file"
+  harvest > "$cache_file"
+  trap "rm -f $mode_file $cache_file" EXIT
+
+  local bind_cycle="cur=\$(cat $mode_file); if [ \"\$cur\" = all ]; then echo url; elif [ \"\$cur\" = url ]; then echo local; else echo all; fi > $mode_file"
+  local bind_reload="mode=\$(cat $mode_file); if [ \"\$mode\" = url ]; then awk -F'\t' '\$2 ~ /^https?:\/\//' $cache_file; elif [ \"\$mode\" = local ]; then awk -F'\t' '\$2 !~ /^https?:\/\//' $cache_file; else cat $cache_file; fi"
+  local bind_header="mode=\$(cat $mode_file); printf '[%s] enter:open  ctrl-y:copy  ctrl-e:nvim  ctrl-t:filter' \$(echo \$mode | tr a-z A-Z)"
+
+  local selected
+  selected=$(cat "$cache_file" | fzf \
+    --prompt="bm> " \
+    --ansi \
+    --delimiter="\t" \
+    --with-nth=1 \
+    --header='[ALL] enter:open  ctrl-y:copy  ctrl-e:nvim  ctrl-t:filter' \
+    --expect="ctrl-y,ctrl-e" \
+    --bind "ctrl-t:execute-silent($bind_cycle)+reload($bind_reload)+transform-header($bind_header)" \
+    --preview='
+      target={2}; source={3}
+      org='"'$ORG_DIR'"'
+      home='"'$HOME'"'
+      if [[ "$target" == http://* || "$target" == https://* ]]; then
+        src_path="$org/$source"
+        printf "\033[1;34m%s\033[0m\n" "$target"
+        printf "\033[2m%s\033[0m\n\n" "$source"
+        if [[ -f "$src_path" ]]; then
+          line=$(rg -Fn "$target" "$src_path" 2>/dev/null | head -1 | cut -d: -f1)
+          if [[ -n "$line" ]]; then
+            heading=$(head -n "$line" "$src_path" | grep "^#" | tail -1)
+            [[ -n "$heading" ]] && printf "\033[1;33m%s\033[0m\n" "$heading"
+            echo "---"
+            start=$((line - 5)); [[ $start -lt 1 ]] && start=1
+            fin=$((line + 5))
+            bat --color=always --style=numbers --highlight-line "$line" \
+              -r "$start:$fin" "$src_path" 2>/dev/null || sed -n "${start},${fin}p" "$src_path"
+          fi
+        fi
+      else
+        resolved="$target"
+        [[ "$resolved" != /* && "$resolved" != ~/* ]] && resolved="$org/$resolved"
+        [[ "$resolved" == ~/* ]] && resolved="$home/${resolved:2}"
+        if [[ -f "$resolved" ]]; then
+          bat --color=always --style=numbers "$resolved" 2>/dev/null || cat "$resolved"
+        else
+          printf "%s\n" "$resolved"
+        fi
+      fi
+    ' \
+    --preview-window='bottom:50%:wrap' \
+  ) || exit 0
+
+  [[ -z "$selected" ]] && exit 0
+
+  local key pick
+  key=$(head -1 <<< "$selected")
+  pick=$(tail -1 <<< "$selected")
+  [[ -z "$pick" ]] && exit 0
+
+  local target source resolved
+  target=$(printf '%s' "$pick" | cut -f2)
+  source=$(printf '%s' "$pick" | cut -f3)
+  resolved=$(resolve "$target")
+
+  case "$key" in
+    ctrl-y)
+      printf '%s' "$resolved" | pbcopy
+      [[ -n "${TMUX:-}" ]] && tmux display-message "Copied: $resolved"
+      ;;
+    ctrl-e)
+      local src_path="$ORG_DIR/$source"
+      local sock
+      sock=$(find /tmp -maxdepth 2 -name '*.0' -path '*/nvim.*' 2>/dev/null | head -1)
+      if [[ -n "${sock:-}" ]]; then
+        nvim --server "$sock" --remote-send "<Esc>:tabedit ${src_path}<CR>"
+      elif [[ -n "${TMUX:-}" ]]; then
+        tmux new-window "nvim '${src_path}'"
+      else
+        ${EDITOR:-nvim} "$src_path"
+      fi
+      ;;
+    *)
+      case "$resolved" in
+        http://*|https://*)
+          open "$resolved"
+          ;;
+        *)
+          local line
+          line=$(rg -Fn "$target" "$ORG_DIR/$source" 2>/dev/null | head -1 | cut -d: -f1)
+          mvim --remote-tab-silent ${line:+"+$line"} "$resolved"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+# --- main ---
+
+cmd="${1:-pick}"
+case "$cmd" in
+  harvest) harvest ;;
+  pick)    pick ;;
+  *)       echo "Usage: bmf [--popup] [harvest|pick]"; exit 1 ;;
+esac
