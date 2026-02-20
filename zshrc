@@ -315,7 +315,7 @@ then
   zinit ice wait"0" silent; zinit light zsh-users/zsh-autosuggestions
   zinit ice wait"0" silent; zinit light zsh-users/zsh-completions
   zinit ice wait"0" silent; zinit light zsh-users/zsh-syntax-highlighting
-  zinit ice wait"2" silent; zinit light chitoku-k/fzf-zsh-completions
+  zinit ice wait"2" silent atload'unfunction _fzf_complete_gh 2>/dev/null'; zinit light chitoku-k/fzf-zsh-completions
   zinit ice wait"0" silent from"gh" as"program" pick"bin/*"; zinit light reegnz/jq-zsh-plugin
 else
   command -v git &>/dev/null \
@@ -472,6 +472,19 @@ _fzf_complete_m_post() {
   awk '{print $1}'
 }
 
+_fzf_complete_ghrepo() {
+  local org=$1; shift
+  _fzf_complete --ansi --delimiter=$'\t' --nth=1 --header="$org" \
+    --bind='ctrl-o:execute-silent(open https://github.com/{1})' -- "$@" < <(
+    gh repo list "$org" --limit 200 --json nameWithOwner,description,primaryLanguage,isPrivate \
+      --jq '.[] | "\(.nameWithOwner)\t\(.description // "")\t\(.primaryLanguage.name // "")\t\(if .isPrivate then "prv" else "" end)"' 2>/dev/null |
+    awk -F'\t' '{printf "%s\t\033[90m%s\033[0m\t\033[33m%s\033[0m\t\033[31m%s\033[0m\n", $1, $2, $3, $4}'
+  )
+}
+_fzf_complete_ghrepo_post() {
+  awk -F'\t' '{print $1}'
+}
+
 #### history
 _fzf_select_history_widget() {
   BUFFER="$(history | perl -e 'print reverse <>' |
@@ -596,12 +609,20 @@ _fzf_my_completion_hook() {
   prefix=$1
   lbuf=$2
 
+  # gh repo clone <org>/ → list repos from org (with description + language)
+  # fzf widget splits: lbuf="gh repo clone " prefix="myorg/"
+  if [[ "$lbuf" == *'gh repo clone '* ]] && [[ "$prefix" =~ '^([^/ ]+)/' ]]; then
+    local org="${match[1]}"
+    _fzf_complete_ghrepo "$org" "$lbuf"
+    return 0
+  fi
+
   # 명령어 기반 completion 체크 (파이프라인 고려)
   local last_cmd="${lbuf##*|}"
   local cmd_word="${${last_cmd## }%% *}"
   if type "_fzf_complete_${cmd_word}" &>/dev/null; then
     prefix="$prefix" eval "_fzf_complete_${cmd_word}" ${(q)lbuf}
-    return 0
+    return $?
   fi
 
   case $prefix in
