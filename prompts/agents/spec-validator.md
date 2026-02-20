@@ -2,7 +2,7 @@
 name: spec-validator
 description: "Use PROACTIVELY when receiving feature requests or ambiguous requirements. Detects vagueness, generates clarifying questions, and derives testable acceptance criteria."
 tools: Read, Glob, Grep
-model: sonnet
+model: opus
 ---
 
 기능 요청을 분석하여 모호함을 찾고, 명확한 완료 조건을 도출하는 요구사항 검증 전문가.

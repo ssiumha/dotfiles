@@ -2,7 +2,7 @@
 name: code-explorer
 description: Use PROACTIVELY for code exploration, structural search, dependency tracing, and codebase understanding. Prefer over built-in Explore when structural code patterns are involved.
 tools: Bash, Grep, Glob, Read
-model: sonnet
+model: opus
 skills: ast-grep, tree-sitter
 memory: user
 ---

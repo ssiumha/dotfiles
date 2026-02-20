@@ -1,6 +1,6 @@
 ---
 name: ci-cd
-description: Sets up CI/CD workflows both locally (Justfile, lint, test) and remotely (GitHub Actions, GitLab CI). Use for test automation, pre-commit hooks, or deployment pipelines.
+description: Sets up CI/CD workflows locally (Justfile, lint, test) and GitLab CI pipelines. Use for test automation, pre-commit hooks, or local CI setup. For GitHub Actions, use github-action skill.
 ---
 
 # CI/CD
@@ -26,15 +26,15 @@ description: Sets up CI/CD workflows both locally (Justfile, lint, test) and rem
 
 2. **리소스 로드**
    - 로컬 CI: Read resources/01-local-ci.md
-   - 원격 CI/CD: Read resources/02-ci-cd-pipelines.md
+   - GitLab CI: Read resources/02-ci-cd-pipelines.md
+   - GitHub Actions: `/github-action` skill 사용
    - 언어별: Read resources/languages/typescript.md (현재 TypeScript만 지원)
 
 3. **설정 생성**
    - justfile 생성/수정
    - 언어별 lint 설정 (biome.json 등)
    - E2E용 compose.yaml
-   - .github/workflows/ci.yml 또는 .gitlab-ci.yml
-   - 캐싱 및 service container 설정
+   - .gitlab-ci.yml (GitHub Actions는 `/github-action` skill로 위임)
 
 4. **검증**
    - just lint, just test 실행 확인
@@ -49,7 +49,7 @@ description: Sets up CI/CD workflows both locally (Justfile, lint, test) and rem
 | justfile, task runner | 01-local-ci.md |
 | pre-commit, hooks | 01-local-ci.md |
 | CI/CD, 파이프라인 | 02-ci-cd-pipelines.md |
-| GitHub Actions | 02-ci-cd-pipelines.md |
+| GitHub Actions | → `/github-action` skill |
 | GitLab CI | 02-ci-cd-pipelines.md |
 | 캐싱, cache | 02-ci-cd-pipelines.md |
 | TypeScript + lint/test | languages/typescript.md |
@@ -58,18 +58,21 @@ description: Sets up CI/CD workflows both locally (Justfile, lint, test) and rem
 
 ### 로컬 + 원격 CI 통합 설정
 User: "TypeScript 프로젝트에 lint, test 자동화하고 GitHub Actions 설정"
-→ Read 01-local-ci.md + languages/typescript.md + 02-ci-cd-pipelines.md
-→ justfile, biome.json, .github/workflows/ci.yml 생성
-→ just lint, just test 확인
+→ Read 01-local-ci.md + languages/typescript.md
+→ justfile, biome.json 생성 + just lint, just test 확인
+→ GitHub Actions: `/github-action` skill 호출
 
-### GitHub Actions만 설정
+### GitHub Actions 설정
 User: "GitHub Actions로 CI/CD 파이프라인 만들어줘"
+→ `/github-action` skill로 위임
+
+### GitLab CI 설정
+User: "GitLab CI 파이프라인 만들어줘"
 → Read 02-ci-cd-pipelines.md
-→ .github/workflows/ci.yml 생성
-→ 캐싱 + service container 설정
+→ .gitlab-ci.yml 생성
 
 ## Technical Details
 
 - `resources/01-local-ci.md`: Justfile 패턴, E2E 테스트
-- `resources/02-ci-cd-pipelines.md`: GitHub Actions, GitLab CI 패턴
+- `resources/02-ci-cd-pipelines.md`: GitLab CI 패턴 (GitHub Actions → `/github-action` skill)
 - `resources/languages/typescript.md`: Biome, Vitest/Jest

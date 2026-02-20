@@ -2,7 +2,7 @@
 name: tidy-commit
 description: Use PROACTIVELY at phase completion or task end. Organizes changes into logical commit units, suggests commit separation or fixup.
 tools: Read, Grep, Glob, Bash
-model: haiku
+model: opus
 ---
 
 커밋을 논리적 단위로 정리하는 전문 agent.

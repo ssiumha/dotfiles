@@ -2,7 +2,7 @@
 name: code-reviewer
 description: Use PROACTIVELY after code changes (2+ files modified), before commits, when reviewing PRs. Analyzes quality, security, performance, scalability, DB compatibility.
 tools: Read, Glob, Grep
-model: sonnet
+model: opus
 skills: literate-docs, code-review-python, code-review-typescript
 memory: user
 ---

@@ -2,7 +2,7 @@
 name: skill-suggester
 description: "Use PROACTIVELY when detecting reusable patterns during work. Triggers on repeated workflows (3+), long instructions (20+ lines), or checklist patterns. Suggests organizing them into skills."
 tools: Read, Glob, Grep
-model: sonnet
+model: opus
 memory: user
 ---
 

@@ -2,7 +2,7 @@
 name: test-verifier
 description: "Use PROACTIVELY after tests pass. Verifies test independence, detects overfitting to implementation details, and evaluates test quality and requirement coverage."
 tools: Read, Glob, Grep
-model: sonnet
+model: opus
 ---
 
 구현 코드와 독립적으로 테스트를 검증하는 전문가. Overfitting 방지 및 테스트 품질 보장.
