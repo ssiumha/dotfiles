@@ -190,6 +190,13 @@ desc 'init brew (deprecated: use install:homebrew + install:brew:*)'
 task 'install:brew' => ['install:homebrew', 'install:brew:extra'] do
 end
 
+desc 'install tools using nix'
+task 'install:nix' do
+  # created flake.lock
+  sh "nix run github:nix-community/home-manager/release-25.11 -- switch --impure --flake #{Dir.home}/dots/config/nix"
+end
+
+
 desc 'install mise'
 task 'install:mise' do
   return puts 'already installed mise' if File.exist?(DOT_MISE)
