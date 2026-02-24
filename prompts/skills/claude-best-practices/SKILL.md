@@ -61,7 +61,7 @@ return ResponseEntity.ok(data);
 사용자를 블로킹하지 않으면서 오래 걸리는 작업을 처리:
 
 ```
-Task(subagent_type="general-purpose", run_in_background=true, prompt="...")
+Task(subagent_type="general-purpose", model="opus", run_in_background=true, prompt="...")
 → output_file 경로 반환
 → Read로 결과 확인 또는 tail로 진행 상황 모니터링
 ```

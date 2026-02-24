@@ -2,17 +2,16 @@
 
 ## SHA 고정
 
-Third-party action은 반드시 full SHA로 고정:
+First-party GitHub actions(`actions/*`, `github/*`)는 **태그 사용**. 그 외 커뮤니티/third-party 액션만 SHA 고정:
 
 ```yaml
-# Bad - 태그는 변경 가능
+# First-party (actions/*) - 태그 사용
 - uses: actions/checkout@v4
+- uses: actions/setup-java@v4.7.1
 
-# Good - SHA 고정 + 태그 코멘트
-- uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+# Third-party - 반드시 SHA 고정 + 태그 코멘트
+- uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf  # v2.11.1
 ```
-
-First-party GitHub actions(actions/*)는 태그 사용 가능. 커뮤니티 액션은 항상 SHA 고정.
 
 2025년 `tj-actions/changed-files` 공급망 공격(CVE-2025-30066)이 이 원칙을 재확인.
 
@@ -126,6 +125,38 @@ jobs:
 
 ---
 
+## Secrets 조건부 사용 제한
+
+`secrets`는 `if:` 조건에서 사용 불가 (job-level, step-level 모두). 사용 시 워크플로우 파싱 실패.
+
+| `if:` 위치 | 사용 가능 context |
+|---|---|
+| `jobs.<id>.if` | `github`, `needs`, `vars`, `inputs` |
+| `steps[*].if` | 위 + `env`, `strategy`, `matrix`, `job`, `runner`, `steps` |
+
+`secrets`는 `steps[*].env`, `steps[*].with`, `steps[*].run`에서만 사용 가능.
+
+```yaml
+# Bad - 워크플로우 파싱 실패 (name 미인식, schedule 미실행)
+jobs:
+  notify:
+    if: ${{ secrets.SLACK_TOKEN != '' }}
+
+# Good 1 - Repository Variables (job-level 조건)
+jobs:
+  notify:
+    if: vars.ENABLE_SLACK == 'true'
+
+# Good 2 - env 변환 (step-level 조건)
+steps:
+  - env:
+      TOKEN: ${{ secrets.SLACK_TOKEN }}
+    if: env.TOKEN != null
+    run: curl ...
+```
+
+---
+
 ## pull_request_target 주의
 
 `pull_request_target`은 base repo 컨텍스트에서 실행 → write 권한 있음.
@@ -193,3 +224,4 @@ jobs:
 - [ ] `pull_request_target` 사용 시 코드 격리
 - [ ] cloud auth는 OIDC (secrets에 long-lived credentials 금지)
 - [ ] secrets는 environment 또는 org 레벨 관리
+- [ ] `if:` 조건에서 `secrets` 직접 참조 금지 → `vars` 또는 `env` 변환 사용

@@ -61,7 +61,7 @@ TeamCreate:
   team_name: {project}-dev
   description: {프로젝트명} 개발
 
-Task(subagent_type={role}, name={role}, team_name={project}-dev):
+Task(subagent_type={role}, model="opus", name={role}, team_name={project}-dev):
   prompt: "담당 태스크: #{ID} {제목}.
            작업 범위: {파일/모듈}.
            완료 기준: {검증 방법}.
@@ -86,11 +86,11 @@ Task(subagent_type={role}, name={role}, team_name={project}-dev):
 
 ```
 # 사전 조사
-Task(subagent_type=code-explorer):
+Task(subagent_type=code-explorer, model="opus"):
   prompt: "{모듈} 관련 파일과 의존성 분석. 파일경로:라인 형식으로 요약."
 
 # 팀원 스폰
-Task(subagent_type={role}, name={name}, team_name={project}-dev):
+Task(subagent_type={role}, model="opus", name={name}, team_name={project}-dev):
   prompt: "태스크: {제목}
            대상: {파일 목록}
            완료 기준: {구체적 조건}
@@ -112,7 +112,7 @@ Task(subagent_type={role}, name={name}, team_name={project}-dev):
 ---
 name: {role}
 description: {역할 설명}
-model: sonnet
+model: opus
 memory: local
 ---
 
