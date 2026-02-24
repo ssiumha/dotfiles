@@ -217,9 +217,8 @@ call plug#begin(expand('$HOME/.local/vim/plugged'))
 
 Plug 'junegunn/fzf' ", { 'do': { -> fzf#install() } }
 Plug 'junegunn/fzf.vim'
-  let $FZF_DEFAULT_COMMAND="fd -tf --hidden --no-ignore-vcs" .
-        \ " --follow --exclude 'tmp/' --exclude 'dist/' --exclude '.bundle/' --exclude '.venv/'" .
-        \ " --exclude '.expo/'"
+  let g:fzf_vim = { 'grep_multi_line': 2 }
+  let $FZF_DEFAULT_COMMAND="fd -tf --hidden --no-ignore-vcs --follow"
   if exists('$FZF_APPEND_COMMAND')
     let $FZF_DEFAULT_COMMAND .= ' ' . $FZF_APPEND_COMMAND
   endif
@@ -364,8 +363,12 @@ Plug 'voldikss/vim-floaterm'
         \   { path -> execute('read ' . path) }, 'filepath')
   nnoremap <space>f <esc>:MySnip<cr>
 
-" Plug 'mileszs/ack.vim', { 'on': ['Ack', 'Ack!'] }  " → :Rg (fzf.vim)
-"   let g:ackprg = 'rg --vimgrep --smart-case --color=never'
+  command! -bang -nargs=* Rg
+    \ call fzf#vim#grep(
+    \   'rg --column --line-number --no-heading --color=always --smart-case'
+    \   .' --glob "!*.log" --glob "!*.lock" --glob "!*.min.*" --glob "!*.map"'
+    \   .' -- '.fzf#shellescape(<q-args>),
+    \   fzf#vim#with_preview(), <bang>0)
   nnoremap <silent> <space>a <Cmd>Rg<CR>
 
 Plug 'tpope/vim-fugitive'

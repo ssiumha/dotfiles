@@ -51,6 +51,10 @@ task 'install:rc' do
   File.write(DOT_ZSHRC, "source #{DOT_DIR}/zshrc").tap { puts 'created .zshrc' } unless File.exist?(DOT_ZSHRC)
   File.write(DOT_VIMRC, "source #{DOT_DIR}/vimrc").tap { puts 'created .vimrc' } unless File.exist?(DOT_VIMRC)
 
+  ignore_src = File.join(DOT_DIR, 'ignore')
+  ignore_dest = File.join(Dir.home, '.ignore')
+  FileUtils.ln_sf(ignore_src, ignore_dest).tap { puts 'linked .ignore' } unless File.symlink?(ignore_dest)
+
   FileUtils.mkdir_p File.join(DOT_CACHE, 'vim/undo')
   FileUtils.mkdir_p File.join(DOT_CACHE, 'vim/swap')
   FileUtils.mkdir_p File.join(DOT_CACHE, 'vim/backup')
