@@ -115,7 +115,20 @@ alias jl="JUST_JUSTFILE=justfile.local just"
 alias ghw="gh pr view --web"
 
 alias vdb="v +DBUI"
-alias flog="v +Flog"
+function flog() {
+  git rev-parse --is-inside-work-tree &>/dev/null || { echo "Not a git repository"; return 1; }
+  local opts=""
+  while [[ "$1" == -* ]]; do
+    case "$1" in
+      -a) opts="$opts -all"; shift ;;
+      *)  shift ;;
+    esac
+  done
+  if [[ -n "$1" ]]; then
+    opts="$opts -path=$1"
+  fi
+  ${EDITOR:-nvim} "+Flog$opts"
+}
 
 alias rb="ruby --disable-gems"
 
