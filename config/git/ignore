@@ -27,6 +27,8 @@ tmp
 .plan
 claude-swarm.yml
 **/.claude/settings.local.json
+**/.claude/designs/**
+**/.claude/plans/**
 
 ## asdf, env
 .direnv/

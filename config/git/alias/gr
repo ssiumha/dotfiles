@@ -77,5 +77,5 @@ if [ "$use_fzf" = true ]; then
           --bind 'ctrl-/:toggle-search+transform-header:echo "{fzf:header}" | grep -q "^\[BROWSE\]" && echo "'"$header_search"'" || echo "'"$header_browse"'"' \
           --bind 'esc:disable-search+clear-query+change-header('"$header_browse"')'
 else
-  eval "$log_cmd" | awk -F '\t' "$awk_fmt"
+  eval "$log_cmd" | awk -F '\t' "$awk_fmt" | less -S -R
 fi

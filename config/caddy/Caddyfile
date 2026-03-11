@@ -1,0 +1,6 @@
+{
+	http_port 80
+	auto_https disable_redirects
+}
+
+import routes/*.caddy

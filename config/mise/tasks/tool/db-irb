@@ -113,9 +113,41 @@ class Sequel::Model
     yaml = self.values.to_yaml
     path ? (File.write(File.expand_path(path), yaml); puts "Saved to #{path}") : puts(yaml)
   end
+
+  def self.joins(*assocs)
+    assocs.reduce(dataset) { |ds, a| ds.association_join(a) }
+  end
+
+  def self.where(*conds, &block)
+    ds = dataset
+    conds.each do |c|
+      next unless c.is_a?(Hash)
+      c.each_key do |k|
+        next unless c[k].is_a?(Hash)
+        assoc_name = association_reflections.keys.find do |name|
+          association_reflection(name).associated_class.table_name == k rescue false
+        end
+        ds = ds.association_join(assoc_name) if assoc_name
+      end
+    end
+    ds.where(*conds, &block)
+  end
 end
 
 class Sequel::Dataset
+  alias_method :_sequel_where, :where
+  def where(*conds, &block)
+    _sequel_where(*conds.map { |c|
+      next c unless c.is_a?(Hash)
+      c.each_with_object({}) do |(k, v), h|
+        if v.is_a?(Hash)
+          v.each { |col, val| h[Sequel[k][col]] = val }
+        else
+          h[k] = v
+        end
+      end
+    }, &block)
+  end
   def to_yaml(path = nil)
     require 'yaml'
     data = self.all
@@ -191,6 +223,7 @@ end
 def to_csv(dataset, path = nil)
   require 'csv'
   data = dataset.is_a?(Array) ? dataset : dataset.all
+  data = data.map { |r| r.respond_to?(:values) ? r.values : r }
   return puts "No data" if data.empty?
 
   csv = CSV.generate do |c|
@@ -209,6 +242,7 @@ end
 def to_json(dataset, path = nil)
   require 'json'
   data = dataset.is_a?(Array) ? dataset : dataset.all
+  data = data.map { |r| r.respond_to?(:values) ? r.values : r }
   json = JSON.pretty_generate(data)
 
   if path
@@ -222,6 +256,7 @@ end
 def to_clip(dataset)
   require 'json'
   data = dataset.is_a?(Array) ? dataset : dataset.all
+  data = data.map { |r| r.respond_to?(:values) ? r.values : r }
   IO.popen('pbcopy', 'w') { |io| io.puts JSON.pretty_generate(data) }
   puts "Copied to clipboard (#{data.size} rows)"
 end
@@ -269,6 +304,7 @@ end
 
 # Schema helper - 보기 좋게 포맷팅
 def schema(table)
+  table = table.table_name if table.respond_to?(:table_name)
   info = DB.schema(table)
   max_name = info.map { |name, _| name.to_s.length }.max
 
@@ -285,6 +321,7 @@ end
 
 # Foreign key helper
 def fk(table)
+  table = table.table_name if table.respond_to?(:table_name)
   fks = DB.foreign_key_list(table)
   if fks.empty?
     puts "No foreign keys on :#{table}"
@@ -298,63 +335,203 @@ def fk(table)
   nil
 end
 
+# 테이블 검색
+def tables(pattern = nil)
+  result = DB.tables.sort
+  return result unless pattern
+  pat = pattern.is_a?(Regexp) ? pattern : /#{pattern}/i
+  result.select { |t| t.to_s.match?(pat) }
+end
+
+# 테이블 요약 (count + schema + fk)
+def overview(table)
+  table = table.table_name if table.respond_to?(:table_name)
+  puts "#{DB[table].count} rows, #{DB[table].columns.size} columns"
+  schema(table)
+  fk(table)
+  nil
+end
+alias desc overview
+
+# 샘플 데이터
+def sample(target, n = 3)
+  target = target.table_name if target.respond_to?(:table_name) && target.is_a?(Class)
+  ds = target.is_a?(Symbol) ? DB[target] : target
+  ds.limit(n).all
+end
+
+# Analysis helpers
+def load_json(path)
+  require 'json'
+  JSON.parse(File.read(File.expand_path(path)), symbolize_names: true)
+end
+
+def index_by(arr, key)
+  arr.each_with_object({}) { |h, idx| idx[h[key]] = h }
+end
+
+def merge_by(arr1, arr2, key)
+  idx = index_by(arr2, key)
+  arr1.map { |h| idx[h[key]] ? h.merge(idx[h[key]]) : h }
+end
+
+def to_report(hash, path)
+  require 'json'
+  hash[:meta] ||= {}
+  hash[:meta][:generated_at] ||= Date.today.to_s
+  json = JSON.pretty_generate(hash)
+  File.write(File.expand_path(path), json)
+  puts "Report saved to #{path}"
+end
+
+# Script runner - 외부 .rb 스크립트 로드 & 실행
+def run_script(path)
+  expanded = File.expand_path(path)
+  abort "\e[31mScript not found: #{expanded}\e[0m" unless File.exist?(expanded)
+  puts "\e[36mRunning #{expanded}\e[0m"
+  load expanded
+end
+
 # Help 함수
 def help
   puts <<~HELP
-    == Sequel Cheatsheet ==
+    == db-irb Quick Reference ==
 
-    [Query]
+    [Model Naming]
+    테이블 → 클래스: split('_').map(&:capitalize).join
+      users -> User, user_settings -> UserSettings
+      ※ Rails inflector와 다름 (statuses -> Statuses, 불규칙 복수형 미처리)
+    tables              # 전체 테이블 목록 (헬퍼)
+    tables(/user/)      # 테이블 검색
+    overview :users     # count + schema + fk 한번에
+
+    [Schema & Relations]
+    schema :users                # 컬럼 상세 (타입, PK, nullable)
+    fk :orders                   # 외래키 관계
+    User.columns                 # 컬럼명 배열
+    User.associations            # [:orders, :comments, ...] 심볼 배열
+
+    [Association] (FK 기반 자동 설정 + _id 추론)
+    user.orders                  # has_many -> Array<Order>
+    user.orders_dataset          # has_many -> Dataset (lazy, 체이닝 가능)
+    order.user                   # belongs_to -> User 인스턴스 or nil
+
+    [Model vs Raw Dataset]
+    User.first                   # -> Sequel::Model 인스턴스 (.values로 Hash)
+    DB[:users].first             # -> Hash 직접 반환
+    # Model: association, scope 사용 가능 / Raw: 가볍고 단순
+
+    [Select & Filter]
     User.all / User.first / User[1]
     User.where(active: true).all
-    User.where { age > 20 }.limit(10)
-    User.order(:created_at).reverse
+    User.where { created_at > Date.today - 30 }.all
+    User.exclude(active: false)          # where의 반대
+    User.where(name: 'foo').or(name: 'bar')
+    User.select(:id, :name).all         # 특정 컬럼만
+    User.select_map(:email)             # -> ["a@b", "c@d"] 단일 컬럼 배열
+    User.distinct.select(:role).all
+    User.count / .sum(:amount) / .avg(:score)
 
-    [Create/Update/Delete]
-    User.create(name: "x")
-    user.update(name: "y")      # instance
-    User.where(...).update(...) # batch (즉시 실행!)
-    user.delete                 # callbacks 없음
+    [Join]
+    DB[:users].join(:orders, user_id: :id)
+      .select_all(:users)               # 필수! 없으면 컬럼 충돌
+      .select_append(Sequel[:orders][:total])
+      .all
 
-    [Batch 처리]
-    User.where(...).paged_each { |u| ... }  # 메모리 효율
-    DB.transaction { ... }                   # 트랜잭션
+    [Join - Rails style]
+    Member.joins(:oauth_account)
+      .where(oauth_accounts: { provider: 'google' })
+      .select_all(:members).all
+    Member.joins(:oauth_account, :team)    # 복수 join
+
+    [Auto-Join] (nested hash where → 자동 join)
+    Member.where(oauth_accounts: { provider: 'google' }).all
+      # association 매칭 → 자동 association_join
+      # joins 생략 가능. 매칭 안 되면 join 없이 SQL 에러
+
+    [Group & Aggregate]
+    Order.group_and_count(:status).all
+      # => [{status: "paid", count: 42}, ...]
+    Order.group(:user_id)
+      .select_append { sum(amount).as(total) }.all
+
+    [Order & Pagination]
+    User.order(:created_at).reverse.all
+    User.order(:created_at).limit(10).offset(20).all
+    sample :users              # limit(3).all 헬퍼
+    sample User.where(active: true), 5
 
     [Raw SQL]
     DB["SELECT * FROM users WHERE id = ?", 1].all
     DB.run("UPDATE users SET x = 1")
+    # -e에서는 DB["..."]가 shell escape 충돌 → %() 리터럴 사용:
+    #   -e 'DB[%(SELECT * FROM users WHERE id = ?), 1].all'
+    #   %()는 Ruby 쌍따옴표 문자열과 동일, 괄호 안에 " 불필요
 
-    [Schema]
-    DB.tables              # 테이블 목록
-    schema :users          # 컬럼 상세 (타입, PK, nullable)
-    fk :orders             # 외래키 관계
-    User.columns           # 컬럼명 배열
-    User.where(...).explain # 쿼리 플랜
+    [Create/Update/Delete]
+    User.create(name: "x")
+    user.update(name: "y")
+    User.where(...).update(name: "z")  # batch (즉시 실행!)
+    user.delete
 
     [Export]
-    to_csv  User.all              # 화면 출력
-    to_csv  User.all, "~/a.csv"   # 파일 저장
-    to_json User.limit(10)        # JSON 출력
-    to_clip User.first(5)         # 클립보드 복사
-    User.first.to_yaml            # YAML 출력 (단일)
-    User.limit(5).to_yaml "~/a.yml"  # YAML 파일 저장
+    to_csv  User.all              # stdout
+    to_csv  User.all, "~/a.csv"   # 파일
+    to_json User.limit(10)
+    to_clip User.first(5)         # 클립보드
+    User.first.to_yaml
+
+    [Analysis]
+    load_json "~/logs.json"              # 외부 JSON -> Ruby 배열/해시
+    index_by  users, :id                 # [{id:1,...},...] -> {1 => {...}}
+    merge_by  db_data, logs, :user_id    # 공통 키로 두 배열 머지
+    to_report({                          # 구조화된 보고서 JSON 저장
+      meta: {title: "Report"},
+      summary: {total: 100},
+      details: merged_data
+    }, "~/report.json")
+    run_script "~/analysis.rb"           # 외부 Ruby 스크립트 실행
 
     [Import] (--write 필요 for prod)
     from_csv :users, "~/a.csv"              # dry-run
     from_csv :users, "~/a.csv", run: true   # 실제 insert
-    from_json :users, "~/a.json", run: true
 
-    [Custom Scope]
-    .db-irb.rb 파일에 정의:
-      class Asset
-        default_scope { order(Sequel.desc(:created_at)).limit(100) }
-        scope :video, -> { where(asset_type: 'VIDEO') }
-      end
-    사용: Asset.video.all
+    [-e Mode]
+    mise run db:irb - <url> -e 'User.count'
+    mise run db:irb - <url> -e 'User.where(active: true).limit(5)'
+    # 출력: Dataset/Array<Hash> -> 테이블, nil -> 무시, 그 외 -> pp
+    # 여러 문장: -e 'x = User.first; x.orders.all'
+    # 주의: shell escape 때문에 Raw SQL(DB["..."]) 대신 Sequel DSL 사용
 
-    [Association] (FK 기반 자동 설정)
-    asset.user          # belongs_to (user_id FK)
-    user.assets         # has_many (역방향)
-    Asset.associations  # 설정된 association 목록
+    [Explore Workflow]
+    # 1. 테이블 목록 확인
+    tables                       # 또는 tables(/keyword/)
+    # 2. 관심 테이블 상세
+    overview :users              # count + schema + fk
+    # 3. Association 확인
+    User.associations
+    # 4. 데이터 샘플
+    sample :users
+    # 5. 분석 쿼리
+    User.group_and_count(:role).all
+
+    [Custom Helpers]
+    # .db-irb.rb에 프로젝트별 도메인 헬퍼 정의 (자동 로드)
+    # 위치: $MISE_PROJECT_ROOT/.db-irb.rb 또는 $PWD/.db-irb.rb
+    #
+    # 예시 (.db-irb.rb):
+    #   def votes_by(member_id)
+    #     Vote.where(member_id: member_id)
+    #       .order(Sequel.desc(:created_at)).all
+    #   end
+    #
+    #   def active_members
+    #     Member.where(active: true)
+    #       .where { last_login > Date.today - 30 }
+    #   end
+    #
+    # run_script으로 외부 스크립트도 실행 가능:
+    #   run_script "~/scripts/abuse_analysis.rb"
   HELP
 end
 
