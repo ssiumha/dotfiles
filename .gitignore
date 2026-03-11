@@ -1,3 +1,5 @@
+config/caddy/routes/*.caddy
+config/caddy/state.yml
 config/gh/hosts.yml
 config/k9s/aliases.yaml
 config/k9s/config.yaml
