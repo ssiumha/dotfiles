@@ -129,10 +129,10 @@ function M.open(opts)
       local dir, rest = line:match('^(.*/)(.+)$')
       if dir and rest:match('^[^/]+:%d+:') then
         local file, loc, text = rest:match('^([^:]+)(:%d[%d:]*:)(.*)')
-        if file and is_test_path(dir, file) then
-          return '\027[90m' .. dir .. '\n  ' .. file .. loc .. text .. '\027[0m'
-        end
         if file then
+          if is_test_path(dir, file) then
+            return '\027[90m' .. dir .. '\n  ' .. file .. loc .. text .. '\027[0m'
+          end
           return '\027[90m' .. dir .. '\027[0m\n  '
             .. file .. '\027[33m' .. loc .. '\027[0m' .. text
         end

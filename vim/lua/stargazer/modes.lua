@@ -114,9 +114,9 @@ register_mode({
         end
       end
     end
-    -- Path prefix: /api/users
+    -- Path prefix: /api/users → query에서 leading / 제거 (검색 유연성)
     if raw:match('^/%w') then
-      return { query = raw }
+      return { query = raw:sub(2), is_path = true }
     end
     -- Short prefix: r:users
     local rest = raw:match('^r:(.+)')
@@ -137,6 +137,18 @@ register_mode({
           cmd = string.format('%s | grep -i %s', cmd, vim.fn.shellescape(parsed.query))
         end
         return cmd
+      end
+      if parsed.is_path then
+        -- preset rg (감지된 프레임워크) + merged preset rg (모든 프레임워크 router 패턴)
+        -- WHY: Spring 감지되어도 Next.js page.tsx 등 다른 프레임워크 router 파일 함께 검색
+        local preset_cmd = build_rg_cmd(preset.router, parsed.query, { path_match = true })
+        local merged = ctx.merged_router
+        if merged and #merged > 0 then
+          local merged_cmd = build_rg_cmd(merged, parsed.query, { path_match = true })
+          -- 2>/dev/null: 매치 파일 없는 프레임워크 glob의 rg stderr 억제
+          return string.format("{ %s; %s; } 2>/dev/null | awk -F: '!seen[$1]++'", preset_cmd, merged_cmd)
+        end
+        return preset_cmd
       end
       return build_rg_cmd(preset.router, parsed.query)
     end
@@ -272,5 +284,26 @@ register_mode({
 
     -- dedup은 dispatch의 build_rank_awk가 처리
     return "{ " .. table.concat(parts, '; ') .. "; }"
+  end,
+})
+
+-- 7. Default mode (priority 100) — fallback to symbol search
+register_mode({
+  name = 'default',
+  priority = 100,
+  match = function(raw)
+    if raw and raw ~= '' then
+      return { query = raw }
+    end
+    return nil
+  end,
+  build_cmd = function(parsed, _ctx)
+    return string.format(
+      '%s %s',
+      RG_SEARCH,
+      vim.fn.shellescape(
+        '(function|class|def|fn|type|interface|enum|struct|trait|impl)\\s+' .. parsed.query
+      )
+    )
   end,
 })

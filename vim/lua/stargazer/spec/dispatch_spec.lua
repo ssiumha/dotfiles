@@ -148,6 +148,83 @@ end)
 -- router mode
 --------------------------------------------------------------------------------
 
+-- /path 쿼리 + preset: preset rg + merged preset fallback
+T.describe('dispatch: router /path with preset uses path matching', function()
+  local ctx_preset = {
+    root = '/tmp/test', preset_name = 'nextjs', has_sg = false,
+    preset = { router = {
+      { glob = 'app/**/route.{js,ts}', pattern = 'export.*(GET|POST|PUT|DELETE|PATCH)' },
+      { glob = 'app/**/page.{js,jsx,ts,tsx}', pattern = 'export default' },
+    }},
+    merged_router = {
+      { glob = 'app/**/route.{js,ts}', pattern = 'export.*(GET|POST|PUT|DELETE|PATCH)' },
+      { glob = 'app/**/page.{js,jsx,ts,tsx}', pattern = 'export default' },
+      { glob = '**/*.java', pattern = '@(Get|Post|Put|Delete|Patch|Request)Mapping' },
+    },
+  }
+  local parsed = parse('/audit-logs')
+  local cmd = dispatch(parsed, ctx_preset)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'grep.*audit%-logs', 'path filter applied')
+  T.no_match(cmd, 'awk.-RSTART', 'no content-only AWK for /path query')
+  T.no_match(cmd, 'rg %-%-files', 'no unrestricted file listing')
+end)
+
+-- 재현: Spring 모노레포에서 /audit-logs → merged preset으로 page.tsx도 검색
+T.describe('dispatch: router /path Spring monorepo finds cross-framework routes', function()
+  local ctx_spring = {
+    root = '/tmp/test', preset_name = 'spring', has_sg = false,
+    preset = { router = {
+      { glob = '**/*.java', pattern = '@(Get|Post|Put|Delete|Patch|Request)Mapping' },
+    }},
+    merged_router = {
+      { glob = '**/*.java', pattern = '@(Get|Post|Put|Delete|Patch|Request)Mapping' },
+      { glob = 'app/**/page.{js,jsx,ts,tsx}', pattern = 'export default' },
+      { glob = 'app/**/route.{js,ts}', pattern = 'export.*(GET|POST|PUT|DELETE|PATCH)' },
+    },
+  }
+  local parsed = parse('/audit-logs')
+  local cmd = dispatch(parsed, ctx_spring)
+  T.ok(cmd ~= nil, 'cmd generated')
+  -- Spring preset rg 포함
+  T.match(cmd, 'Mapping', 'preset rg command present')
+  -- merged fallback에 Next.js page glob 포함 (핵심: page.tsx 검색 가능)
+  T.match(cmd, 'page', 'merged fallback includes page.tsx glob')
+  -- 경로 필터 적용
+  T.match(cmd, 'audit%-logs', 'path filter applied')
+  -- rg --files 사용 안 함 (router 파일만 검색)
+  T.no_match(cmd, 'rg %-%-files', 'no unrestricted file listing')
+end)
+
+-- r: prefix + preset: content-only 매칭 유지
+T.describe('dispatch: router r: prefix with preset uses content filter', function()
+  local ctx_preset = {
+    root = '/tmp/test', preset_name = 'nextjs', has_sg = false,
+    preset = { router = {
+      { glob = 'app/**/route.{js,ts}', pattern = 'export.*(GET|POST|PUT|DELETE|PATCH)' },
+    }},
+  }
+  local parsed = parse('r:users')
+  local cmd = dispatch(parsed, ctx_preset)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'awk', 'r: prefix uses content-only AWK')
+end)
+
+-- GET /path + preset: method grep chain 유지 (변경 없음)
+T.describe('dispatch: router method+path with preset uses method grep', function()
+  local ctx_preset = {
+    root = '/tmp/test', preset_name = 'nextjs', has_sg = false,
+    preset = { router = {
+      { glob = 'app/**/route.{js,ts}', pattern = 'export.*(GET|POST|PUT|DELETE|PATCH)' },
+    }},
+  }
+  local parsed = parse('GET /api/users')
+  local cmd = dispatch(parsed, ctx_preset)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.no_match(cmd, 'awk.-RSTART', 'method: no content-only AWK')
+  T.match(cmd, 'grep.-GET', 'method: grep chain for HTTP method')
+end)
+
 --------------------------------------------------------------------------------
 -- git mode
 --------------------------------------------------------------------------------

@@ -12,7 +12,7 @@ T.describe('parse_query: mode dispatch', function()
   T.eq(parse('&wallet').mode, 'context', '& prefix -> context')
   T.eq(parse('!').mode, 'git', '! prefix -> git')
   T.eq(parse('model User').mode, 'model', 'keyword -> model')
-  T.eq(parse('hello world'), nil, 'no match -> nil')
+  T.eq(parse('hello world').mode, 'default', 'no specific match -> default')
 end)
 
 T.describe('parse_query: pipe filter', function()
@@ -30,6 +30,7 @@ end)
 
 T.describe('parse_query: query extraction', function()
   T.eq(parse('m:User').query, 'User', 'm:User -> query=User')
+  T.eq(parse('/users').query, 'users', '/path -> query without leading /')
   T.eq(parse('GET /api/users').query, '/api/users', 'GET path extraction')
   T.eq(parse('Wallet').query, 'Wallet', 'PascalCase query')
   T.eq(parse('model User').query, 'user', 'keyword query (lowercased)')
@@ -43,9 +44,9 @@ T.describe('parse_query: edge cases', function()
   T.eq(parse(nil).query, '', 'nil -> empty query')
 
   -- infer boundary: only strict PascalCase single word
-  T.eq(parse('wallet'), nil, 'lowercase -> not infer')
+  T.eq(parse('wallet').mode, 'default', 'lowercase -> default (not infer)')
   T.eq(parse('WALLET').mode, 'infer', 'all-caps -> infer (starts with upper)')
-  T.eq(parse('Wallet Service'), nil, 'multi-word with space -> no match')
+  T.eq(parse('Wallet Service').mode, 'default', 'multi-word -> default (not infer)')
   T.eq(parse('WalletService').mode, 'infer', 'PascalCase compound -> infer')
 
   -- git mode

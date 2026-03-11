@@ -369,7 +369,15 @@ Plug 'voldikss/vim-floaterm'
     \   .' --glob "!*.log" --glob "!*.lock" --glob "!*.min.*" --glob "!*.map"'
     \   .' -- '.fzf#shellescape(<q-args>),
     \   fzf#vim#with_preview(), <bang>0)
-  nnoremap <silent> <space>a <Cmd>Rg<CR>
+  nnoremap <silent> <space>a <Cmd>call <SID>RgCword()<CR>
+  function! s:RgCword()
+    let word = expand('<cword>')
+    call fzf#vim#grep(
+      \ 'rg --column --line-number --no-heading --color=always --smart-case'
+      \ .' --glob "!*.log" --glob "!*.lock" --glob "!*.min.*" --glob "!*.map"'
+      \ .' -- '.fzf#shellescape(word),
+      \ fzf#vim#with_preview({'options': '--query '.shellescape(word)}), 0)
+  endfunction
 
 Plug 'tpope/vim-fugitive'
 Plug 'rbong/vim-flog', { 'on': ['Flog', 'Flogsplit', 'Floggit'] }

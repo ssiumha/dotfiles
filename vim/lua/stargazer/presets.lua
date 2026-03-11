@@ -5,16 +5,16 @@ local engine = require('stargazer.engine')
 engine.register_preset('rails', {
   detect = 'Gemfile',
   router = {
-    { glob = 'config/routes.rb', pattern = '(get|post|put|patch|delete|resources|resource|match)\\s' },
-    { glob = 'app/controllers/**/*.rb', pattern = 'def\\s+(index|show|create|update|destroy|new|edit)' },
+    { glob = '**/config/routes.rb', pattern = '(get|post|put|patch|delete|resources|resource|match)\\s' },
+    { glob = '**/app/controllers/**/*.rb', pattern = 'def\\s+(index|show|create|update|destroy|new|edit)' },
   },
   model = {
-    { glob = 'app/models/**/*.rb', pattern = 'class\\s+\\w+' },
-    { glob = 'db/migrate/**/*.rb', pattern = 'create_table|add_column|change_column' },
+    { glob = '**/app/models/**/*.rb', pattern = 'class\\s+\\w+' },
+    { glob = '**/db/migrate/**/*.rb', pattern = 'create_table|add_column|change_column' },
   },
   domain = {
-    { glob = 'app/services/**/*.rb', pattern = 'class\\s+\\w+' },
-    { glob = 'app/jobs/**/*.rb', pattern = 'class\\s+\\w+' },
+    { glob = '**/app/services/**/*.rb', pattern = 'class\\s+\\w+' },
+    { glob = '**/app/jobs/**/*.rb', pattern = 'class\\s+\\w+' },
   },
 })
 
@@ -77,14 +77,15 @@ engine.register_preset('django', {
 engine.register_preset('nextjs', {
   detect = 'next.config.*',
   router = {
-    { glob = 'app/**/route.{js,ts}', pattern = 'export.*(GET|POST|PUT|DELETE|PATCH)' },
-    { glob = 'pages/api/**/*.{js,ts}', pattern = 'export\\s+default' },
+    { glob = '**/app/**/route.{js,ts}', pattern = 'export.*(GET|POST|PUT|DELETE|PATCH)' },
+    { glob = '**/app/**/page.{js,jsx,ts,tsx}', pattern = 'export default' },
+    { glob = '**/pages/api/**/*.{js,ts}', pattern = 'export\\s+default' },
   },
   model = {
     { glob = '**/*.{js,ts}', pattern = '(prisma|mongoose|sequelize)' },
   },
   domain = {
-    { glob = { 'lib/**/*.{js,ts}', 'services/**/*.{js,ts}' }, pattern = '(export|class)\\s+\\w+' },
+    { glob = { '**/lib/**/*.{js,ts}', '**/services/**/*.{js,ts}' }, pattern = '(export|class)\\s+\\w+' },
   },
 })
 

@@ -220,14 +220,8 @@ end
 -- Command Builders (공용)
 -------------------------------------------------------------------------------
 
---- 공통 제외 패턴 (빌드 산출물, 설정, 문서)
+--- 코드 검색 특화 확장자 제외 (디렉토리 제외는 ~/.ignore에서 처리)
 local RG_EXCLUDE = table.concat({
-  '--glob !target/',
-  '--glob !build/',
-  '--glob !dist/',
-  '--glob !node_modules/',
-  '--glob !.git/',
-  '--glob !**/logs/',
   '--glob !*.xml',
   '--glob !*.md',
   '--glob !*.json',
@@ -248,8 +242,10 @@ local RG_SEARCH = 'rg --line-number --column --no-heading --color=never --smart-
 --- rg 명령 빌드 (entries: {glob, pattern}[] + filter)
 ---@param entries StargazerPresetEntry[]
 ---@param filter? string
+---@param opts? {path_match?: boolean}
 ---@return string
-local function build_rg_cmd(entries, filter)
+local function build_rg_cmd(entries, filter, opts)
+  opts = opts or {}
   local parts = {}
   for _, entry in ipairs(entries) do
     local globs = type(entry.glob) == 'table' and entry.glob or { entry.glob }
@@ -269,11 +265,19 @@ local function build_rg_cmd(entries, filter)
   local cmd = table.concat(parts, '; ')
 
   if filter and filter ~= '' then
-    -- content-only 필터: filepath:linenum: 이후만 매칭 (경로 오탐 방지)
-    cmd = string.format(
-      "{ %s; } | awk -v q=%s 'match($0,/:[0-9]+:/){if(index(tolower(substr($0,RSTART+RLENGTH)),q)>0)print}'",
-      cmd, vim.fn.shellescape(filter:lower())
-    )
+    if opts.path_match then
+      -- path match: 경로 + 콘텐츠 모두 매칭 (filesystem routing 지원)
+      cmd = string.format(
+        "{ %s; } | grep -iF -- %s",
+        cmd, vim.fn.shellescape(filter)
+      )
+    else
+      -- content-only 필터: filepath:linenum: 이후만 매칭 (경로 오탐 방지)
+      cmd = string.format(
+        "{ %s; } | awk -v q=%s 'match($0,/:[0-9]+:/){if(index(tolower(substr($0,RSTART+RLENGTH)),q)>0)print}'",
+        cmd, vim.fn.shellescape(filter:lower())
+      )
+    end
   end
 
   return cmd
@@ -491,6 +495,7 @@ local function build_context(root)
     root = root,
     preset_name = preset_name,
     preset = preset,
+    merged_router = build_merged_preset().router,
     has_sg = vim.fn.executable('sg') == 1,
   }
 end

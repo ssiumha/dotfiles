@@ -111,6 +111,42 @@ require('pckr').add{
     vim.keymap.set({ 'n', 'x', 'o' }, '[M', function() ts_move.goto_previous_end('@function.outer') end)
   end },
 
+  { 'HiPhish/rainbow-delimiters.nvim', config = function()
+    local rainbow = require('rainbow-delimiters')
+    vim.api.nvim_set_hl(0, 'RainbowDelimiterRed',    { fg = '#d98870' })
+    vim.api.nvim_set_hl(0, 'RainbowDelimiterYellow',  { fg = '#fad07a' })
+    vim.api.nvim_set_hl(0, 'RainbowDelimiterBlue',    { fg = '#8fbfdc' })
+    vim.api.nvim_set_hl(0, 'RainbowDelimiterOrange',  { fg = '#e6a75a' })
+    vim.api.nvim_set_hl(0, 'RainbowDelimiterGreen',   { fg = '#99ad6a' })
+    vim.api.nvim_set_hl(0, 'RainbowDelimiterViolet',  { fg = '#c6b6ee' })
+    vim.api.nvim_set_hl(0, 'RainbowDelimiterCyan',    { fg = '#8197bf' })
+    vim.g.rainbow_delimiters = {
+      strategy = {
+        [''] = function(bufnr)
+          if vim.api.nvim_buf_line_count(bufnr) > 5000 then return nil end
+          return rainbow.strategy['global']
+        end,
+        html = rainbow.strategy['local'],
+        tsx = rainbow.strategy['local'],
+        javascript = rainbow.strategy['local'],
+      },
+      query = {
+        [''] = 'rainbow-delimiters',
+        tsx = 'rainbow-delimiters',
+        lua = 'rainbow-blocks',
+      },
+      highlight = {
+        'RainbowDelimiterRed',
+        'RainbowDelimiterYellow',
+        'RainbowDelimiterBlue',
+        'RainbowDelimiterOrange',
+        'RainbowDelimiterGreen',
+        'RainbowDelimiterViolet',
+        'RainbowDelimiterCyan',
+      },
+    }
+  end },
+
   { 'shellRaining/hlchunk.nvim', config = function()
     require('hlchunk').setup({
       chunk = { enable = true, delay = 0 },
@@ -345,7 +381,8 @@ end, {})
 -------------------
 local lsp_tools = {
   lua_ls     = { tool = 'lua-language-server',              bin = 'lua-language-server',        ft = 'lua',        tags = { 'lua' } },
-  ts_ls      = { tool = 'npm:typescript-language-server',   bin = 'typescript-language-server', ft = 'typescript', tags = { 'web' } },
+  ts_ls      = { tool = 'npm:typescript-language-server',   bin = 'typescript-language-server', ft = 'typescript', tags = { 'web', 'ts' } },
+  vtsls      = { tool = 'npm:@vtsls/language-server',       bin = 'vtsls',                     ft = 'typescript', tags = { 'web', 'ts' } },
   html       = { tool = 'npm:vscode-langservers-extracted', bin = 'vscode-html-language-server',                  tags = { 'web' } },
   cssls      = { tool = 'npm:vscode-langservers-extracted', bin = 'vscode-css-language-server',  ft = 'css',       tags = { 'web' } },
   jsonls     = { tool = 'npm:vscode-langservers-extracted', bin = 'vscode-json-language-server', ft = 'json',      tags = { 'web' } },
@@ -364,14 +401,50 @@ local lsp_tools = {
   jdtls      = { tool = 'jdtls',                               bin = 'jdtls',                      ft = 'java',      tags = { 'java' }, via = 'brew' },
 }
 
+-- WHY: mise shims exist in PATH even for inactive tools,
+-- causing vim.fn.executable() false positives.
+-- Use `mise ls --current --json` to check actually active tools.
+local function lsp_active_tools()
+  local tools = {}
+  local out = vim.fn.system('mise ls --current --json 2>/dev/null')
+  if vim.v.shell_error == 0 then
+    local ok, data = pcall(vim.json.decode, out)
+    if ok and type(data) == 'table' then
+      for name, entries in pairs(data) do
+        if type(entries) == 'table' and entries[1] and entries[1].installed then
+          tools[name] = true
+          local short = name:match('^[^:]+:(.+)$')
+          if short then tools[short] = true end
+        end
+      end
+    end
+  end
+  return tools
+end
+
+local function lsp_is_installed(e, active)
+  if e.via then return vim.fn.executable(e.bin) == 1 end
+  if vim.tbl_isempty(active) then return vim.fn.executable(e.bin) == 1 end
+  local short = e.tool:match('^[^:]+:(.+)$')
+  return active[e.tool] == true or (short ~= nil and active[short] == true)
+end
+
 do
+  local active = lsp_active_tools()
   local names = {}
   for name, e in pairs(lsp_tools) do
-    if vim.fn.executable(e.bin) == 1 then
+    if lsp_is_installed(e, active) then
       names[#names + 1] = name
     end
   end
+  if vim.tbl_contains(names, 'vtsls') then
+    names = vim.tbl_filter(function(n) return n ~= 'ts_ls' end, names)
+  end
   vim.lsp.enable(names)
+end
+
+local function lsp_parse_name(s)
+  return s:gsub('^[✓ ] +', ''):gsub('%s+.*$', '')
 end
 
 local function lsp_do_install(entries)
@@ -383,13 +456,23 @@ local function lsp_do_install(entries)
   if #brew > 0 then vim.cmd('!brew install ' .. table.concat(brew, ' ')) end
 end
 
+local function lsp_do_uninstall(entries)
+  local mise, brew = {}, {}
+  for _, e in ipairs(entries) do
+    if e.via == 'brew' then brew[#brew + 1] = e.tool else mise[#mise + 1] = e.tool end
+  end
+  if #mise > 0 then vim.cmd('!mise rm ' .. table.concat(mise, ' ')) end
+  if #brew > 0 then vim.cmd('!brew uninstall ' .. table.concat(brew, ' ')) end
+end
+
 vim.api.nvim_create_user_command('LspInstall', function(opts)
   local filter_tag = opts.args ~= '' and opts.args or nil
   local ft = vim.bo.filetype
+  local active = lsp_active_tools()
   local matched, rest = {}, {}
   for name, e in pairs(lsp_tools) do
     if not filter_tag or vim.tbl_contains(e.tags or {}, filter_tag) then
-      local mark = vim.fn.executable(e.bin) == 1 and '✓' or ' '
+      local mark = lsp_is_installed(e, active) and '✓' or ' '
       local tag_str = e.tags and '[' .. table.concat(e.tags, ',') .. ']' or ''
       local via_str = e.via and ('(' .. e.via .. ') ') or ''
       local item = mark .. ' ' .. name .. '  ' .. via_str .. tag_str
@@ -409,10 +492,18 @@ vim.api.nvim_create_user_command('LspInstall', function(opts)
       ['default'] = function(selected)
         local entries = {}
         for _, s in ipairs(selected) do
-          local name = s:gsub('^[✓ ] +', ''):gsub('%s+%[.*%]$', '')
+          local name = lsp_parse_name(s)
           if lsp_tools[name] then entries[#entries + 1] = lsp_tools[name] end
         end
         if #entries > 0 then lsp_do_install(entries) end
+      end,
+      ['ctrl-x'] = function(selected)
+        local entries = {}
+        for _, s in ipairs(selected) do
+          local name = lsp_parse_name(s)
+          if lsp_tools[name] then entries[#entries + 1] = lsp_tools[name] end
+        end
+        if #entries > 0 then lsp_do_uninstall(entries) end
       end,
     },
   })
@@ -460,11 +551,23 @@ vim.lsp.config('biome', {
 })
 
 vim.lsp.config('ts_ls', {
+  filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' },
   root_markers = { "package.json", "tsconfig.json", "jsconfig.json", ".git" },
   init_options = {
     preferences = {
       includeCompletionsForModuleExports = true,
       includeCompletionsForImportStatements = true,
+    },
+  },
+})
+
+vim.lsp.config('vtsls', {
+  filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' },
+  root_markers = { 'tsconfig.json', 'package.json', 'jsconfig.json', '.git' },
+  settings = {
+    vtsls = { autoUseWorkspaceTsdk = true },
+    typescript = {
+      preferences = { includePackageJsonAutoImports = 'auto' },
     },
   },
 })
@@ -663,3 +766,7 @@ do
   end)
 end
 
+-------------------
+-- misc
+-------------------
+require('unicode_overlay').enable()
