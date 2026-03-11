@@ -5,6 +5,7 @@ require 'cgi'
 require 'openssl'
 require 'json'
 require 'securerandom'
+require 'set'
 require 'time'
 
 class UT
@@ -48,7 +49,8 @@ class UT
     'case_header' => ['[text|-]', 'Convert to Header-Case'],
     'case_sentence' => ['[text|-]', 'Convert to Sentence case'],
     'case_snake' => ['[text|-]', 'Convert to snake_case'],
-    'case_kebab' => ['[text|-]', 'Convert to kebab-case']
+    'case_kebab' => ['[text|-]', 'Convert to kebab-case'],
+    'env_scan' => ['[dir]', 'Scan project for environment variables']
   }.freeze
 
   def self.read_input(args)
@@ -572,6 +574,87 @@ class UT
       STDERR.puts "Error: Failed to verify JWT - #{e.message}"
       exit 1
     end
+  end
+
+  # Environment variable scanner
+  RG_ENV_PATTERN = [
+    'ENV\[', 'ENV\.fetch',
+    'os\.environ', 'os\.getenv',
+    'process\.env[.\[]',
+    'System\.getenv',
+    'os\.Getenv',
+    '@Value\("\$\{',
+    'getenv\('
+  ].join('|').freeze
+
+  EXTRACT_PATTERNS = [
+    /ENV\[['"](.+?)['"]\]/,
+    /ENV\.fetch\(['"](.+?)['"]/,
+    /os\.environ\[['"](.+?)['"]\]/,
+    /os\.environ\.get\(['"](.+?)['"]/,
+    /os\.getenv\(['"](.+?)['"]/,
+    /process\.env\.([A-Z_][A-Z0-9_]*)/,
+    /process\.env\[['"](.+?)['"]\]/,
+    /System\.getenv\("(.+?)"\)/,
+    /os\.Getenv\("(.+?)"\)/,
+    /@Value\("\$\{([^}:]+)/,
+    /getenv\("(.+?)"\)/
+  ].freeze
+
+  def self.env_scan(args)
+    dir = args.first || '.'
+
+    unless system('which rg > /dev/null 2>&1')
+      STDERR.puts "Error: rg (ripgrep) is required but not found"
+      exit 1
+    end
+
+    cmd = ['rg', '--no-heading', '--line-number', '--no-filename', '-n', RG_ENV_PATTERN, dir]
+    # Use --with-filename to get file:line:content format
+    cmd = ['rg', '--no-heading', '--with-filename', '--line-number', RG_ENV_PATTERN, dir]
+
+    vars = {}  # {var_name => [{file:, line:, context:}]}
+
+    IO.popen(cmd, err: '/dev/null') do |io|
+      io.each_line do |raw|
+        # rg output: file:line:content
+        match = raw.match(/\A(.+?):(\d+):(.*)/)
+        next unless match
+
+        file, line, content = match[1], match[2], match[3].strip
+
+        EXTRACT_PATTERNS.each do |pat|
+          content.scan(pat).each do |captures|
+            var_name = captures[0]
+            next unless var_name
+            vars[var_name] ||= []
+            vars[var_name] << { file: file, line: line, context: content }
+          end
+        end
+      end
+    end
+
+    if vars.empty?
+      puts "No environment variables found."
+      return
+    end
+
+    file_set = Set.new
+    vars.sort_by { |name, _| name }.each do |name, locations|
+      puts name
+      # Deduplicate by file:line
+      seen = Set.new
+      locations.each do |loc|
+        key = "#{loc[:file]}:#{loc[:line]}"
+        next if seen.include?(key)
+        seen.add(key)
+        file_set.add(loc[:file])
+        puts "  %-25s %s" % [key, loc[:context]]
+      end
+      puts
+    end
+
+    puts "Found #{vars.size} env vars across #{file_set.size} files"
   end
 
   def self.usage
