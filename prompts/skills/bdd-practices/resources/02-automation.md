@@ -148,7 +148,7 @@ def login(email, password):
 ### Phase 3: REFACTOR
 - Step definitions 중복 제거
 - 공통 fixture 추출
-- 복잡한 로직은 tdd-practices로
+- 복잡한 로직은 tdd로
 
 ## 파일 구조
 
@@ -172,4 +172,4 @@ project/
 1. **Step definition 재사용**: 여러 시나리오에서 같은 step 공유
 2. **Fixture 활용**: 공통 설정은 conftest.py에 정의
 3. **태그로 필터링**: `pytest -m smoke`로 스모크 테스트만 실행
-4. **tdd-practices 연계**: 복잡한 비즈니스 로직은 별도 유닛 테스트로
+4. **tdd 연계**: 복잡한 비즈니스 로직은 별도 유닛 테스트로

@@ -104,7 +104,7 @@ description: Creates dependency-based task execution plans with parallel orchest
 
 실행 플로우:
   Group 1: [task-1, task-3] → ✓ 검증 → 커밋
-  Group 2: [task-2] → /tdd-practices → /review-security → ✓ 검증 → 커밋
+  Group 2: [task-2] → /tdd → /review-security → ✓ 검증 → 커밋
   Group 3: [task-4] → /lint-audit → ✓ 검증 → 커밋 (최종)
 
 크리티컬 패스: task-1 → task-2 → task-4
@@ -173,7 +173,7 @@ tasks:
     title: "테스트 작성"
     why: "완료 조건 충족"
     blockedBy: [api]
-    skills: [tdd-practices]
+    skills: [tdd]
     risk: low
 
 === GUIDANCE ===
@@ -181,7 +181,7 @@ tasks:
 실행 플로우:
   Group 1: [schema] → ✓ 검증 → 커밋
   Group 2: [api] → /review-security → ✓ 검증 → 커밋
-  Group 3: [test] → /tdd-practices → ✓ 검증 → 커밋 (최종)
+  Group 3: [test] → /tdd → ✓ 검증 → 커밋 (최종)
 크리티컬 패스: schema → api → test
 ```
 

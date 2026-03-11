@@ -164,3 +164,6 @@ ast-grep --lang typescript -p 'console.log($$$ARGS)' -r 'logger.debug($$$ARGS)' 
 **skill 호출 vs 직접 사용**:
 - 직접 사용: 단일 메타변수, 표준 함수/클래스 검색
 - skill 호출: 리팩토링 (-r), 언어별 특수 구문, 조건부 매칭
+
+### 고급 기능 리소스
+- `resources/advanced-rules.md`: YAML 룰 시스템, Relational Rules(inside/has/follows), 보안 스캐닝 룰, CI 통합

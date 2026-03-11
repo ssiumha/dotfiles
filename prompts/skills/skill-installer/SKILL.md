@@ -160,7 +160,7 @@ cat .claude/skills/.registry.json | jq '.'
 ```
 설치된 Skills:
 1. react-best-practices (vercel-labs/agent-skills) - 2026-01-19
-2. tdd-practices (local) - 2026-01-10
+2. tdd (local) - 2026-01-10
 3. docker-setup (awesome-claude-skills/devops) - 2026-01-15
 ```
 
@@ -291,7 +291,7 @@ cat .claude/skills/.registry.json | jq 'to_entries | .[] | .key + " (" + .value.
     "method": "npx add-skill",
     "version": "abc123def456"
   },
-  "tdd-practices": {
+  "tdd": {
     "source": "local",
     "installedAt": "2026-01-10T08:00:00Z",
     "method": "manual",

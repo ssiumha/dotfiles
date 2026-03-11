@@ -176,6 +176,10 @@ let externalVisible = false;
 let circularHighlighted = false;
 let selectedNode = null;
 let colorMode = GRAPH_DATA.groupBy || 'role'; // 'dir' or 'role'
+const EDGE_STYLES = {
+  extends:    { color: '#1565C0', dashes: false },
+  implements: { color: '#2E7D32', dashes: [5, 5] },
+};
 
 function getNodeColor(node) {
   const role = node._role ?? node.role;
@@ -201,12 +205,16 @@ function init() {
     };
   });
 
-  const edges = GRAPH_DATA.edges.map(e => ({
-    ...e,
-    color: { color: COLORS.dimEdge, highlight: COLORS.highlightEdge },
-    smooth: { type: 'cubicBezier', forceDirection: 'none', roundness: 0.4 },
-    width: 1,
-  }));
+  const edges = GRAPH_DATA.edges.map(e => {
+    const style = EDGE_STYLES[e.type];
+    return {
+      ...e,
+      color: { color: style ? style.color : COLORS.dimEdge, highlight: COLORS.highlightEdge },
+      smooth: { type: 'cubicBezier', forceDirection: 'none', roundness: 0.4 },
+      dashes: style ? style.dashes : false,
+      width: style ? 1.5 : 1,
+    };
+  });
 
   allNodes = nodes;
   allEdges = edges;
@@ -279,14 +287,17 @@ function applyFilters() {
   document.querySelectorAll('#dir-filters input:checked').forEach(cb => checkedGroups.add(cb.dataset.group));
   const checkedRoles = new Set();
   document.querySelectorAll('#role-filters input:checked').forEach(cb => checkedRoles.add(cb.dataset.role));
-  const query = document.getElementById('search').value.toLowerCase();
+  const raw = document.getElementById('search').value.toLowerCase().trim();
+  const terms = raw ? raw.split(/\s*\|\s*/).filter(Boolean) : [];
 
   const updates = [];
   nodesDataset.forEach(n => {
     const orig = allNodes.find(an => an.id === n.id);
     const matchGroup = n.external ? externalVisible : checkedGroups.has(orig?._dir);
     const matchRole = checkedRoles.has(orig?._role || 'other');
-    const matchSearch = !query || n.id.toLowerCase().includes(query) || (n.label || '').toLowerCase().includes(query);
+    const idLower = n.id.toLowerCase();
+    const labelLower = (n.label || '').toLowerCase();
+    const matchSearch = terms.length === 0 || terms.some(t => idLower.includes(t) || labelLower.includes(t));
     updates.push({ id: n.id, hidden: !matchGroup || !matchRole || !matchSearch });
   });
   nodesDataset.update(updates);
@@ -309,17 +320,34 @@ function renderStats() {
 // --- Legend ---
 function renderLegend() {
   const container = document.getElementById('legend-items');
+  let html = '';
   if (colorMode === 'role' && GRAPH_DATA.roles) {
-    container.innerHTML = Object.entries(GRAPH_DATA.roles)
+    html = Object.entries(GRAPH_DATA.roles)
       .sort(([a],[b]) => a.localeCompare(b))
       .map(([name, r]) =>
         `<span class="legend-item"><span class="filter-color" style="background:${r.color}"></span>${escapeHTML(name)}</span>`
       ).join('');
   } else {
-    container.innerHTML = Object.entries(GRAPH_DATA.groups).map(([name, g]) =>
+    html = Object.entries(GRAPH_DATA.groups).map(([name, g]) =>
       `<span class="legend-item"><span class="filter-color" style="background:${g.color}"></span>${escapeHTML(name)}</span>`
     ).join('');
   }
+
+  const hasTypedEdges = GRAPH_DATA.edges.some(e => e.type);
+  if (hasTypedEdges) {
+    const edgeLegend = [
+      { label: 'import', color: COLORS.dimEdge, dashes: false },
+      { label: 'extends', color: '#1565C0', dashes: false },
+      { label: 'implements', color: '#2E7D32', dashes: true },
+    ];
+    html += '<span style="display:inline-block;width:12px"></span>';
+    html += edgeLegend.map(e => {
+      const dash = e.dashes ? 'stroke-dasharray="5,5"' : '';
+      const svg = `<svg width="24" height="10" style="vertical-align:middle;margin-right:3px"><line x1="0" y1="5" x2="24" y2="5" stroke="${e.color}" stroke-width="2" ${dash}/></svg>`;
+      return `<span class="legend-item">${svg}${escapeHTML(e.label)}</span>`;
+    }).join('');
+  }
+  container.innerHTML = html;
 }
 
 // --- Recolor nodes ---
@@ -439,7 +467,12 @@ function highlightConnected(nodeId) {
   const edgeUpdates = [];
   edgesDataset.forEach(e => {
     const connected = connEdges.some(ce => ce.id === e.id);
-    edgeUpdates.push({ id: e.id, color: { color: connected ? COLORS.highlightEdge : COLORS.fadedEdge }, width: connected ? 2 : 1 });
+    if (connected) {
+      const style = EDGE_STYLES[e.type];
+      edgeUpdates.push({ id: e.id, color: { color: style ? style.color : COLORS.highlightEdge }, width: connected ? 2 : 1, dashes: style ? style.dashes : false });
+    } else {
+      edgeUpdates.push({ id: e.id, color: { color: COLORS.fadedEdge }, width: 1, dashes: false });
+    }
   });
   edgesDataset.update(edgeUpdates);
 }
@@ -479,7 +512,8 @@ function clearHighlight() {
 
   const edgeUpdates = [];
   edgesDataset.forEach(e => {
-    edgeUpdates.push({ id: e.id, color: { color: COLORS.dimEdge, highlight: COLORS.highlightEdge }, width: 1 });
+    const style = EDGE_STYLES[e.type];
+    edgeUpdates.push({ id: e.id, color: { color: style ? style.color : COLORS.dimEdge, highlight: COLORS.highlightEdge }, width: style ? 1.5 : 1, dashes: style ? style.dashes : false });
   });
   edgesDataset.update(edgeUpdates);
 }

@@ -111,9 +111,9 @@ Gherkin 형식으로 기능을 명세하고, 선택적으로 자동화 테스트
    - pytest-bdd, behave, cucumber-js 설정
    - RED → GREEN → REFACTOR 사이클
 
-3. **tdd-practices 연계**
+3. **tdd 연계**
    - Step definition은 얇게 유지
-   - 복잡한 내부 로직은 tdd-practices로 개발
+   - 복잡한 내부 로직은 tdd로 개발
 
 ---
 
@@ -139,7 +139,7 @@ Gherkin 형식으로 기능을 명세하고, 선택적으로 자동화 테스트
 
 ---
 
-## tdd-practices 연계
+## tdd 연계
 
 **BDD vs TDD**:
 - BDD: 시나리오 레벨 (.feature → Step definitions)
@@ -147,7 +147,7 @@ Gherkin 형식으로 기능을 명세하고, 선택적으로 자동화 테스트
 
 **연계 시점**: 자동화 단계에서 복잡한 로직이 필요할 때
 - Step definition은 얇게 유지
-- 내부 로직은 tdd-practices의 RED-GREEN-REFACTOR로 개발
+- 내부 로직은 tdd의 RED-GREEN-REFACTOR로 개발
 
 ---
 
@@ -189,4 +189,4 @@ User: "비밀번호 찾기 시나리오 추가해줘"
 - Gherkin 상세 문법: `resources/01-gherkin-syntax.md`
 - 자동화 가이드: `resources/02-automation.md`
 - 템플릿: `templates/crud.feature`, `templates/auth.feature`
-- 유닛 테스트 연계: `tdd-practices`
+- 유닛 테스트 연계: `tdd`

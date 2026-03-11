@@ -36,6 +36,7 @@ function process(user) {
 ```
 
 **감지**: 중첩 깊이 3 이상, if-else 체인
+**주의**: guard clause가 7-8개 이상이면 역효과 — 함수 분리를 고려할 것
 
 ## 2. Dead Code
 
@@ -87,6 +88,8 @@ const a = items.filter(x => x.active);
 const b = items.filter(x => x.enabled);
 ```
 
+> "차이가 있으면 독자는 의미 있는 차이라고 기대한다" — 불필요한 차이를 제거하여 진짜 차이에 집중하게 한다.
+
 **⚠️ 우연한 유사성 vs 진짜 중복**
 
 | 구분 | 진짜 중복 | 우연한 유사성 |
@@ -121,6 +124,8 @@ function findUserById(id: string): User {
 ```
 
 **용도**: 레거시 코드를 점진적으로 개선할 때
+
+> "SW 설계의 미시적 본질" — 원하는 인터페이스를 먼저 만들고, 내부는 기존 구현을 호출. 호출자를 점진적으로 새 인터페이스로 전환한 뒤 내부 구현을 교체.
 
 ## 5. Reading Order
 
@@ -258,6 +263,8 @@ logActivity(user.id, 'order_summary');
 
 **조건**: 3회 이상 반복될 때만 (premature abstraction 주의)
 
+> "추상적으로 생각할 준비가 되면 새 인터페이스가 등장한다" — 패턴이 보이기 전에 추출하지 말 것.
+
 **Before**:
 ```typescript
 const userJson = JSON.stringify(user);
@@ -286,6 +293,8 @@ saveToStorage('settings', settings);
 
 **용도**: 리팩토링 전 단계로, 전체 그림 파악
 
+> 인라인 후 재구성이 분산 상태에서 이해하는 것보다 유리할 수 있다. 흩어진 조각을 한 곳에 모아야 전체 패턴이 보인다.
+
 **주의**: 이후 다시 분리 필요
 
 ## 14. Delete Redundant Comments
@@ -309,21 +318,25 @@ i++;
 
 **유지할 주석**: "왜(why)"를 설명하는 주석
 
-## 15. Rename
+## 15. Expand Abbreviations
 
-의도를 더 잘 드러내는 이름으로 변경.
+약어를 의미 있는 전체 이름으로 확장.
 
 **Before**:
 ```typescript
 const d = new Date() - startTime;
 function proc(x) { ... }
+const cfg = loadConfig();
 ```
 
 **After**:
 ```typescript
 const elapsedMs = new Date() - startTime;
 function processUserRequest(request) { ... }
+const config = loadConfig();
 ```
+
+> 약어는 작성자에겐 자명하지만 독자에겐 해독 비용. 이름을 풀어쓰면 코드가 산문처럼 읽힌다. 단, 널리 통용되는 약어(id, url, http 등)는 유지.
 
 ---
 
@@ -331,7 +344,7 @@ function processUserRequest(request) { ... }
 
 | 상황 | 추천 패턴 |
 |------|----------|
-| 코드 이해가 어려움 | Explaining Variable, Rename, Reading Order |
+| 코드 이해가 어려움 | Explaining Variable, Expand Abbreviations, Reading Order |
 | 중첩이 깊음 | Guard Clause |
 | 일관성 없음 | Normalize Symmetries |
 | 레거시 개선 | New Interface Old Implementation |

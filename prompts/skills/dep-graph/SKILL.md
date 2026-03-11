@@ -246,6 +246,7 @@ dep-graph.html    # 프로젝트 루트에 생성
 - 지원 언어: Java, TypeScript/JavaScript, Python
 - Java source root 자동 탐색 (`**/src/main/java`)
 - Java 내부 패키지 자동 판별 (source root의 top-level 패키지 수집)
+- Java 같은 패키지 내 `extends`/`implements` 관계 자동 감지 (import 없이도 edge 추가)
 - tsconfig.json `compilerOptions.paths` alias 자동 읽기 (JSONC 지원)
 - 순환 참조 탐지 (iterative DFS, 대규모 프로젝트 안전)
 - `--json` 플래그로 stats JSON 출력 (스크립트 체이닝용)

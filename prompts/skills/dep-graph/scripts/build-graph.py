@@ -239,6 +239,42 @@ def extract_ts_imports(filepath: Path) -> list[str]:
     return imports
 
 
+_JAVA_EXTENDS_RE = re.compile(r'\bclass\s+\w+\s+extends\s+(\w+)')
+_JAVA_IMPLEMENTS_RE = re.compile(r'\bimplements\s+([\w\s,]+)\s*\{')
+
+
+def find_class_hierarchy_deps(
+    java_files: list[tuple[Path, str]],
+) -> list[tuple[str, str]]:
+    """같은 패키지 내 extends/implements 관계를 감지하여 (src_rel, tgt_rel, type) 반환."""
+    dir_groups: dict[str, list[tuple[Path, str]]] = defaultdict(list)
+    for fp, rel in java_files:
+        dir_groups[str(fp.parent)].append((fp, rel))
+
+    deps: list[tuple[str, str, str]] = []
+    for _, files in dir_groups.items():
+        if len(files) < 2:
+            continue
+        siblings = {fp.stem: rel for fp, rel in files}
+        for fp, rel in files:
+            try:
+                content = fp.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            # extends
+            for m in _JAVA_EXTENDS_RE.finditer(content):
+                parent = m.group(1).strip()
+                if parent in siblings and siblings[parent] != rel:
+                    deps.append((rel, siblings[parent], "extends"))
+            # implements
+            for m in _JAVA_IMPLEMENTS_RE.finditer(content):
+                ifaces = [name.strip() for name in m.group(1).split(",")]
+                for iface in ifaces:
+                    if iface in siblings and siblings[iface] != rel:
+                        deps.append((rel, siblings[iface], "implements"))
+    return deps
+
+
 _PY_FROM_RE = re.compile(r"^from\s+([\w.]+)\s+import", re.MULTILINE)
 _PY_IMPORT_RE = re.compile(r"^import\s+([\w.]+)", re.MULTILINE)
 
@@ -718,11 +754,14 @@ def main() -> None:
     edge_set: set[tuple[str, str]] = set()
     ext_deps: set[str] = set()
 
-    def _add_edge(short_from: str, short_to: str) -> None:
+    def _add_edge(short_from: str, short_to: str, edge_type: str = "import") -> None:
         key = (short_from, short_to)
         if key not in edge_set:
             edge_set.add(key)
-            edges.append({"from": short_from, "to": short_to, "arrows": "to"})
+            edge = {"from": short_from, "to": short_to, "arrows": "to"}
+            if edge_type != "import":
+                edge["type"] = edge_type
+            edges.append(edge)
 
     # Java
     for fp, rel in java_files:
@@ -737,6 +776,12 @@ def main() -> None:
                 parts = imp.split(".")
                 if len(parts) >= 2:
                     ext_deps.add(parts[0] + "." + parts[1] if parts[0] != "java" else parts[0])
+
+    # Java same-package extends/implements dependencies (no import needed)
+    for src_rel, tgt_rel, rel_type in find_class_hierarchy_deps(java_files):
+        sf, tf = known[src_rel], known[tgt_rel]
+        if sf != tf:
+            _add_edge(sf, tf, rel_type)
 
     # TypeScript
     for fp, rel in ts_files:

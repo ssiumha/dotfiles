@@ -110,5 +110,7 @@ com.google.common.collect.ImmutableList → ext:com.google.common
 
 ```
 - java.lang.* → 항상 제외 (암묵적 import)
-- 같은 패키지 내 클래스 → import 없이 사용 가능, 별도 처리
+- 같은 패키지 내 클래스 → import 없이 사용 가능
+  - `extends`/`implements` 절 파싱 → 타입명이 같은 디렉토리에 있으면 edge 추가
+  - 범용 타입(필드, 파라미터 등) 매칭은 오탐 위험으로 미지원
 ```

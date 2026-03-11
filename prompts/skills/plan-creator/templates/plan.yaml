@@ -27,7 +27,7 @@ tasks:
     title: "{제목}"
     why: "{이유}"
     blockedBy: [task-1]
-    skills: [tdd-practices, review-security]  # 예시: 해당 task에 격발할 skill
+    skills: [tdd, review-security]  # 예시: 해당 task에 격발할 skill
     risk: medium
     verify: "{완료 확인 방법}"
     docs: true  # 문서 갱신 필요 여부
