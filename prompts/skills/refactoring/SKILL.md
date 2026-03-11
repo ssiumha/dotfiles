@@ -35,7 +35,7 @@ triggers:
 현재 코드 구조를 파악하고 리팩토링 대상을 식별한다.
 
 **구조 분석**:
-- 모듈 의존성, import 패턴 (`/dep-graph` 활용)
+- 모듈 의존성, import 패턴 (`/vis-graph` 활용)
 - 결합도 메트릭 (`/code-metrics` 활용)
 - 데이터 흐름, 공유 상태, 결합 지점
 
@@ -123,7 +123,7 @@ triggers:
 - `/tidy` — 분 단위 소규모 코드 정리
 - `/plan-review tdd` — 새 기능의 테스트 주도 개발
 - `/code-metrics` — 결합도/복잡도 정량 측정
-- `/dep-graph` — 파일 간 의존성 시각화
+- `/vis-graph` — 파일 간 의존성 시각화
 - `/strategic-thinking` — 리팩토링 범위 결정 시 체계적 판단
 
 > Origin: moai-adk workflow-ddd (ANALYZE-PRESERVE-IMPROVE cycle) 기반, dots 스타일로 재구성
