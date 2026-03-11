@@ -121,7 +121,7 @@ triggers:
 ## See Also
 
 - `/tidy` — 분 단위 소규모 코드 정리
-- `/tdd` — 새 기능의 테스트 주도 개발
+- `/plan-review tdd` — 새 기능의 테스트 주도 개발
 - `/code-metrics` — 결합도/복잡도 정량 측정
 - `/dep-graph` — 파일 간 의존성 시각화
 - `/strategic-thinking` — 리팩토링 범위 결정 시 체계적 판단

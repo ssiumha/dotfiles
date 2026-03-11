@@ -285,4 +285,4 @@ AI 명령 흐름:
 ### 참조 리소스
 - Addy Osmani의 원본 가이드: https://addyosmani.com/blog/good-spec/
 - ldoc skill: 요구사항 문서화와 연계
-- bdd-practices: Testing 영역 작성 시 시나리오 활용
+- plan-review bdd: Testing 영역 작성 시 시나리오 활용

@@ -1,6 +1,6 @@
 ---
 name: qa
-description: 기능별 QA 체크리스트 생성, 수동 테스트 실행, 결과 기록. Use when QA 테스트, 체크리스트 만들기, 수동 검증, 기능 확인, qa 진행, checklist. Do NOT use for automated test code (use tdd/test-review instead) or BDD spec (use bdd-practices instead).
+description: 기능별 QA 체크리스트 생성, 수동 테스트 실행, 결과 기록. Use when QA 테스트, 체크리스트 만들기, 수동 검증, 기능 확인, qa 진행, checklist. Do NOT use for automated test code (use plan-review tdd / code-review instead) or BDD spec (use plan-review bdd instead).
 argument-hint: "[create|run|list] [feature-name]"
 ---
 

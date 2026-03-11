@@ -13,7 +13,7 @@ Claude Code는 다양한 설정 방식을 제공합니다. **컨텍스트 소비
 | rules/ | 자동 로드 (paths 지정 시 해당 경로만) | 상세 규칙 분리 (20줄+ 시) |
 | hooks/ | 이벤트 시 | 도구 호출 전후 자동 실행 |
 | commands/ | 호출 시만 | 반복 작업 템플릿 (/docs, /self-review) |
-| skills/ | 필요 시만 | 전문 지식 패키지 (tdd) |
+| skills/ | 필요 시만 | 전문 지식 패키지 (plan-review) |
 | agents/ | 위임 시만 | 독립 컨텍스트 작업 (code-review) |
 
 ### 어디에 넣을까?
@@ -27,102 +27,9 @@ Claude Code는 다양한 설정 방식을 제공합니다. **컨텍스트 소비
 
 ### Skill Frontmatter 레퍼런스
 
-`skills/{name}/SKILL.md`의 YAML frontmatter 공식 필드.
+`skills/{name}/SKILL.md`의 YAML frontmatter 공식 필드 (name, description, argument-hint, disable-model-invocation, user-invocable, allowed-tools, model, context/agent, hooks, 동적 컨텍스트).
 
-#### 기본 필드
-
-**`name`** — 슬래시 커맨드 이름. 소문자+숫자+하이픈, 최대 64자. 생략 시 디렉토리명.
-```yaml
-name: fix-issue    # → /fix-issue 로 호출
-```
-
-**`description`** — Claude가 자동 호출 여부를 판단하는 기준 + `/` 메뉴 설명. What + When 형식 필수. 생략 시 마크다운 첫 문단.
-```yaml
-description: Resolves Git rebase conflicts. Use when encountering merge conflicts during rebase.
-```
-
-**`argument-hint`** — `/` 자동완성 시 표시되는 인자 힌트.
-```yaml
-argument-hint: "[issue-number]"
-# /fix-issue [issue-number] 로 표시
-```
-
-스킬 본문에서 `$ARGUMENTS` (전체), `$0`, `$1` (개별)로 참조:
-```markdown
-Fix GitHub issue $ARGUMENTS following our coding standards.
-```
-
-#### 호출 제어
-
-**`disable-model-invocation`** — `true` 설정 시 Claude가 자동으로 호출하지 못함. 사용자만 `/`로 수동 호출. description이 컨텍스트에 로드되지 않아 토큰도 절약.
-```yaml
-# 배포처럼 부작용이 큰 작업에 적합
-disable-model-invocation: true
-```
-
-**`user-invocable`** — `false` 설정 시 `/` 메뉴에서 숨김. Claude만 자동 호출. description은 컨텍스트에 로드됨.
-```yaml
-# Claude용 배경 지식에 적합 (사용자가 직접 호출할 이유 없음)
-user-invocable: false
-```
-
-**조합 효과**:
-
-| 설정 | 사용자 호출 | Claude 호출 | description 로드 | 용도 |
-|------|:---:|:---:|:---:|------|
-| (기본값) | O | O | O | 일반 skill |
-| `disable-model-invocation: true` | O | X | X | 배포, 커밋 등 수동 제어 |
-| `user-invocable: false` | X | O | O | 배경 지식, 레퍼런스 |
-
-#### 도구/모델 제어
-
-**`allowed-tools`** — skill 실행 중 사용 가능한 도구 제한. 와일드카드 지원.
-```yaml
-# 읽기 전용 skill
-allowed-tools: Read, Grep, Glob
-
-# Git 명령만 허용
-allowed-tools: Bash(git *), Read, Grep, Glob
-```
-
-**`model`** — skill 실행 시 사용할 모델. 종료 후 원래 모델로 복귀.
-```yaml
-# 간단한 포매팅은 저비용 모델로
-model: claude-haiku-4-5-20251001
-
-# 복잡한 분석은 고성능 모델로
-model: claude-opus-4-6
-```
-
-#### 격리 실행
-
-**`context: fork`** + **`agent`** — 독립 서브에이전트에서 실행. 메인 대화 이력에 접근 불가, 컨텍스트 보호.
-```yaml
-context: fork
-agent: Explore          # Explore, Plan, general-purpose, 또는 커스텀
-allowed-tools: Glob, Grep, Read
-```
-
-#### Skill-scoped Hooks
-
-**`hooks`** — skill 실행 중에만 활성화되는 훅. 종료 시 해제.
-```yaml
-hooks:
-  - matcher: Bash
-    hooks:
-      - type: command
-        command: "~/.claude/hooks/check-secrets.sh"
-        timeout: 30
-```
-
-#### 동적 컨텍스트 주입
-
-본문에서 `` !`command` `` 문법으로 셸 명령을 **전처리** (Claude 이전 실행, 출력 삽입):
-```markdown
-## PR context
-- Diff: !`gh pr diff`
-- Comments: !`gh pr view --comments`
-```
+상세 필드 설명 및 조합 효과: `resources/05-skill-frontmatter.md` 참조.
 
 ---
 
@@ -132,7 +39,7 @@ Claude Code는 여러 위치에서 메모리를 로드합니다. **위에서 아
 
 | 우선순위 | 유형 | 위치 | 공유 범위 |
 |:---:|------|------|----------|
-| 1 | Enterprise policy | macOS: `/Library/Application Support/ClaudeCode/CLAUDE.md`<br>Linux: `/etc/claude-code/CLAUDE.md`<br>Windows: `C:\Program Files\ClaudeCode\CLAUDE.md` | 조직 전체 |
+| 1 | Enterprise policy | OS별 시스템 경로 | 조직 전체 |
 | 2 | User memory | `~/.claude/CLAUDE.md` | 개인 (모든 프로젝트) |
 | 3 | Project memory | `./CLAUDE.md` 또는 `./.claude/CLAUDE.md` | 팀 (소스 컨트롤) |
 | 4 | Project rules | `./.claude/rules/*.md` | 팀 (소스 컨트롤) |
@@ -237,7 +144,7 @@ Read claude.md (또는 CLAUDE.md)
    - "TypeScript", "타입", "컨벤션", "린팅" → patterns-typescript
    - "React", "컴포넌트", "hooks", "상태 관리" → patterns-react
    - "API 설계", "엔드포인트", "RESTful" → patterns-api
-   - "테스트", "유닛", "E2E", "mocking" → test-guidelines
+   - "테스트", "유닛", "E2E", "mocking" → code-review (Test Review)
    - "에러 핸들링", "try-catch", "로깅" → patterns-error-handling
 
    **판단 기준**:
@@ -255,28 +162,7 @@ Read claude.md (또는 CLAUDE.md)
 
 #### 3. 리포트 생성
 
-사용자에게 분석 결과 요약:
-
-```markdown
-## 📊 claude.md 리뷰 결과
-
-### 전체 현황
-- 총 라인: XXX줄
-- 상태: ✅ 간결하고 적절 / ⚠️ 약간 김 / ❌ 분리 필요
-
-### Skills로 분리 권장 (총 YYY줄)
-1. TypeScript 컨벤션 (50줄) → patterns-typescript
-2. React 패턴 (80줄) → patterns-react
-3. 테스트 가이드 (40줄) → test-guidelines
-
-### 필수 항목 누락
-- [ ] 퀵 커맨드
-- [ ] 서비스 엔드포인트
-
-### 적절한 내용
-- [x] 프로젝트별 quirks
-- [x] 특정 서비스 설정
-```
+사용자에게 분석 결과 요약 (전체 현황, 줄 수, Skills 분리 권장 목록, 필수 항목 누락, 적절한 내용 체크).
 
 #### 4. 사용자 확인
 
@@ -292,57 +178,20 @@ Read claude.md (또는 CLAUDE.md)
 - 포맷만 정리
 
 **[3] 새로 작성**
-- 기존 내용 참고하여 템플릿 기반 재작성
+- 프로젝트 유형에 맞는 `templates/` 선택 (minimal, web-app, api-server, monorepo, enterprise)
+- 사용자와 대화하며 커스터마이징
 
 #### 5. 개선 실행
 
 **[1] Skills 분리 선택 시**:
-
-1. 각 분리 대상마다 확인:
-   ```
-   "TypeScript 컨벤션(50줄)을 patterns-typescript skill로 분리하시겠습니까?"
-   → Yes: 새 skill 생성
-   → No: claude.md에 유지
-   ```
-
-2. 새 skill 생성:
-   ```bash
-   mkdir -p skills/patterns-{name}/
-   Write skills/patterns-{name}/SKILL.md
-   ```
-
-3. claude.md에서 해당 섹션 제거
-
-4. claude.md에 skill 참조 추가:
-   ```markdown
-   ## 코딩 가이드
-   - TypeScript: `patterns-typescript` skill 참조
-   - React: `patterns-react` skill 참조
-   ```
+- 각 분리 대상마다 사용자 확인 → Yes: 새 skill 생성, No: claude.md에 유지
+- claude.md에서 해당 섹션 제거 + skill 참조 추가
 
 **[2] 정리만 선택 시**:
-
-- 포맷 정리
-- 섹션 재배치
-- 필수 항목 추가
+- 포맷 정리, 섹션 재배치, 필수 항목 추가
 
 **[3] 새로 작성 선택 시**:
-
-1. 프로젝트 유형 확인:
-   - Web App (Next.js, React 등)
-   - API Server (Express, Fastify 등)
-   - Monorepo (Turborepo, Nx 등)
-   - Minimal (기본)
-
-2. 적절한 템플릿 선택 (`templates/{유형}.md`)
-
-3. 사용자와 대화하며 커스터마이징:
-   - "프로젝트명은?"
-   - "빌드 명령어는?"
-   - "개발 서버 포트는?"
-   - "특별한 주의사항은?"
-
-4. claude.md 생성
+- 적절한 `templates/` 선택 → 사용자와 대화하며 커스터마이징 → claude.md 생성
 
 #### 6. 검증
 
@@ -366,32 +215,7 @@ Read claude.md (또는 CLAUDE.md)
 - 특정 서비스 설정 (Redis, DB 등)
 - 프로젝트 특화 트러블슈팅
 
-**예시:**
-```markdown
-# MyApp
-
-웹 기반 사용자 관리 시스템
-
-## 퀵 커맨드
-- Build: `npm run build`
-- Dev: `npm run dev` (http://localhost:3000)
-- Test: `npm test`
-- Deploy: `./scripts/deploy.sh`
-
-## 서비스
-- API: http://localhost:3000/api
-- Admin: http://localhost:3001
-- Redis: localhost:6379
-
-## 환경변수 필수
-- DATABASE_URL
-- REDIS_URL
-- JWT_SECRET
-
-## 주의사항
-- DB 마이그레이션은 항상 백업 후 실행
-- Redis는 개발 시 docker compose로 자동 실행
-```
+**예시**: `resources/06-enterprise-claudemd.md` 하단 참조.
 
 ### ❌ Skills로 분리할 것
 
@@ -409,80 +233,17 @@ Read claude.md (또는 CLAUDE.md)
 - React 패턴 → `patterns-react`
 - Backend 아키텍처 → `patterns-backend`
 - API 설계 → `patterns-api`
-- 테스트 가이드 → `test-guidelines`
+- 테스트 가이드 → `code-review` (Test Review)
 - 에러 핸들링 → `patterns-error-handling`
-- 보안 → `review-security`
+- 보안 → `security`
 
 ---
 
 ## 대규모 프로젝트 CLAUDE.md
 
-대규모 엔터프라이즈 프로젝트는 일반 권장 범위를 초과할 수 있습니다.
+200줄+ CLAUDE.md가 필요한 경우 (DDD, 규제 준수, 복잡한 체크리스트 등)의 권장 구조, 코드 예시 패턴 (올바름/잘못됨), 체크리스트 패턴.
 
-### 언제 200줄+ CLAUDE.md가 필요한가?
-
-- 프로젝트 고유 규칙이 많은 경우 (REST API 표준, 로깅 표준, i18n 등)
-- DDD 같은 복잡한 아키텍처를 사용하는 경우
-- 규제 준수 요구사항이 있는 경우 (금융, 의료 등)
-- 체크리스트가 필요한 경우 (새 Controller, 새 Service 등)
-
-### 대규모 프로젝트 권장 섹션
-
-```markdown
-1. Project Overview        # 프로젝트 개요
-2. Quick Commands          # 개발 명령어
-3. Services                # 서비스 엔드포인트
-4. Environment Variables   # 환경변수
-5. Architecture            # 아키텍처 가이드라인 (패키지 구조, 계층 의존성)
-6. REST API Standards      # API 응답 패턴, 로깅 표준
-7. Internationalization    # i18n 메시지 사용법
-8. Swagger Documentation   # API 문서화 규칙
-9. Checklists              # 체크리스트 (새 컨트롤러, 새 서비스, PR)
-10. Testing Strategy       # 테스트 전략, 디렉토리 구조
-11. Troubleshooting        # 자주 발생하는 문제 해결
-12. References             # 상세 문서 링크
-```
-
-### 코드 예시 패턴 (✅/❌)
-
-올바른 방법과 잘못된 방법을 대비하여 명확하게 가이드:
-
-```java
-// ✅ 올바른 패턴: ApiResult 래퍼 사용
-@PostMapping
-public ResponseEntity<ApiResult<UserResponse>> createUser(...) {
-    return ResponseEntity.status(HttpStatus.CREATED)
-        .body(ApiResult.success(response, message));
-}
-
-// ❌ 잘못된 패턴: ApiResult 없이 직접 반환
-@GetMapping
-public ResponseEntity<List<UserResponse>> getUsers() {
-    return ResponseEntity.ok(service.getAll());  // 이렇게 하지 마세요
-}
-```
-
-**효과**: AI가 명확한 패턴을 학습하여 일관된 코드 생성
-
-### 체크리스트 패턴
-
-새 기능 구현 시 빠뜨리기 쉬운 사항을 명시적으로 나열:
-
-```markdown
-### New Controller Checklist
-
-- [ ] **ApiResult 패턴 적용**: 모든 엔드포인트가 `ResponseEntity<ApiResult<T>>` 반환
-- [ ] **MessageSourceService 주입**: 다국어 메시지 처리를 위해 필수
-- [ ] **Swagger 문서화**: `@Tag`, `@Operation`, `@ApiResponses` 어노테이션 추가
-- [ ] **로깅 표준 준수**: GET은 `debug`, POST/PUT/DELETE는 `info` 레벨
-- [ ] **메시지 파일 업데이트**: messages_ko.properties에 메시지 키 추가
-```
-
-**효과**: AI가 코드 생성 후 자체 검증 가능
-
-### 템플릿
-
-대규모 프로젝트용 템플릿: `templates/enterprise.md`
+상세 가이드 및 템플릿: `resources/06-enterprise-claudemd.md` 참조.
 
 ## 체크리스트
 
@@ -532,11 +293,64 @@ Assistant:
 3. 커스터마이징
 4. claude.md 생성
 
+---
+
+## Workflow: 커맨드 생성
+
+요구사항 파악 → 유형 선택 (batch-processor / pipeline / interactive / simple) → 위치 결정 (프로젝트 `.claude/commands/` vs 전역 `~/.claude/commands/`) → 기존 확인 → 생성.
+
+상세 절차 및 유형별 키워드: `resources/01-commands-reference.md` 참조.
+
+---
+
+## Workflow: Rules 생성
+
+기존 rules 확인 → 스코프 결정 → CLAUDE.md vs rules/ 판단 (항상 적용 → CLAUDE.md, 특정 경로 → rules/) → paths frontmatter 설정 → 생성.
+
+상세 절차 및 판단 기준: `resources/02-rules-reference.md` 참조.
+
+---
+
+## Workflow: Hooks 설정
+
+프로젝트 분석 (언어/프레임워크 감지) → 적합한 레시피 선택 → settings.json 생성 → `/hooks`에서 리뷰 안내.
+
+설정 위치: 글로벌 `~/.claude/settings.json` / 프로젝트 `.claude/settings.json` / 로컬 `.claude/settings.local.json`.
+
+상세 레퍼런스: `resources/03-hooks-reference.md`, 레시피: `resources/04-hooks-recipes.md` 참조.
+
+---
+
 ## Technical Details
 
-템플릿은 `templates/` 디렉토리 참조:
+CLAUDE.md 템플릿은 `templates/` 디렉토리 참조:
 - minimal.md: 최소 구성
 - web-app.md: 웹앱 프로젝트
 - api-server.md: API 서버
 - monorepo.md: 모노레포
 - enterprise.md: 엔터프라이즈 프로젝트 (DDD, 규제 준수)
+
+Command 템플릿은 `templates/commands/` 디렉토리 참조:
+- simple.md, batch-processor.md, interactive.md, pipeline.md
+
+Hook 템플릿은 `templates/hooks/` 디렉토리 참조:
+- post-edit.sh, recipe-template.yaml
+
+Hook 레시피는 `recipes/` 디렉토리 참조:
+- auto-save-state.yaml, post-edit-lint.yaml, post-edit-test.yaml, pre-bash-guard.yaml, on-complete-log.yaml
+
+---
+
+## Workflow: 운용 최적화
+
+위임 판단, 백그라운드 실행, 컨텍스트 관리, 블로킹 최소화 패턴.
+
+상세 가이드: `resources/07-operations-guide.md` 참조.
+
+---
+
+## Workflow: Skill 설치/관리
+
+외부 skill 탐색, 설치, 업데이트, 제거. `npx add-skill` 기반.
+
+설치 절차: `resources/08-skill-installer.md`, 추천 저장소: `resources/09-registries.md` 참조.
