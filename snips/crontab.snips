@@ -32,6 +32,11 @@ snippet cronenv "need `mkdir ~/logs`"
 * * * * * printenv > $HOME/logs/cronenv
 endsnippet
 
+snippet every_30mins ""
+# 00:00, 00:30, 01:00
+*/30 * * * * date
+endsnippet
+
 snippet shell_env ""
 SHELL=/bin/zsh
 PATH=$PATH

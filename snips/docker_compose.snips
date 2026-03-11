@@ -1,3 +1,4 @@
 extends docker_compose/syntax
 extends docker_compose/service
 extends docker_compose/feature
+extends docker_compose/env
