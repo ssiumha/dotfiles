@@ -137,32 +137,61 @@ function! webdav#buffer#update_version(response)
   endif
 endfunction
 
-" Reload WebDAV buffer (called by :e! command via BufReadCmd)
-function! webdav#buffer#reload()
-  " Extract path from buffer name (webdav://<url><path>)
-  let buffer_name = expand('%')
+" Parse buffer name to extract server info and path
+" Input: 'webdav://http://server:port/path/to/file.md'
+" Returns: {'url': 'http://server:port', 'path': '/path/to/file.md', 'server_name': 'name'}
+function! webdav#buffer#parse_buffer_name(name)
+  let result = {'url': '', 'path': '', 'server_name': ''}
+  let rest = substitute(a:name, '^webdav://', '', '')
 
-  " Verify this is a WebDAV buffer
+  " Scan all configured servers for URL prefix match
+  let servers = webdav#server#scan()
+  for [sname, info] in items(servers)
+    if rest =~# '^' . escape(info.url, '/.\')
+      let result.url = info.url
+      let result.path = rest[len(info.url):]
+      let result.server_name = sname
+      if result.path !~# '^/'
+        let result.path = '/' . result.path
+      endif
+      return result
+    endif
+  endfor
+
+  " Fallback: parse protocol://host:port from buffer name
+  let m = matchlist(rest, '^\(https\?://[^/]\+\)\(/.*\)$')
+  if !empty(m)
+    let result.url = m[1]
+    let result.path = m[2]
+  endif
+  return result
+endfunction
+
+" Reload WebDAV buffer (called by :e! command via BufReadCmd)
+" Handles both normal reload (:e!) and restoration after bufhidden=wipe
+function! webdav#buffer#reload()
+  let buffer_name = expand('%')
   if buffer_name !~# '^webdav://'
     echoerr "Error: Not a WebDAV buffer"
     return
   endif
 
-  " Verify buffer is managed
-  if !exists('b:webdav_managed') || !b:webdav_managed
-    echoerr "Error: Not a WebDAV-managed buffer"
+  " Fast path: buffer variables still exist
+  if exists('b:webdav_managed') && b:webdav_managed && exists('b:webdav_original_path')
+    call webdav#file#get(b:webdav_original_path, get(b:, 'webdav_server', ''))
     return
   endif
 
-  " Get the original path from buffer variable
-  if !exists('b:webdav_original_path')
-    echoerr "Error: WebDAV path not found"
+  " Slow path: buffer was wiped, restore from buffer name
+  let parsed = webdav#buffer#parse_buffer_name(buffer_name)
+  if empty(parsed.path)
+    echoerr "Error: Cannot parse WebDAV buffer name: " . buffer_name
     return
   endif
 
-  let path = b:webdav_original_path
-
-  " Force reload by calling webdav#file#get
-  " This will discard any unsaved changes (standard :e! behavior)
-  call webdav#file#get(path)
+  if !empty(parsed.server_name)
+    call webdav#file#get(parsed.path, parsed.server_name)
+  else
+    call webdav#file#get_absolute(parsed.url, parsed.path, '')
+  endif
 endfunction

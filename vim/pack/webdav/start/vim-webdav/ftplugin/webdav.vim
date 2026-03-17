@@ -27,7 +27,7 @@ nnoremap <buffer> <silent> - :WebDAVList<CR>
 " Key mappings for wikilink navigation
 " gf: follow wikilink under cursor (like vim's gf for goto file)
 nnoremap <buffer> <silent> gf :call webdav#wikilink#open()<CR>
-" Enter: also follow wikilink (convenient for quick navigation)
-nnoremap <buffer> <silent> <CR> :call webdav#wikilink#open()<CR>
+" Note: <CR> mapping is handled by note.vim's OpenWiki() which dispatches to
+" webdav#wikilink#open() for WebDAV buffers
 
-let b:undo_ftplugin = "setlocal noswapfile< statusline< | silent! nunmap <buffer> - | silent! nunmap <buffer> gf | silent! nunmap <buffer> <CR>"
+let b:undo_ftplugin = "setlocal noswapfile< statusline< | silent! nunmap <buffer> - | silent! nunmap <buffer> gf"

@@ -193,11 +193,11 @@ function! webdav#operations#rename()
   if !empty(check_cmd)
     " Modify PROPFIND to only check if resource exists (Depth: 0)
     let check_cmd = substitute(check_cmd, '-H "Depth: 1"', '-H "Depth: 0"', '')
-    let check_response = system(check_cmd)
+    let check_result = webdav#http#execute(check_cmd)
 
-    if v:shell_error == 0
+    if check_result.success
       " Parse HTTP status
-      let http_code = webdav#core#extract_http_code(check_response)
+      let http_code = webdav#core#extract_http_code(check_result.response)
 
       if http_code == 207 || (http_code >= 200 && http_code < 300)
         " Destination exists - ask for confirmation

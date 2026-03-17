@@ -62,7 +62,6 @@ function! webdav#wikilink#resolve(target, current_path, vault_root)
   " Add .md extension if not present
   let target = s:ensure_extension(target)
 
-  " Use vault_root as-is (no fallback - requires explicit configuration)
   let vault_root = a:vault_root
 
   " Determine link type and resolve
@@ -75,9 +74,19 @@ function! webdav#wikilink#resolve(target, current_path, vault_root)
     let resolved = current_dir . '/' . target
     return s:normalize_path(resolved)
   else
-    " Filename only: look in current directory
+    " Filename only: search vault-wide (Obsidian behavior)
     let current_dir = fnamemodify(a:current_path, ':h')
-    return s:normalize_path(current_dir . '/' . target)
+    let local_path = s:normalize_path(current_dir . '/' . target)
+
+    " Try vault-wide search via PROPFIND cache
+    let server_name = exists('b:webdav_server') ? b:webdav_server : ''
+    let vault_path = s:search_vault_cache(target, vault_root, server_name)
+    if !empty(vault_path)
+      return vault_path
+    endif
+
+    " Fallback: current directory
+    return local_path
   endif
 endfunction
 
@@ -110,9 +119,38 @@ function! s:normalize_path(path)
   return '/' . join(result, '/')
 endfunction
 
+" Search vault-wide for a filename using PROPFIND scan cache
+" Returns: resolved absolute path, or '' if not found
+function! s:search_vault_cache(filename, vault_root, server_name) abort
+  let server_info = webdav#server#get_info(a:server_name)
+  if empty(server_info) || empty(server_info.url)
+    return ''
+  endif
+
+  let cache_key = webdav#cache#get_key(a:server_name, server_info.url)
+  let scan_cache = webdav#cache#get_data()
+  let base_path = empty(a:vault_root) ? '/' : a:vault_root
+  if base_path !~ '/$'
+    let base_path .= '/'
+  endif
+
+  if !has_key(scan_cache, cache_key) || !has_key(scan_cache[cache_key], base_path)
+    return ''
+  endif
+
+  let files = scan_cache[cache_key][base_path]
+  let target_name = '/' . a:filename
+  for f in files
+    if f =~# escape(target_name, '.') . '$'
+      return s:normalize_path(base_path . f)
+    endif
+  endfor
+
+  return ''
+endfunction
+
 " Get vault root for server
-" Requires explicit configuration via g:webdav_vault_roots
-" Example: let g:webdav_vault_roots = { 'default': '/vault' }
+" Reads from g:webdav_vault_roots configuration
 function! webdav#wikilink#get_vault_root(server_name)
   let vault_roots = get(g:, 'webdav_vault_roots', {})
 
@@ -126,7 +164,6 @@ function! webdav#wikilink#get_vault_root(server_name)
     return vault_roots['default']
   endif
 
-  " No auto-detect: require explicit configuration
   return ''
 endfunction
 
@@ -148,9 +185,7 @@ function! webdav#wikilink#open()
 
   " Get current file info
   let current_path = b:webdav_original_path
-  let server_name = exists('b:webdav_server') ? b:webdav_server : ''
-
-  " Get vault root
+  let server_name = get(b:, 'webdav_server', '')
   let vault_root = webdav#wikilink#get_vault_root(server_name)
 
   " Debug output
@@ -170,27 +205,8 @@ function! webdav#wikilink#open()
     return 0
   endif
 
-  " Check if resolved path is outside server's base path
-  let server_info = webdav#server#get_info(server_name)
-  let server_url = server_info.url
-  let host_end = matchend(server_url, '://[^/]*')
-
-  if host_end != -1 && host_end < len(server_url)
-    let server_host = server_url[0 : host_end - 1]
-    let server_base = server_url[host_end :]
-
-    " If resolved_path doesn't start with server_base -> external path
-    if resolved_path !~# '^' . escape(server_base, '/.')
-      if get(g:, 'webdav_debug', 0)
-        echom '[wikilink] external path detected: ' . resolved_path . ' (base: ' . server_base . ')'
-      endif
-      " Use host only for external paths
-      call webdav#file#get_absolute(server_host, resolved_path, server_name)
-      return 1
-    endif
-  endif
-
-  " Open the file (webdav#file#get handles 404 for new files)
+  " Open the file in a new tab
+  tabnew
   call webdav#file#get(resolved_path, server_name)
   return 1
 endfunction

@@ -123,24 +123,6 @@ cat > /var/webdav/vault/nested/path/subdir/note.md << 'EOF'
 Quick capture content.
 EOF
 
-# External path test: file outside server base path but within vault_root
-# Server base: /vault/nested/path
-# Vault root: /vault
-# External file: /vault/external/shared.md
-mkdir -p /var/webdav/vault/external
-
-cat > /var/webdav/vault/external/shared.md << 'EOF'
-# Shared External File
-
-This file is outside the server base path but within vault root.
-EOF
-
-# Add link to external file in deep vault
-cat > /var/webdav/vault/nested/path/link-to-external.md << 'EOF'
-# Link to External
-
-- [[/external/shared.md]]
-EOF
 
 # Set permissions
 chmod -R 777 /var/webdav

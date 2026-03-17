@@ -10,7 +10,7 @@ function! webdav#file#get(path, server_name = '')
     let server_name = a:server_name
   elseif exists('b:webdav_managed') && b:webdav_managed
     " Use current buffer's server info
-    let server_name = exists('b:webdav_server') ? b:webdav_server : ''
+    let server_name = get(b:, 'webdav_server', '')
   else
     let server_name = ''
   endif
@@ -71,7 +71,7 @@ function! webdav#file#get(path, server_name = '')
     if !empty(body)
       echoerr "Error: Server does not provide ETag or Last-Modified headers"
       echoerr "Cannot safely edit file without conflict detection"
-      echoerr "DEBUG: Response headers received:"
+      echoerr "Response headers received:"
       for header in header_lines
         echoerr "  " . header
       endfor
@@ -96,7 +96,7 @@ function! webdav#file#put()
 
   try
     " Get server info from buffer (using server name if available)
-    let server_name = exists('b:webdav_server') ? b:webdav_server : ''
+    let server_name = get(b:, 'webdav_server', '')
     let server_info = webdav#server#get_info(server_name)
 
     " Use base_url if set (for external path files opened via wikilink)

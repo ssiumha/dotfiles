@@ -49,6 +49,20 @@ function! webdav#core#join_path(base_path, relative_item)
   return safe_base . safe_item
 endfunction
 
+" Compute parent directory path
+" Example: '/test/folder/' -> '/test/', '/test/file.txt' -> '/test/'
+function! webdav#core#parent_path(path)
+  let clean = substitute(a:path, '/$', '', '')
+  if clean !~ '/'
+    return '/'
+  endif
+  let parent = substitute(clean, '/[^/]*$', '/', '')
+  if parent !~ '/$'
+    let parent .= '/'
+  endif
+  return parent
+endfunction
+
 " Helper function to extract HTTP status code from response
 " Returns integer HTTP code (e.g., 200, 404, 500)
 function! webdav#core#extract_http_code(response)

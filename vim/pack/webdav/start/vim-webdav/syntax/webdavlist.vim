@@ -26,6 +26,7 @@ syntax match webdavFile '^[^"[:space:]][^/]*$'
 highlight default link webdavComment Comment
 highlight default link webdavParent Special
 highlight default link webdavDirectory Directory
+highlight default link webdavAction Title
 highlight default link webdavFile Normal
 
 let b:current_syntax = "webdavlist"

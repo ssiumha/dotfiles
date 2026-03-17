@@ -92,9 +92,10 @@ function! webdav#note#open(pattern_name, ...)
   " Handle title prompt if pattern requires it
   let title = ''
   if has_key(pattern, 'prompt_title')
-    " Empty string uses default date format (%y%m%d)
-    " Non-empty string uses custom date format
-    if empty(pattern.prompt_title)
+    " v:null = no prefix, empty string = default %y%m%d, otherwise custom format
+    if pattern.prompt_title is v:null
+      let date_prefix = ''
+    elseif empty(pattern.prompt_title)
       let date_prefix = strftime('%y%m%d ', timestamp)
     else
       let date_prefix = strftime(pattern.prompt_title, timestamp)

@@ -7,29 +7,8 @@ let g:loaded_webdav = 1
 let g:webdav_preview_enabled = get(g:, 'webdav_preview_enabled', 1)
 let g:webdav_preview_lines = get(g:, 'webdav_preview_lines', 200)
 let g:webdav_preview_use_bat = get(g:, 'webdav_preview_use_bat', 1)
-
-" Wikilink settings
-" Vault roots per server: {'server_name': '/vault/', 'default': '/'}
+let g:webdav_fzf_max_depth = get(g:, 'webdav_fzf_max_depth', 3)
 let g:webdav_vault_roots = get(g:, 'webdav_vault_roots', {})
-" Policy for non-existent files: 'prompt', 'create', 'error'
-let g:webdav_wikilink_create_policy = get(g:, 'webdav_wikilink_create_policy', 'prompt')
-
-" Constants for HTTP response parsing
-
-" Helper function to get server name from buffer or default URL
-" Returns server_name string, or v:null if validation failed
-
-
-" Parse WebDAV URL with authentication
-" Input: https://user:pass@host:port/path or http://host/path
-" Returns: {'url': 'https://host:port/path', 'user': 'user', 'pass': 'pass'}
-
-" Scan environment variables for WEBDAV_UI_* pattern
-" Returns: Dictionary of {name: {url: 'url', user: 'user', 'pass': 'pass'}, ...}
-
-" Get server info by server name
-" Returns: Dictionary with 'url', 'user', 'pass' keys
-" Priority: WEBDAV_UI_{NAME} -> WEBDAV_UI_DEFAULT -> WEBDAV_DEFAULT_* -> error
 
 " Public wrapper for webdav#file#get (called from autoload/webdav/fzf.vim)
 function! WebDAVGet(path, server_name = '')
@@ -52,6 +31,9 @@ command! WebDAVRecent call webdav#recent#list()
 command! WebDAVRecentFzf call webdav#recent#fzf()
 command! -nargs=+ WebDAVNote call webdav#note#open(<f-args>)
 command! -nargs=0 WebDAVFollowLink call webdav#wikilink#open()
+command! -nargs=1 WebDAVGrep call webdav#search#grep(<q-args>)
+command! WebDAVGrepFzf call webdav#search#grep_fzf()
+command! WebDAVBacklinks call webdav#search#backlinks()
 
 " Setup autocmd for WebDAV buffers (ONLY for webdav:// protocol buffers)
 augroup webdav_buffers
@@ -74,10 +56,6 @@ if exists('$WEBDAV_TEST_MODE') && $WEBDAV_TEST_MODE == '1'
 
   function! TestGetScanCache()
     return webdav#cache#get_data()
-  endfunction
-
-  function! TestWebDAVFzfOpen(base_path, selection)
-    return s:WebDAVFzfOpen(a:base_path, a:selection)
   endfunction
 
   function! TestGetRecentFiles()
@@ -112,35 +90,8 @@ if exists('$WEBDAV_TEST_MODE') && $WEBDAV_TEST_MODE == '1'
     return webdav#wikilink#get_vault_root(a:server_name)
   endfunction
 
-  function! TestSetVaultRoot(key, value)
-    if !exists('g:webdav_vault_roots')
-      let g:webdav_vault_roots = {}
-    endif
-    let g:webdav_vault_roots[a:key] = a:value
-  endfunction
-
-  " No-arg version for shell escaping issues in tests
-  function! TestSetDefaultVaultRoot()
-    if !exists('g:webdav_vault_roots')
-      let g:webdav_vault_roots = {}
-    endif
-    let g:webdav_vault_roots['default'] = '/vault'
-  endfunction
-
-  " Deep path vault root for testing
-  function! TestSetDeepVaultRoot()
-    if !exists('g:webdav_vault_roots')
-      let g:webdav_vault_roots = {}
-    endif
-    let g:webdav_vault_roots['default'] = '/vault/nested/path'
-  endfunction
-
-  " Vault root at /vault (for external path testing)
-  function! TestSetVaultOnlyRoot()
-    if !exists('g:webdav_vault_roots')
-      let g:webdav_vault_roots = {}
-    endif
-    let g:webdav_vault_roots['default'] = '/vault'
+  function! TestSetVaultRoot(server_name, root)
+    let g:webdav_vault_roots[a:server_name] = a:root
   endfunction
 endif
 

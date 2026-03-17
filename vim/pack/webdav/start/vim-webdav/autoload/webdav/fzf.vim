@@ -226,7 +226,24 @@ function! webdav#fzf#handle_sink(base_path, fzf_args, server_name, result)
   endif
 endfunction
 
-" Main fzf interface with recursive scanning and caching
+" Resolve script directory at load time (not inside functions)
+let s:plugin_root = fnamemodify(resolve(expand('<sfile>:p')), ':h:h:h')
+
+" Build streaming scan shell command
+function! webdav#fzf#build_scan_cmd(base_path, server_info, max_depth) abort
+  let script = s:plugin_root . '/scripts/scan-bfs.sh'
+  let auth_arg = ''
+  if !empty(a:server_info.user) && !empty(a:server_info.pass)
+    let auth_arg = '-u ' . a:server_info.user . ':' . a:server_info.pass
+  endif
+  return 'bash ' . shellescape(script)
+    \ . ' ' . shellescape(a:server_info.url)
+    \ . ' ' . shellescape(a:base_path)
+    \ . ' ' . a:max_depth
+    \ . ' ' . shellescape(auth_arg)
+endfunction
+
+" Main fzf interface with streaming BFS scan
 " Usage: :WebDAVFzf [server_name] [path] or :WebDAVFzf [path]
 " :WebDAVFzf! - Force cache refresh
 function! webdav#fzf#main(args, force_refresh)
@@ -260,12 +277,14 @@ function! webdav#fzf#main(args, force_refresh)
   let server_name = resolved.server_name
   let server_info = webdav#server#get_info(server_name)
 
-  " DEBUG: Log FZF start state
-  call webdav#core#debug_log("DEBUG FZF START: server_name=" . string(server_name))
-  call webdav#core#debug_log("DEBUG FZF START: server_info.url=" . string(server_info.url))
-  call webdav#core#debug_log("DEBUG FZF START: base_path=" . string(base_path))
+  " Check if fzf is available
+  if !executable('fzf')
+    echoerr "Error: fzf is not installed"
+    return
+  endif
 
-  " Check cache (key: server_name@url + path)
+  " Determine source: cached list or streaming scan
+  let max_depth = get(g:, 'webdav_fzf_max_depth', 3)
   let cache_key = webdav#cache#get_key(server_name, server_info.url)
   let scan_cache = webdav#cache#get_data()
 
@@ -273,31 +292,12 @@ function! webdav#fzf#main(args, force_refresh)
     let scan_cache[cache_key] = {}
   endif
 
-  let files = []
-
-  if a:force_refresh || !has_key(scan_cache[cache_key], base_path)
-    " Scan directories recursively
-    echo "Scanning " . server_info.url . base_path . " recursively..."
-    let files = webdav#fzf#scan_recursive(base_path, resolved.server_name)
-
-    " Cache results
-    let scan_cache[cache_key][base_path] = files
-    echo "Found " . len(files) . " files"
+  if !a:force_refresh && has_key(scan_cache[cache_key], base_path)
+    let source = scan_cache[cache_key][base_path]
+    echo "Using cached results: " . len(source) . " files"
   else
-    " Use cached results
-    let files = scan_cache[cache_key][base_path]
-    echo "Using cached results: " . len(files) . " files (cache_key: " . cache_key . ")"
-  endif
-
-  if empty(files)
-    echo "No files found in " . base_path
-    return
-  endif
-
-  " Check if fzf is available
-  if !executable('fzf')
-    echoerr "Error: fzf is not installed"
-    return
+    " Use streaming shell command as fzf source
+    let source = webdav#fzf#build_scan_cmd(base_path, server_info, max_depth)
   endif
 
   " Build fzf options (responsive layout based on terminal width)
@@ -334,8 +334,9 @@ function! webdav#fzf#main(args, force_refresh)
   endif
 
   " Launch fzf (80% window size for better visibility)
+  " source: string → streaming shell command, list → cached results
   call fzf#run(fzf#wrap({
-    \ 'source': files,
+    \ 'source': source,
     \ 'sink*': function('webdav#fzf#handle_sink', [base_path, a:args, resolved.server_name]),
     \ 'options': fzf_options,
     \ 'down': '80%'

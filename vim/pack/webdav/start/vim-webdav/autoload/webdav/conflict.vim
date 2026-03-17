@@ -30,7 +30,7 @@ function! webdav#conflict#diff()
   let local_modified = &modified
 
   " Step 2: Get server info
-  let server_name = exists('b:webdav_server') ? b:webdav_server : ''
+  let server_name = get(b:, 'webdav_server', '')
   let server_info = webdav#server#get_info(server_name)
   let original_path = b:webdav_original_path
 
@@ -66,7 +66,7 @@ function! webdav#conflict#diff()
   let timestamp = strftime('%Y%m%d-%H%M%S')
   let basename = fnamemodify(original_path, ':t')
   let extension = fnamemodify(original_path, ':e')
-  let temp_file = '/tmp/webdav-diff-' . timestamp . '-' . basename
+  let temp_file = tempname() . '-' . basename
 
   call writefile(local_lines, temp_file)
 

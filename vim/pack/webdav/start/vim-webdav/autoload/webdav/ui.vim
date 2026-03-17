@@ -95,7 +95,7 @@ function! webdav#ui#list(path = '/', server_name = '')
     else
       let current_path = a:path
     endif
-    let server_name = exists('b:webdav_server') ? b:webdav_server : ''
+    let server_name = get(b:, 'webdav_server', '')
   else
     let current_path = a:path
     let server_name = ''
@@ -141,48 +141,35 @@ function! webdav#ui#list(path = '/', server_name = '')
   normal! gg
 endfunction
 
+" Check if line is a navigable item (not comment, empty, or action item)
+function! s:is_navigable(line) abort
+  return !empty(trim(a:line)) && a:line !~ '^"' && a:line != '+New' && a:line != '+Folder'
+endfunction
+
 " Handle opening files/folders from list buffer (Enter key handler)
 function! webdav#ui#open()
   let line = getline('.')
-  if empty(trim(line)) || line =~ '^"'
-    return
-  endif
-
-  " Handle special action items
-  if line == '+New'
-    call webdav#operations#create_file(b:webdav_current_path)
-    return
-  elseif line == '+Folder'
-    call webdav#operations#create_folder(b:webdav_current_path)
-    return
-  endif
-
-  " Get current buffer's server info to pass to new tab
-  let current_server = exists('b:webdav_server') ? b:webdav_server : ''
-
-  " Handle parent directory
-  if line == '../'
-    let current = b:webdav_current_path
-    " Remove trailing slash if present, then remove last path component
-    let clean_path = substitute(current, '/$', '', '')
-    let parent = substitute(clean_path, '/[^/]*$', '/', '')
-    " Ensure parent ends with /
-    if parent !~ '/$'
-      let parent .= '/'
+  if !s:is_navigable(line)
+    if line == '+New'
+      call webdav#operations#create_file(b:webdav_current_path)
+    elseif line == '+Folder'
+      call webdav#operations#create_folder(b:webdav_current_path)
     endif
-    call webdav#ui#list(parent, current_server)
     return
   endif
 
-  " Build full path from current path and relative name
+  let current_server = get(b:, 'webdav_server', '')
+
+  if line == '../'
+    call webdav#ui#list(webdav#core#parent_path(b:webdav_current_path), current_server)
+    return
+  endif
+
   let path = webdav#core#join_path(b:webdav_current_path, line)
 
-  " Check if it's a directory (ends with /)
   if line =~ '/$'
-    " Open directory in current buffer
     call webdav#ui#list(path, current_server)
   else
-    " Open file in current buffer
     call WebDAVGet(path, current_server)
   endif
 endfunction
@@ -190,63 +177,42 @@ endfunction
 " Open in new tab (t key handler)
 function! webdav#ui#open_in_tab()
   let line = getline('.')
-  if empty(trim(line)) || line =~ '^"'
-    return
-  endif
-
-  " Handle special action items
-  if line == '+New'
-    call webdav#operations#create_file(b:webdav_current_path)
-    return
-  elseif line == '+Folder'
-    call webdav#operations#create_folder(b:webdav_current_path)
-    return
-  endif
-
-  let current_server = exists('b:webdav_server') ? b:webdav_server : ''
-
-  " Handle parent directory
-  if line == '../'
-    let current = b:webdav_current_path
-    let clean_path = substitute(current, '/$', '', '')
-    let parent = substitute(clean_path, '/[^/]*$', '/', '')
-    if parent !~ '/$'
-      let parent .= '/'
+  if !s:is_navigable(line)
+    if line == '+New'
+      call webdav#operations#create_file(b:webdav_current_path)
+    elseif line == '+Folder'
+      call webdav#operations#create_folder(b:webdav_current_path)
     endif
+    return
+  endif
+
+  let current_server = get(b:, 'webdav_server', '')
+
+  if line == '../'
     tabnew
-    call webdav#ui#list(parent, current_server)
+    call webdav#ui#list(webdav#core#parent_path(b:webdav_current_path), current_server)
     return
   endif
 
   let path = webdav#core#join_path(b:webdav_current_path, line)
 
+  tabnew
   if line =~ '/$'
-    tabnew
     call webdav#ui#list(path, current_server)
   else
-    tabnew
     call WebDAVGet(path, current_server)
   endif
 endfunction
 
 " Go to parent directory (- key handler)
 function! webdav#ui#go_up()
-  let current = b:webdav_current_path
-  let current_server = exists('b:webdav_server') ? b:webdav_server : ''
-
-  " Remove trailing slash
-  let clean_path = substitute(current, '/$', '', '')
-
-  " Get parent directory
-  let parent = substitute(clean_path, '/[^/]*$', '/', '')
-
-  " Ensure it ends with /
-  if parent !~ '/$'
-    let parent .= '/'
+  let current_server = get(b:, 'webdav_server', '')
+  let vault_root = webdav#wikilink#get_vault_root(current_server)
+  if !empty(vault_root) && b:webdav_current_path == vault_root
+    echo "Already at vault root: " . vault_root
+    return
   endif
-
-  " Open parent in current buffer
-  call webdav#ui#list(parent, current_server)
+  call webdav#ui#list(webdav#core#parent_path(b:webdav_current_path), current_server)
 endfunction
 
 " FZF-based server selection menu (alternative to webdav#ui#main)
