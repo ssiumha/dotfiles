@@ -286,3 +286,43 @@ snippet template_remote_buildkit ".services"
     privileged: true
     restart: no
 endsnippet
+
+snippet service_wireguard "wireguard vpn server"
+services:
+  wireguard:
+    image: lscr.io/linuxserver/wireguard
+    container_name: wireguard
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Seoul
+      - SERVERURL=<YOUR_SERVER_URL>
+      - SERVERPORT=51820
+      - PEERS=3
+      - PEERDNS=8.8.8.8
+    volumes:
+      - ./config/wireguard:/config
+    ports:
+      - 51820:51820/udp
+    restart: unless-stopped
+endsnippet
+
+snippet service_socat_tunnel "tcp tunnel via socat (e.g. db proxy)"
+services:
+  socat:
+    image: alpine/socat:1.8.0.0
+    ports:
+      - "3306:3306"
+    command:
+      - tcp-listen:3306,fork,reuseaddr,keepalive
+      - tcp-connect:remote-host:3306
+    restart: always
+    sysctls:
+      net.core.somaxconn: 1024
+      net.ipv4.tcp_tw_resuse: 1
+      net.ipv4.tcp_fin_timeout: 10
+endsnippet

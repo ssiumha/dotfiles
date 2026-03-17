@@ -70,3 +70,94 @@ require 'open3'
 stdout_str, stderr, status = Open3.capture3(%Q[cmd])
 stdout_str => String
 endsnippet
+
+snippet sshkit_proxy_jump "deploy via bastion with SSHKit"
+require 'bundler/inline'
+gemfile do
+  source 'https://rubygems.org'
+  gem 'sshkit', '~> 1.23'
+  gem 'net-ssh', '~> 7.3'
+  gem 'ed25519', '~> 1.3'
+  gem 'bcrypt_pbkdf', '~> 1.0'
+end
+
+require 'sshkit'
+require 'sshkit/dsl'
+require 'net/ssh/proxy/jump'
+include SSHKit::DSL
+
+SSHKit.config.output_verbosity = :debug
+
+BASTION = 'user@bastion-host'
+TARGET  = 'user@target-host'
+
+host = SSHKit::Host.new(
+  user: 'user',
+  hostname: 'target-host',
+  ssh_options: {
+    proxy: Net::SSH::Proxy::Jump.new(BASTION)
+  }
+)
+
+on host do
+  info capture(:hostname).strip
+  execute :ls
+end
+endsnippet
+
+snippet net_ssh_runner "basic Net::SSH command runner"
+require 'bundler/inline'
+gemfile do
+  source 'https://rubygems.org'
+  gem 'net-ssh'
+  gem 'ed25519'
+  gem 'bcrypt_pbkdf'
+end
+
+host = ARGV[0]
+user = ARGV[1]
+
+commands = ['ls -l', 'echo $SHELL']
+
+Net::SSH.start(host, user) do |ssh|
+  commands.each do |command|
+    ssh.exec!(command) do |channel, stream, data|
+      puts data
+    end
+  end
+  ssh.loop
+end
+endsnippet
+
+snippet rakefile_sshkit_deploy "Rakefile multi-server deploy via SSHKit + ProxyJump"
+require 'sshkit'
+require 'sshkit/dsl'
+require 'net/ssh/proxy/jump'
+require 'yaml'
+include SSHKit::DSL
+
+REGISTRY = 'registry.example.com'.freeze
+
+SERVERS = {
+  'app-1' => { service: 'api', tag: 'latest', host: 'user@10.0.1.11' },
+  'app-2' => { service: 'api', tag: 'latest', host: 'user@10.0.1.12' },
+  'web-1' => { service: 'nginx', tag: 'alpine', host: 'user@10.0.2.11' },
+}
+
+SERVERS.each do |name, args|
+  desc "Deploy #{args[:service]} to #{name}"
+  task "deploy:#{name}" do
+    proxy = Net::SSH::Proxy::Jump.new(ENV['PROXY_HOST'])
+    server = SSHKit::Host.new(
+      hostname: args[:host].split('@').last,
+      user: args[:host].split('@').first,
+      ssh_options: { proxy: }
+    )
+    on server do
+      info capture(:hostname).strip
+      execute :docker, "pull #{REGISTRY}/#{args[:service]}:#{args[:tag]}"
+      execute :docker, :compose, "up -d #{args[:service]}"
+    end
+  end
+end
+endsnippet

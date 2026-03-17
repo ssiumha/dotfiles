@@ -3,3 +3,39 @@ snippet tmux_target ""
 or
 %<pane-id>
 endsnippet
+
+snippet tmux_pane_runner "ruby: split pane and send commands"
+#!/usr/bin/env ruby
+
+# -d: don't attach to session
+`tmux split-window -v -d`
+
+# #D: pane id
+$pane_id = `tmux list-panes -F '#D'`.split.last
+
+def run(cmd)
+  `tmux send-keys -t #{$pane_id} '#{cmd}' C-m`
+end
+
+def last_line
+  `tmux capture-pane -p -J -t #{$pane_id}`.split.last
+end
+endsnippet
+
+snippet tmux_session_launcher "ruby: create session and window"
+#!/usr/bin/env ruby
+
+$session_name = 'dev'
+$app_name = 'app'
+$cmd = 'ruby server.rb'
+
+`tmux new-session -d -s '#{$session_name}'`
+
+if not `tmux list-windows -t #{$session_name} | grep '#{$app_name}'`.empty?
+  puts "window already exists"
+  exit 1
+end
+
+`tmux new-window -t #{$session_name}: -n '#{$app_name}' \
+  #{$cmd} || exit`
+endsnippet

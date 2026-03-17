@@ -42,6 +42,29 @@ docker run --rm -it \
     -m you@example.com --agree-tos --no-eff-email
 endsnippet
 
+snippet caddy_webdav "build caddy with webdav plugin"
+cat <<EOF | docker build -t caddy-webdav:latest -
+FROM caddy:2-builder-alpine AS builder
+RUN xcaddy build --with github.com/mholt/caddy-webdav
+FROM caddy:2-alpine
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+EOF
+
+cat <<EOF > /tmp/Caddyfile
+:8000
+route {
+  webdav {
+    root /data
+  }
+}
+EOF
+
+docker run --rm -p 8080:8000 \
+  -v /tmp/data:/data \
+  -v /tmp/Caddyfile:/etc/caddy/Caddyfile caddy-webdav:latest
+endsnippet
+
 snippet caddy_test_cert ""
 # can create certificates with mkcert
 # CAROOT="$(pwd)/pki" mkcert -ecdsa \

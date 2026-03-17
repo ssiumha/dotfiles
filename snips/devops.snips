@@ -1,3 +1,287 @@
 snippet scc "count lines of code; others: cloc, tokei"
 scc .
 endsnippet
+
+snippet docker_swarm_deploy "init swarm + service create/update"
+#!/bin/bash
+set -e
+
+if ! [ -x "$(command -v docker)" ]; then
+  echo "Docker is not installed. Installing Docker..."
+  sudo apt update
+  sudo apt install -y docker.io
+  sudo systemctl enable docker
+  sudo systemctl start docker
+  sudo usermod -aG docker "$(whoami)"
+  echo 'Log out and log back in to apply the group change'
+  exit 1
+fi
+
+if ! docker info | grep -q "Swarm: active"; then
+  echo "Docker swarm is not initialized. Initializing Docker swarm..."
+  docker swarm init
+fi
+
+SERVICE_NAME="my-service"
+
+if docker service ls | grep -q "${SERVICE_NAME}"; then
+  echo "Updating ${SERVICE_NAME}..."
+  docker service update \
+    --image my-service:latest \
+    --update-parallelism 1 \
+    --update-delay 10s \
+    --update-failure-action rollback \
+    "${SERVICE_NAME}"
+else
+  echo "Deploying ${SERVICE_NAME}..."
+  docker service create \
+    --name "${SERVICE_NAME}" \
+    --replicas 2 \
+    --update-delay 10s \
+    --update-parallelism 1 \
+    --update-failure-action rollback \
+    my-service:latest
+fi
+endsnippet
+
+snippet az_vm_run_command "execute script on Azure VM"
+# Run a script on an Azure VM
+az vm run-command invoke \
+  --resource-group <rg-name> \
+  --name <vm-name> \
+  --command-id RunShellScript \
+  --scripts "$(cat deploy.sh)"
+
+# List run-commands
+az vm run-command list \
+  --resource-group <rg-name> \
+  --location 'koreacentral' \
+  --vm-name <vm-name> -o table
+
+# Show result
+az vm run-command show \
+  --resource-group <rg-name> \
+  --name <vm-name> \
+  --command-id RunShellScript \
+  --location 'koreacentral' -o json
+endsnippet
+
+snippet nexus_repo_api "create Nexus repository via REST API"
+#!/usr/bin/env bash
+set -euxo pipefail
+
+NX_URL=${NX_URL:-"http://localhost:8081"}
+NX_USER="admin"
+NX_PASSWORD="password"
+
+repo_exists() {
+  curl -k -u "$NX_USER:$NX_PASSWORD" -s -o /dev/null -w "%{http_code}" \
+    "$NX_URL/service/rest/v1/repositories/$1" | grep -q "200"
+}
+
+# npm proxy
+repo_exists "npm-proxy" || \
+curl -vk -u "$NX_USER:$NX_PASSWORD" -X POST \
+  "$NX_URL/service/rest/v1/repositories/npm/proxy" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "npm-proxy",
+    "online": true,
+    "storage": { "blobStoreName": "default", "strictContentTypeValidation": true },
+    "proxy": { "remoteUrl": "https://registry.npmjs.org/", "contentMaxAge": -1, "metadataMaxAge": 1440 },
+    "negativeCache": { "enabled": true, "timeToLive": 1440 },
+    "httpClient": { "blocked": false, "autoBlock": true }
+  }'
+
+# apt proxy (Ubuntu noble)
+repo_exists "apt-noble-proxy" || \
+curl -vk -u "$NX_USER:$NX_PASSWORD" -X POST \
+  "$NX_URL/service/rest/v1/repositories/apt/proxy" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "apt-noble-proxy",
+    "online": true,
+    "storage": { "blobStoreName": "default", "strictContentTypeValidation": true },
+    "apt": { "distribution": "noble", "flat": false },
+    "proxy": { "remoteUrl": "http://archive.ubuntu.com/ubuntu/", "contentMaxAge": -1, "metadataMaxAge": 1440 },
+    "negativeCache": { "enabled": true, "timeToLive": 1440 },
+    "httpClient": { "blocked": false, "autoBlock": false }
+  }'
+endsnippet
+
+snippet docker_image_archive "pull and save images for offline transfer"
+#!/usr/bin/env bash
+set -euxo pipefail
+
+target_dir="./archives/images"
+mkdir -p "$target_dir"
+
+images=(
+  "caddy:2"
+  "sonatype/nexus3:latest"
+  "registry:3"
+  "ubuntu:24.04"
+)
+
+for image in "${images[@]}"; do
+  image_filename=$(echo "$image" | tr '/:' '__')".tar"
+  if [ -f "$target_dir/$image_filename" ]; then
+    echo "Skipping $image (already saved)"
+    continue
+  fi
+  docker pull --platform linux/amd64 "$image"
+  docker save -o "$target_dir/$image_filename" "$image"
+done
+endsnippet
+
+snippet caddy_internal_tls "Caddy reverse proxy with auto internal TLS"
+# Caddyfile
+{
+  admin off
+}
+
+nexus.example.internal:8081 {
+  tls internal
+  reverse_proxy nexus:8081
+}
+
+registry.example.internal:5000 {
+  tls internal
+  reverse_proxy registry:5000
+}
+
+# PKI certs auto-generated at:
+#   data/caddy/pki/authorities/local/root.crt
+#   data/caddy/pki/authorities/local/root.key
+#
+# Install root CA:
+#   Ubuntu: sudo cp root.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
+#   RHEL:   sudo cp root.crt /etc/pki/ca-trust/source/anchors/ && sudo update-ca-trust extract
+#   Docker: sudo cp root.crt /etc/docker/certs.d/<host>:443/ca.crt && sudo systemctl restart docker
+endsnippet
+
+snippet caddy_webdav "Caddy with WebDAV plugin (xcaddy build)"
+# Build
+FROM caddy:2-builder-alpine AS builder
+RUN xcaddy build --with github.com/mholt/caddy-webdav
+FROM caddy:2-alpine
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
+# Caddyfile
+# :8000
+# route {
+#   webdav { root /data }
+# }
+
+# docker run --rm -p 8080:8000 -v /data:/data -v Caddyfile:/etc/caddy/Caddyfile img
+endsnippet
+
+snippet docker_stack_full_deploy "rolling update all services in Docker Swarm"
+#!/bin/bash
+set -e
+
+REGISTRY="registry.example.com"
+SERVICES=(auth members homepage api)
+
+for svc in "${SERVICES[@]}"; do
+  printf "\e[1;32mDeploying %s $(date +'%Y-%m-%d %H:%M:%S')\e[0m\n" "$svc"
+  docker pull "$REGISTRY/$svc:latest"
+  docker service update \
+    --force \
+    --update-parallelism 1 \
+    --update-delay 10s \
+    "stack_$svc"
+  docker ps -a --filter "status=exited" -q | xargs -r docker rm
+  docker image prune -f
+done
+endsnippet
+
+snippet nextjs_action_generator "scaffold Next.js Server Action (clean architecture)"
+#!/bin/bash
+proj=$1; action=$2
+action_dir="apps/$proj/src/server/action/$action"
+mkdir -p "$action_dir"
+
+pascal=$(echo "$action" | perl -pe 's/(^[a-z]|-([a-z]))/\U$1/g')
+camel=$(echo "$action" | perl -pe 's/(-([a-z]))/\U$1/g')
+prefix="@${proj}/server/action/${action}/${action}"
+
+# Generates: .action.ts .request.ts .response.ts .use-case.ts .use-case.spec.ts
+# Pattern: Zod validation → UseCase (DI container) → Response DTO
+cat > "$action_dir/$action.action.ts" <<-EOF
+'use server'
+import { ${pascal}UseCase } from '${prefix}.use-case'
+import { getUseCase } from '@${proj}/server/provider/container'
+import { z } from 'zod'
+import { redirect } from 'next/navigation'
+
+const schema = z.object({ name: z.string({ required_error: 'required' }) })
+
+export async function ${camel}Action(prevState: string | undefined, formData: FormData) {
+  try {
+    const req = schema.parse(Object.fromEntries(formData.entries()))
+    await getUseCase(${pascal}UseCase).execute(req)
+  } catch (e) {
+    if (e instanceof z.ZodError) return e.issues.map(i => i.message)
+    return ['Unknown error']
+  }
+  redirect('/')
+}
+EOF
+endsnippet
+
+snippet ubuntu_deb_archive "download deb packages for offline install"
+#!/usr/bin/env bash
+set -euxo pipefail
+
+target_dir="./archives/debs"
+cache_dir="./.cache"
+mkdir -p "$target_dir" "$cache_dir"
+
+# packages.txt: one package per line, # for comments
+docker run --rm --platform linux/amd64 \
+  -v "$target_dir:/out" \
+  -v "$cache_dir/apt-cache:/var/cache/apt" \
+  ubuntu:24.04 bash -lc '
+  export DEBIAN_FRONTEND=noninteractive
+  echo "APT::Keep-Downloaded-Packages \"true\";" >/etc/apt/apt.conf.d/99keep
+  rm -f /etc/apt/apt.conf.d/docker-clean
+  apt-get update
+  PKGS=$(grep -vE "^\s*#" /out/packages.txt | tr "\n" " ")
+  apt-get install --download-only -y --no-install-recommends $PKGS
+  cp /var/cache/apt/archives/*.deb /out/
+'
+endsnippet
+
+snippet scoop_archive "download Windows Scoop packages for offline install"
+#!/usr/bin/env bash
+set -euxo pipefail
+
+scoop_url="https://raw.githubusercontent.com/ScoopInstaller"
+target_dir="./archives/scoop"
+mkdir -p "$target_dir"
+
+scoop_download() {
+  local bucket="$1" app="$2" fixed_ver="${3:-}"
+  local manifest=$(curl -sSL "$scoop_url/$bucket/refs/heads/master/bucket/$app.json")
+  local version url
+
+  if [[ -n "$fixed_ver" ]]; then
+    version="$fixed_ver"
+    url=$(echo "$manifest" | jq -r '.autoupdate.architecture["64bit"].url')
+    url=${url//\$version/$fixed_ver}
+  else
+    version=$(echo "$manifest" | jq -r '.version')
+    url=$(echo "$manifest" | jq -r '.architecture["64bit"].url // .url')
+  fi
+
+  local ext=$(echo "$url" | rev | cut -d. -f1 | rev)
+  local target="$target_dir/$app-$version.$ext"
+  [[ -f "$target" ]] && return
+  curl -L -o "$target" "$url"
+}
+
+# scoop_download "Main" "7zip"
+# scoop_download "Extras" "vscode"
+# scoop_download "Java" "temurin21-jdk"
+endsnippet

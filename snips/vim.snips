@@ -9,3 +9,30 @@ endsnippet
 snippet paste_redir_messages ""
 redir => output | silent messages | redir END | call setline(1, split(output, "\n"))
 endsnippet
+
+snippet nvim_lsp_headless "headless nvim LSP documentSymbol test"
+#!/bin/bash
+target_file=$1
+
+# kind: 1=File, 2=Module, 3=Namespace, 5=Class, 6=Method, 12=Function
+nvim \
+  --headless \
+  +'lua
+    filepath = vim.fn.expand("'"$target_file"'")
+    vim.cmd("edit " .. filepath)
+    for i = 1, 100 do
+      clients = vim.lsp.get_clients()
+      if #clients > 0 then break end
+      vim.cmd("sleep 100m")
+    end
+
+    vim.print(
+      vim.lsp.buf_request_sync(
+        0,
+        "textDocument/documentSymbol",
+        { textDocument = vim.lsp.util.make_text_document_params() }
+      )
+    )
+    ' \
+  +'qall!'
+endsnippet

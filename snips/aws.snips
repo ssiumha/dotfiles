@@ -118,6 +118,73 @@ snippet query_log_tail ""
 aws logs tail "<group>" --follow --query "filter @message like /Error/"
 endsnippet
 
+snippet eks_addon_versions "ruby: query compatible addon versions"
+#!/usr/bin/env ruby
+require 'optparse'
+
+options = {}
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: #{$0} {kube_version} [options]"
+  opts.on("-a", "--all", "print all versions") { options[:all] = _1 }
+  opts.on("-h", "--help", "Prints this help") { puts opts; exit }
+end.parse!
+
+kube_version = ARGV[0]
+if kube_version.nil?
+  puts parser
+  exit 1
+end
+
+STDERR.puts "\033[1;33mNOTE: vpc-cni can only be upgraded one minor version at a time.\033[0m"
+
+versions = options[:all] ? '' : '0'
+system <<~CMD
+aws eks describe-addon-versions \
+  --query 'addons[*].{Name:addonName, Version:addonVersions[#{versions}].addonVersion}' \
+  --kubernetes-version "#{kube_version}" \
+  --output json \
+  | jq -r '.[] | .Name as $name \
+    | if (.Version | type) == "array" \
+      then .Version[] | [$name, .] \
+      else [$name, .Version] \
+      end \
+    | @csv' \
+  | column -s, -t
+CMD
+endsnippet
+
+snippet ec2_describe_with_eks "EC2 instances + EKS node info"
+# EC2 instances with EKS tags
+aws ec2 describe-instances \
+  | jq -r '.Reservations[]
+    | .Instances[]
+    | [
+        .InstanceId,
+        .LaunchTime,
+        (.Tags[]|select(.Key=="Name")|.Value),
+        (.Tags[]|select(.Key=="aws:eks:cluster-name")|.Value),
+        (.Tags[]|select(.Key=="eks:nodegroup-name")|.Value)
+      ]
+    | @tsv
+  ' \
+  | sort
+
+# kubectl nodes with EKS metadata
+aws eks update-kubeconfig --name "<cluster>" >/dev/null 2>&1
+kubectl get nodes -ojson \
+  | jq -r '.items[]
+    | [
+        .spec.providerID,
+        .metadata.name,
+        .metadata.labels."eks.amazonaws.com/nodegroup",
+        .metadata.labels."node.kubernetes.io/instance-type",
+        .metadata.labels."topology.kubernetes.io/zone"
+      ]
+    | @tsv
+  ' \
+  | sort
+endsnippet
+
 snippet ecs_task_definition_attributes ""
 family: "app"
 networkMode: "awsvpc"

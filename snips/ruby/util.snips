@@ -181,3 +181,36 @@ require 'zlib'
 require 'base64'
 Base64.decode64(text).then { Zlib::Inflate.inflate(_1) }
 endsnippet
+
+snippet erb_template_generator "CLI ERB template renderer with string helpers"
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'erb'
+require 'optparse'
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = 'Usage: gen-template.rb [options] <template-file>'
+  opts.on('-o', '--output-path=PATH', 'Output path') { |v| options[:output_path] = v }
+  opts.on('-e', '--env=KEY=VALUE', 'Set variable') do |v|
+    key, value = v.split('=', 2)
+    options[key] = value
+  end
+end.parse!
+
+class String
+  def kebab() gsub(/([a-z])([A-Z])/, '\1-\2').downcase end
+  def snake() gsub(/([a-z])([A-Z])/, '\1_\2').downcase end
+  def camel() split(/[-_]/).map(&:capitalize).join end
+end
+
+result = ERB.new(ARGF.read).result(binding)
+
+if options[:output_path]
+  File.write(options[:output_path], result)
+  puts "Generated #{options[:output_path]}"
+else
+  puts result
+end
+endsnippet
