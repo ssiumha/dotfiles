@@ -66,7 +66,8 @@ function! s:BuildAllBuffers() abort
   let idx = [0]
 
   for bufnr in range(1, bufnr('$'))
-    if buflisted(bufnr) && getbufvar(bufnr, '&filetype') ==# 'markdown'
+    let ft = getbufvar(bufnr, '&filetype')
+    if buflisted(bufnr) && (ft ==# 'markdown' || ft ==# 'webdav')
       call s:ExtractHeaders(bufnr, lines_hash, lines_path, idx)
     endif
   endfor

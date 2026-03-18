@@ -70,9 +70,15 @@ function! s:OnNoteCompleteDone()
   endif
 endfunction
 
+function! s:SetupCompleteDone() abort
+  if get(b:, 'note_complete_done_set', 0) | return | endif
+  let b:note_complete_done_set = 1
+  autocmd CompleteDone <buffer> call s:OnNoteCompleteDone()
+endfunction
+
 augroup NoteComplete
   autocmd!
-  autocmd CompleteDone *.md call s:OnNoteCompleteDone()
+  autocmd FileType markdown,webdav call s:SetupCompleteDone()
 augroup END
 
 function! s:InBracketContext()

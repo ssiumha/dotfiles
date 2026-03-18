@@ -294,6 +294,12 @@ function! s:SlackUrlToDeeplink(url) abort
 endfunction
 
 function! OpenWiki() abort
+  " WebDAV 버퍼면 WebDAV wikilink 핸들러로 위임
+  if get(b:, 'webdav_managed', 0)
+    call webdav#wikilink#open()
+    return
+  endif
+
   let link_info = GetMarkdownPagePath()
 
   if link_info.type == 'external'
@@ -376,7 +382,84 @@ endfunction
 
 function! LocalLinkFzf() abort
   let s:link_fzf_mode = 'file'
-  call s:RunLinkFzf()
+  if get(b:, 'webdav_managed', 0)
+    call s:RunWebDAVLinkFzf()
+  else
+    call s:RunLinkFzf()
+  endif
+endfunction
+
+" ============================================================
+" WebDAV Link FZF - PROPFIND 기반 서버 파일 검색
+" ============================================================
+
+function! s:RunWebDAVLinkFzf() abort
+  let server_name = get(b:, 'webdav_server', '')
+  let vault_root = webdav#wikilink#get_vault_root(server_name)
+  let base_path = empty(vault_root) ? fnamemodify(get(b:, 'webdav_original_path', '/'), ':h') . '/' : vault_root . '/'
+
+  " PROPFIND 기반, 현재 폴더에서 검색
+  let server_info = webdav#server#get_info(server_name)
+  let cache_key = webdav#cache#get_key(server_name, server_info.url)
+  let scan_cache = webdav#cache#get_data()
+
+  if !has_key(scan_cache, cache_key) || !has_key(scan_cache[cache_key], base_path)
+    echo "Scanning..."
+    let files = webdav#fzf#scan_recursive(base_path, server_name)
+    if !has_key(scan_cache, cache_key)
+      let scan_cache[cache_key] = {}
+    endif
+    let scan_cache[cache_key][base_path] = files
+  endif
+
+  let files = get(get(scan_cache, cache_key, {}), base_path, [])
+  let md_files = filter(copy(files), 'v:val =~# "\.md$"')
+
+  if empty(md_files)
+    echo "No markdown files found"
+    return
+  endif
+
+  call fzf#run(fzf#wrap({
+    \ 'source': md_files,
+    \ 'sink*': function('s:HandleWebDAVLinkSelection', [server_name]),
+    \ 'options': [
+    \   '--prompt', '[[',
+    \   '--print-query',
+    \   '--expect', 'ctrl-r',
+    \   '--header', 'ctrl-r: refresh',
+    \ ],
+    \ 'down': '40%'
+  \ }))
+endfunction
+
+function! s:HandleWebDAVLinkSelection(server_name, result) abort
+  if len(a:result) < 1 | return | endif
+
+  let query = a:result[0]
+  let key = len(a:result) > 1 ? a:result[1] : ''
+  let selection = len(a:result) > 2 ? a:result[2] : ''
+
+  " ctrl-r: 캐시 새로고침
+  if key ==# 'ctrl-r'
+    let server_info = webdav#server#get_info(a:server_name)
+    let cache_key = webdav#cache#get_key(a:server_name, server_info.url)
+    let scan_cache = webdav#cache#get_data()
+    let cur_vault = webdav#wikilink#get_vault_root(a:server_name)
+    let cur_base = empty(cur_vault) ? fnamemodify(get(b:, 'webdav_original_path', '/'), ':h') . '/' : cur_vault . '/'
+    if has_key(scan_cache, cache_key) && has_key(scan_cache[cache_key], cur_base)
+      unlet scan_cache[cache_key][cur_base]
+    endif
+    call timer_start(10, { -> s:RunWebDAVLinkFzf() })
+    return
+  endif
+
+  " 파일 선택: [[filename]] 삽입 (확장자 없이 파일명만)
+  let link = !empty(selection) ? fnamemodify(selection, ':t:r') : query
+  if empty(link) | return | endif
+
+  execute "normal! a[[" . link . "]]"
+  startinsert!
 endfunction
 
 function! s:RunLinkFzf() abort
