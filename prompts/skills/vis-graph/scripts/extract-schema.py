@@ -18,6 +18,9 @@ from fnmatch import fnmatch
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from vis_graph_common import find_template as _find_template
+from vis_graph_common import inject_template
+
 PALETTE = [
     "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
     "#BA68C8", "#4DD0E1", "#FFD54F", "#A1887F",
@@ -723,19 +726,6 @@ def build_graph_data(
 
 
 # ---------------------------------------------------------------------------
-# Template injection
-# ---------------------------------------------------------------------------
-
-def inject_template(graph_data: dict, template_path: Path, output_path: Path) -> None:
-    """Read template, inject graph data JSON, write output HTML."""
-    tpl = template_path.read_text(encoding="utf-8")
-    js = json.dumps(graph_data, ensure_ascii=False)
-    js = js.replace("<", "\\u003c").replace(">", "\\u003e")
-    html = tpl.replace("{{GRAPH_DATA}}", js)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(html, encoding="utf-8")
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -747,13 +737,7 @@ def main() -> None:
     conn_info = parse_connection_url(args.conn)
 
     # Template
-    if args.template:
-        tpl_path = args.template.resolve()
-    else:
-        tpl_path = Path(__file__).resolve().parent.parent / "templates" / "report.html"
-    if not tpl_path.exists():
-        print(f"error: template not found: {tpl_path}", file=sys.stderr)
-        sys.exit(1)
+    tpl_path = _find_template("schema.html", args.template)
 
     # Output path
     out_path = args.output if args.output.is_absolute() else Path.cwd() / args.output

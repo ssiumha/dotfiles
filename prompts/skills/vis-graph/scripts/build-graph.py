@@ -14,6 +14,8 @@ from collections import defaultdict
 from fnmatch import fnmatch
 from pathlib import Path
 
+from vis_graph_common import find_template, inject_template
+
 PALETTE = [
     "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
     "#BA68C8", "#4DD0E1", "#FFD54F", "#A1887F",
@@ -712,13 +714,7 @@ def main() -> None:
         sys.exit(1)
 
     # Template
-    if args.template:
-        tpl_path = args.template.resolve()
-    else:
-        tpl_path = Path(__file__).resolve().parent.parent / "templates" / "report.html"
-    if not tpl_path.exists():
-        print(f"error: template not found: {tpl_path}", file=sys.stderr)
-        sys.exit(1)
+    tpl_path = find_template("dep.html", args.template)
 
     # Output
     out_path = args.output if args.output.is_absolute() else root / args.output
@@ -876,11 +872,7 @@ def main() -> None:
     }
 
     # --- HTML ---
-    tpl = tpl_path.read_text(encoding="utf-8")
-    js = json.dumps(graph_data, ensure_ascii=False)
-    js = js.replace("<", "\\u003c").replace(">", "\\u003e")
-    html = tpl.replace("{{GRAPH_DATA}}", js)
-    out_path.write_text(html, encoding="utf-8")
+    inject_template(graph_data, tpl_path, out_path)
 
     # --- Report ---
     if args.json_output:

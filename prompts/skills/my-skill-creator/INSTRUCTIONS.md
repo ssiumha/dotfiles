@@ -40,6 +40,38 @@ description: Manages all project documentation and notes.
 - 유사 skill이 있을 때 경계 명확화
 - 형식: `Do NOT use for {제외 케이스} (use {대안 skill} instead).`
 
+**Pushy Description (적극적 트리거 유도)**:
+
+Claude는 skill을 **under-trigger**하는 경향이 있습니다. Description을 적극적으로 작성하세요.
+
+```yaml
+# ❌ 소극적: Claude가 명시적 요청에만 트리거
+description: Creates unit tests. Use when asked to write tests.
+
+# ✅ 적극적: 관련 상황에서 proactively 트리거
+description: Creates unit tests. Use when writing new code, fixing bugs, refactoring, or reviewing PRs — any situation where test coverage matters.
+```
+
+- "asked to" 대신 **상황(situation)**을 나열하라
+- 트리거 범위를 넓게 잡되, 네거티브 트리거로 경계를 잡아라 (pushy + negative = 균형)
+- **목표**: 사용자가 명시적으로 호출하지 않아도 적절한 상황에서 자동 활성화
+
+**Why로 설명하라 (MUST/ALWAYS 남발 금지)**:
+
+Skill body에서 `MUST`, `ALWAYS`, `NEVER`를 남발하면 Claude가 과도하게 경직됩니다. 대신 **이유(why)**를 설명하면 Claude가 맥락에 맞게 판단합니다.
+
+```markdown
+# ❌ 경직: edge case에서 오작동
+You MUST always include error handling in every function.
+
+# ✅ 유연: Claude가 맥락 판단
+Include error handling at system boundaries (user input, external APIs)
+because internal code can trust framework guarantees.
+```
+
+- MUST/ALWAYS는 **안전 관련**(보안, 데이터 손실 방지) 등 진짜 예외 없는 규칙에만 사용
+- 나머지는 "~하라, 왜냐하면 ~" 형식으로 reasoning을 제공
+
 ## Progressive Disclosure (토큰 효율)
 
 Skill은 **3단계로 점진적 로딩**됩니다. 이 원칙을 이해하고 설계하십시오:
@@ -459,6 +491,66 @@ Skill 생성/갱신 후 **실제 사용 피드백**을 반영하십시오:
    - 프로젝트 작업 시 컨텍스트 재설명 불필요
    - 다른 skills와 조합 가능
 
+### 워크플로우 7: Skill 실행 검증 (Eval Loop)
+
+Skill 생성/갱신 후 **실제 동작을 검증**하십시오. Anthropic eval-driven development의 경량 버전입니다.
+
+1. **테스트 프롬프트 작성** (2-3개)
+   - 실제 사용자가 입력할 법한 realistic prompt
+   - edge case 포함
+   - 예: `"이 함수에 테스트 추가해줘"`, `"PR 리뷰해줘"`
+
+2. **Subagent 병렬 실행**
+   - **with-skill**: skill이 적용된 상태에서 프롬프트 실행
+   - **without-skill (baseline)**: skill 없이 동일 프롬프트 실행
+   - 각각 `isolation: worktree`로 격리 실행
+
+3. **결과 비교**
+   - 정성: 출력 품질 직접 비교 (구조, 완성도, 정확성)
+   - 정량 (선택): assertion 체크 (특정 키워드/패턴 포함 여부)
+   - 핵심 질문: "skill이 있을 때 **명확하게 더 나은가**?"
+
+4. **피드백 반영**
+   - 비교 결과에서 부족한 점 → skill 수정
+   - 워크플로우 4 (Iterating)와 연결하여 반복 개선
+
+5. **스크립트 번들링**
+   - 반복 실행 중 subagent가 동일 검증 스크립트를 반복 작성하면 → `scripts/`로 번들
+
+**상세 가이드**: `resources/06-eval-patterns.md` 참조
+
+### 워크플로우 8: Description 최적화
+
+Description의 트리거 정확도를 체계적으로 검증하고 개선합니다.
+
+1. **Trigger eval set 작성**
+   - `should_trigger`: 이 skill이 활성화되어야 하는 query 8-10개
+   - `should_not_trigger`: 활성화되면 안 되는 query 8-10개
+   - should_not_trigger는 **near-miss** 위주 (키워드는 겹치지만 다른 skill이 적합한 경우)
+
+2. **사용자 확인 후 확정**
+   - eval set을 사용자에게 제시
+   - 누락된 케이스나 잘못된 분류 조정
+
+3. **트리거 테스트**
+   ```bash
+   claude -p "query" --allowedTools ""
+   ```
+   - 각 query에 대해 skill이 trigger되는지 확인
+   - trigger 여부만 확인 (실행 결과는 무관)
+
+4. **실패 분석 → description 수정**
+   - false negative: should_trigger인데 미트리거 → description에 키워드/상황 추가
+   - false positive: should_not_trigger인데 트리거 → 네거티브 트리거 추가
+   - 수정 후 재테스트
+
+5. **반복** (3-5회)
+   - 전체 eval set 통과율 90%+ 목표
+   - 완벽을 추구하지 않음 — 명확한 케이스만 통과하면 충분
+
+**상세 가이드**: `resources/06-eval-patterns.md` 참조
+**참고**: 자동화가 필요하면 `anthropics/skills` repo의 `scripts/run_loop.py` 활용 가능
+
 ## 대화형 설계 (AskUserQuestion 활용)
 
 Skill 내에서 사용자와 상호작용이 필요한 경우 AskUserQuestion을 적재적소에 활용하세요.
@@ -522,12 +614,14 @@ Skill 내에서 사용자와 상호작용이 필요한 경우 AskUserQuestion을
 ## 중요 원칙 (Anthropic 공식 권장)
 
 1. **평가부터 시작**: Claude의 약점을 관찰 후 그 격차를 메우는 skill 구축
-2. **Description이 핵심**: What + When 명시, 구체적 키워드 포함
+2. **Description이 핵심**: What + When 명시, 구체적 키워드 포함, pushy하게 작성
 3. **규모에 맞춘 구조화**: SKILL.md 복잡해지면 별도 파일로 분리
 4. **Claude 관점에서 설계**: 실제 사용을 모니터링하며 description 반복 개선
 5. **Claude와 협업**: Claude에게 성공/실패 사례를 skill로 문서화 요청
 6. **토큰 효율**: Progressive Disclosure 원칙 준수
 7. **모듈식 설계**: 단일 책임 원칙, 작은 focused skills → 조합하여 사용
+8. **Why로 설명하라**: MUST/ALWAYS 남발 대신 이유(reasoning)를 제공하여 Claude가 맥락에 맞게 판단하도록 유도
+9. **일반화 우선**: 특정 테스트 케이스에 과적합하지 말고, 다양한 상황에서 올바르게 동작하도록 설계. 한 케이스를 고치면서 다른 케이스를 깨뜨리지 않는지 확인
 
 ## 안티패턴
 
@@ -588,4 +682,5 @@ bash scripts/validate-skill.sh <skill-name>
 - `resources/03-update-patterns.md`: 갱신 패턴 가이드
 - `resources/04-interactive-design.md`: 대화형 skill 설계 패턴
 - `resources/05-composable-skills.md`: 모듈식 skill 조합 가이드
+- `resources/06-eval-patterns.md`: 실행 검증 및 Description 최적화 가이드
 - `templates/SKILL-template.md`: 기본 뼈대

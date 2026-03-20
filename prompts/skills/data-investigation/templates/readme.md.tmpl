@@ -1,0 +1,41 @@
+# {Investigation Title}
+
+## 목적
+
+- 배경: {왜 이 조사를 하는지}
+- 질문: {어떤 질문에 답하려는지}
+- 요청자: {누가 요청했는지 (선택)}
+
+## 데이터
+
+| 파일 | 소스 | 수집 방법 | 건수 | 비고 |
+|------|------|----------|------|------|
+| `data/00_xxx.json` | {prod DB, API, CloudWatch, 파일 등} | {스크립트명 또는 수동} | {N건} | {필터 조건 등} |
+
+- 수집 기간: {period}
+- Data Cutoff: {cutoff timestamp}
+
+## 파일 구조
+
+| 경로 | 설명 |
+|------|------|
+| `data/` | 수집/추출 데이터 |
+| `charts/` | 분석 차트 (PNG) |
+| `analyze.py` | 분석 + 차트 생성 스크립트 |
+| `collect*.rb/py` | 데이터 수집 스크립트 |
+| `REPORT.md` | 분석 리포트 (Markdown) |
+| `REPORT.html` | 분석 리포트 (HTML, 차트 embed) |
+
+## 재실행
+
+```bash
+# 1. 데이터 수집 (필요 시)
+{수집 명령어}
+
+# 2. 분석 + 차트 생성
+python3 analyze.py
+
+# 3. 리포트 HTML 변환
+python3 to_html.py
+open REPORT.html
+```

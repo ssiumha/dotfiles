@@ -9,6 +9,7 @@ skill-creator의 상세 리소스 가이드입니다.
 | `resources/01-type-templates.md` | 5가지 skill 유형별 템플릿 | 신규 skill 생성 시 (워크플로우 3B) |
 | `resources/02-best-practices-checklist.md` | 품질 검증 체크리스트 | 생성/갱신 후 검증 시 |
 | `resources/03-update-patterns.md` | 기존 skill 갱신 패턴 | 기존 skill 갱신 시 (워크플로우 3A) |
+| `resources/06-eval-patterns.md` | 실행 검증 및 Description 최적화 | 워크플로우 7/8 실행 시 |
 | `templates/SKILL-template.md` | 기본 SKILL.md 뼈대 | 신규 skill 생성 시 참조 |
 
 ## 권장 학습 순서

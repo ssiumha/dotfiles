@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Investigation: {name}
+{description}
+"""
+import json
+import os
+import re
+from collections import Counter, defaultdict
+from datetime import datetime, timezone, timedelta
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
+
+# ── Paths ──
+BASE = os.path.expanduser("docs/reports/{name}")
+DATA = f"{BASE}/data"
+CHARTS = f"{BASE}/charts"
+os.makedirs(CHARTS, exist_ok=True)
+
+KST = timezone(timedelta(hours=9))
+UTC = timezone.utc
+
+# ── Style ──
+plt.rcParams.update({
+    'figure.figsize': (14, 8),
+    'font.size': 10,
+    'axes.titlesize': 13,
+    'axes.labelsize': 11,
+})
+
+# Korean font support
+import platform
+if platform.system() == 'Darwin':
+    plt.rcParams['font.family'] = 'AppleGothic'
+elif platform.system() == 'Windows':
+    plt.rcParams['font.family'] = 'Malgun Gothic'
+else:
+    for font in ['Noto Sans CJK KR', 'NanumGothic']:
+        if font in [f.name for f in matplotlib.font_manager.fontManager.ttflist]:
+            plt.rcParams['font.family'] = font
+            break
+plt.rcParams['axes.unicode_minus'] = False
+
+
+def load_json(filename):
+    with open(f"{DATA}/{filename}") as f:
+        return json.load(f)
+
+
+def parse_ts(s):
+    """Parse timestamp string to datetime (UTC)."""
+    if not s:
+        return None
+    for fmt in ["%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"]:
+        try:
+            dt = datetime.strptime(s, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return dt
+        except ValueError:
+            continue
+    return None
+
+
+def to_kst(dt):
+    if dt is None:
+        return None
+    return dt.astimezone(KST)
+
+
+# ═══════════════════════════════════════════════════
+# LOAD DATA
+# ═══════════════════════════════════════════════════
+print("Loading data...")
+
+# {데이터 로드}
+# 예:
+# data = load_json("00_data.json")
+# print(f"Loaded {len(data)} records")
+
+
+# ═══════════════════════════════════════════════════
+# ENRICHMENT
+# ═══════════════════════════════════════════════════
+
+# {dedup, 필터, 타임스탬프 파싱, lookup map 구축, 추가 매핑}
+# 예:
+# for row in data:
+#     row["dt"] = parse_ts(row["created_at"])
+#     row["date_kst"] = to_kst(row["dt"]).strftime("%m/%d") if row["dt"] else None
+
+
+# ═══════════════════════════════════════════════════
+# CROSS VALIDATION
+# ═══════════════════════════════════════════════════
+print("\n" + "=" * 60)
+print("CROSS VALIDATION")
+print("=" * 60)
+
+# {수집 건수 vs 기대값 체크}
+# 예:
+# print(f"Total records: {len(data)}")
+# print(f"After filter: {len(filtered)}")
+
+
+# ═══════════════════════════════════════════════════
+# ANALYSIS
+# ═══════════════════════════════════════════════════
+
+# {지표 계산, 그룹별 집계}
+# 예:
+# stats = {}
+# for group_key, items in grouped.items():
+#     stats[group_key] = {
+#         "count": len(items),
+#         "unique_users": len(set(i["user_id"] for i in items)),
+#     }
+
+
+# ═══════════════════════════════════════════════════
+# CHARTS
+# ═══════════════════════════════════════════════════
+# resources/01-chart-patterns.md 참조하여 조사 목적에 맞는 차트 선택
+
+# {차트 생성}
+# 예:
+# ─── Chart 01: {title} ───
+# print("\nGenerating Chart 01: {title}...")
+# fig, ax = plt.subplots(figsize=(14, 8))
+# ...
+# plt.tight_layout()
+# plt.savefig(f"{CHARTS}/01_{name}.png", dpi=150)
+# plt.close()
+
+
+# ═══════════════════════════════════════════════════
+# SUMMARY
+# ═══════════════════════════════════════════════════
+print("\n" + "=" * 60)
+print("SUMMARY")
+print("=" * 60)
+
+# {핵심 지표 콘솔 출력}
+# 예:
+# for key, val in stats.items():
+#     print(f"  {key}: {val}")
+
+# Optional: JSON summary 저장
+# summary = {"total": len(data), ...}
+# with open(f"{BASE}/summary.json", "w") as f:
+#     json.dump(summary, f, indent=2, ensure_ascii=False)
+
+print(f"\nAll charts saved to {CHARTS}/")
+print("Done!")

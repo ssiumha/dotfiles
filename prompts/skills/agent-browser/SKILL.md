@@ -141,10 +141,18 @@ agent-browser screenshot products.png
 
 ### Sessions (parallel browsers)
 
+**동시 사용 시 `--session` 필수.** `--session` 없이 실행하면 모든 세션이 `default` daemon을 공유하여 서로 간섭한다.
+
+세션 이름 규칙:
+- worktree에서 실행 → worktree 브랜치명 사용
+- 메인에서 실행 → 작업 목적으로 명명 (예: `qa-login`, `data-extract`)
+
 ```bash
-agent-browser --session test1 open site-a.com
-agent-browser --session test2 open site-b.com
-agent-browser session list
+agent-browser --session my-feature open site-a.com   # 세션 A
+agent-browser --session my-feature snapshot -i        # 같은 세션에서 조작
+
+agent-browser --session other-task open site-b.com    # 세션 B (독립)
+agent-browser session list                            # 활성 세션 목록
 ```
 
 ### JSON output (for parsing)
@@ -165,12 +173,14 @@ agent-browser errors                     # View page errors
 
 ## Best Practices
 
-1. **Always snapshot before interacting**: Get fresh refs after navigation or DOM changes
-2. **Use interactive snapshot (`-i`)**: Reduces noise, focuses on actionable elements
-3. **Wait appropriately**: Use `wait --load networkidle` after actions that trigger navigation
-4. **Save auth state**: Reuse login sessions with `state save/load`
-5. **Take screenshots for verification**: Visual confirmation of expected state
-6. **Use semantic locators for stable tests**: `find role/text/label` is more resilient than refs
+1. **동시 사용 시 `--session` 지정**: `--session` 없으면 `default` 세션을 공유하여 간섭 발생. 항상 고유한 세션명 사용
+2. **Always snapshot before interacting**: Get fresh refs after navigation or DOM changes
+3. **Use interactive snapshot (`-i`)**: Reduces noise, focuses on actionable elements
+4. **Wait appropriately**: Use `wait --load networkidle` after actions that trigger navigation
+5. **Save auth state**: Reuse login sessions with `state save/load`
+6. **Take screenshots for verification**: Visual confirmation of expected state
+7. **Use semantic locators for stable tests**: `find role/text/label` is more resilient than refs
+8. **작업 완료 후 `close`**: 유휴 daemon은 15분 후 자동 종료되지만, 리소스 절약을 위해 명시적 close 권장
 
 ## Technical Details
 

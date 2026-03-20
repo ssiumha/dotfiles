@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""REPORT.md -> HTML with chart images inline (browser Print -> PDF)."""
+import os
+import re
+import base64
+import markdown
+
+BASE = os.path.expanduser("docs/reports/{name}")
+CHARTS = f"{BASE}/charts"
+MD_FILE = f"{BASE}/REPORT.md"
+OUT_HTML = f"{BASE}/REPORT.html"
+
+with open(MD_FILE) as f:
+    md_text = f.read()
+
+
+# Replace ![alt](charts/xxx.png) with base64 embedded images
+def embed_image(match):
+    alt = match.group(1)
+    path = match.group(2)
+    abs_path = os.path.join(BASE, path)
+    if os.path.exists(abs_path):
+        with open(abs_path, "rb") as img:
+            b64 = base64.b64encode(img.read()).decode()
+        return f'<img src="data:image/png;base64,{b64}" alt="{alt}" />'
+    return match.group(0)
+
+
+md_text = re.sub(r'!\[([^\]]*)\]\(([^)]+\.png)\)', embed_image, md_text)
+
+html_body = markdown.markdown(md_text, extensions=["tables", "fenced_code"])
+
+html_full = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+<style>
+@media print {{
+    body {{ font-size: 10px; }}
+    img {{ page-break-inside: avoid; max-width: 100%; }}
+    h2 {{ page-break-before: always; }}
+    h2:first-of-type {{ page-break-before: avoid; }}
+    table {{ page-break-inside: avoid; }}
+}}
+body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #24292f;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 20px 40px;
+}}
+h1 {{
+    font-size: 24px;
+    border-bottom: 2px solid #d0d7de;
+    padding-bottom: 8px;
+}}
+h2 {{
+    font-size: 18px;
+    border-bottom: 1px solid #d0d7de;
+    padding-bottom: 6px;
+    margin-top: 32px;
+}}
+h3 {{
+    font-size: 15px;
+    margin-top: 20px;
+}}
+table {{
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 12px;
+}}
+th, td {{
+    border: 1px solid #d0d7de;
+    padding: 6px 10px;
+    text-align: left;
+}}
+th {{
+    background-color: #f6f8fa;
+    font-weight: 600;
+}}
+tr:nth-child(even) {{
+    background-color: #f6f8fa;
+}}
+code {{
+    background-color: #f6f8fa;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, monospace;
+}}
+hr {{
+    border: none;
+    border-top: 1px solid #d0d7de;
+    margin: 24px 0;
+}}
+img {{
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 16px auto;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+}}
+p {{
+    margin: 8px 0;
+}}
+</style>
+</head>
+<body>
+{html_body}
+</body>
+</html>
+"""
+
+with open(OUT_HTML, "w") as f:
+    f.write(html_full)
+
+print(f"HTML: {OUT_HTML}")
+img_count = html_full.count("data:image/png;base64,")
+print(f"Charts embedded: {img_count}")
