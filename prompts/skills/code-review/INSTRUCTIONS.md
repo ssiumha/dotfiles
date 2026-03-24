@@ -20,7 +20,9 @@
 | 코드 리뷰, 타입 체크, 타입 안전성 | Type Safety Review | 언어별 checklist |
 | lint 감사, 프로젝트 건강, 죽은 코드 | Lint Audit | `03-lint-audit.md` |
 | 테스트 리뷰, 테스트 품질, test smell, overfitting | Test Review | `test-review/INSTRUCTIONS.md` |
-| 둘 다 / 전체 품질 체크 | 순차 실행 (Type Safety → Lint Audit) | 전체 |
+| terraform, IaC, 인프라 코드 리뷰 | Terraform Review | `04-checklist-terraform.md` |
+| 전체 품질 체크, 다각적 리뷰 | Parallel Review Mode | 4개 에이전트 병렬 |
+| 둘 다 / Type Safety + Lint | 순차 실행 (Type Safety → Lint Audit) | 전체 |
 
 **라우팅 (이 스킬이 아닌 경우)**:
 - 보안 리뷰 → `/security`
@@ -52,7 +54,32 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 4. 타입 체크 도구 실행 (tsc / mypy)
 5. 결과 통합하여 Output Format으로 출력
 
-## Workflow 2: Lint Audit
+## Workflow 2: Terraform Review
+
+### 1. 파일 감지
+
+```
+*.tf 파일 존재 → Terraform → resources/04-checklist-terraform.md
+```
+
+### 2. 리뷰 범위 결정
+
+| 인자 | 범위 |
+|------|------|
+| 파일/디렉토리 경로 | 해당 경로만 |
+| 없음 + staged changes 있음 | staged .tf 파일만 |
+| 없음 + staged 없음 | 프로젝트 전체 .tf 파일 |
+
+### 3. 체크 실행
+
+1. `04-checklist-terraform.md` 로드
+2. Grep Patterns으로 .tf 파일 스캔
+3. data source → resource 매핑하여 lifecycle 누락 확인
+4. 발견 항목을 심각도별 분류
+5. `terraform validate` 실행 (가능한 경우)
+6. 결과 통합하여 Output Format으로 출력
+
+## Workflow 3: Lint Audit
 
 `resources/03-lint-audit.md`의 4-phase 워크플로우를 따른다:
 1. 프로젝트 분석 (스택/CI/도구 감지)
@@ -60,7 +87,7 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 3. 리포트 생성
 4. 자동화 제안
 
-## Workflow 3: Test Review
+## Workflow 4: Test Review
 
 `test-review/INSTRUCTIONS.md`의 6-phase 워크플로우를 따른다:
 1. 리뷰 범위 결정 (인자 또는 git diff 기반)
@@ -92,6 +119,53 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 2. [중간] ...
 3. [낮음] ...
 ```
+
+## Parallel Review Mode
+
+`전체 품질 체크`, `다각적 리뷰`, 또는 명시적으로 병렬 리뷰 요청 시 활성화한다.
+
+### 실행 방식
+
+4개 에이전트를 **병렬로 스폰**하여 독립적으로 분석한 뒤, 결과를 통합한다.
+
+| Agent | 역할 | 모델 | 도구 |
+|-------|------|------|------|
+| #1 Checklist | 언어/IaC별 체크리스트 기반 패턴 스캔 | haiku | Grep, Read |
+| #2 Bug Hunter | 변경 코드에서 버그/위험 패턴 탐지 (shallow scan) | sonnet | Read, Grep |
+| #3 History | git blame/log으로 과거 맥락 기반 리뷰 | haiku | Bash(git), Read |
+| #4 Web Best Practices | 웹 검색으로 관련 best practice/사례 확인 | haiku | WebSearch, WebFetch |
+
+### 에이전트 프롬프트 가이드
+
+각 에이전트에게 전달할 정보:
+- 리뷰 대상 파일 목록 + 변경 범위
+- 해당 언어/IaC의 checklist 리소스 경로 (#1만)
+- 발견한 이슈마다 **심각도 점수(0-100)** 부여
+
+### Scoring Rubric (에이전트에게 그대로 전달)
+
+| 점수 | 기준 |
+|------|------|
+| 0 | False positive. 가볍게 봐도 문제 아님, 또는 기존 코드 문제 |
+| 25 | 문제일 수 있으나 검증 불가. 스타일 이슈이면서 체크리스트에 명시되지 않은 것 |
+| 50 | 실제 문제이나 nitpick 수준. PR 전체 맥락에서 중요도 낮음 |
+| 75 | 높은 확신. 실제로 발생할 문제이며, 기능에 직접 영향. 체크리스트에 명시된 항목 |
+| 100 | 절대 확신. 반드시 발생하는 문제. 증거로 직접 확인 완료 |
+
+### 결과 통합
+
+1. 4개 에이전트 결과 수집
+2. **점수 80 미만 필터링** — 남은 이슈만 최종 리포트에 포함
+3. 중복 이슈 병합
+4. Output Format에 맞춰 출력 (각 이슈에 발견 출처 Agent# 표기)
+
+### False Positive 예시 (에이전트에게 전달)
+
+- 기존 코드의 문제 (이번 변경과 무관)
+- Linter/타입체커가 잡을 수 있는 문제 (CI에서 별도 실행)
+- 의도적 기능 변경을 버그로 지적
+- 코드에서 명시적으로 suppress한 항목 (lint ignore 등)
+- 수정하지 않은 라인에 대한 지적
 
 ## Related Skills
 

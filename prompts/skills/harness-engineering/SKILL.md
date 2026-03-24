@@ -139,6 +139,7 @@ Enforcement Layer:
 | 린트 메시지 최적화 | 린트 실패 후 에이전트가 수정 방법을 모름 | 에러 메시지에 수정 지침 주입 |
 | Hook 추가 | 결정론적 강제 필요 | `update-config` skill로 위임 |
 | 아키텍처 테스트 도입 | Constraints Score 2 + ARCHITECTURE.md 불변식 존재 | 스택에 맞는 아키텍처 테스트 도구 제안 (`resources/06-arch-test-tools.md`) |
+| 불변식 커버리지 확장 | Audit에서 특정 유형 불변식 미비 | `resources/07-invariant-taxonomy.md`로 미커버 유형 식별 후 추가 |
 | 문서 인코딩 | 외부에만 있는 지식 발견 | docs/에 마크다운으로 기록 |
 | CLAUDE.md 다이어트 | 100줄 초과 | rules로 분리, 목차만 남기기 |
 | Gardening 스킬 생성 | Audit 후 doc-gardening 스킬 부재 | 워크플로우 4 → 4단계 실행 |
@@ -204,6 +205,19 @@ Level 2+ 프로젝트(ARCHITECTURE.md + rules 존재)에서, `.claude/skills/doc
 | 탐색 비용 | Codebase Map 없이 매 세션 Glob/Grep | ARCHITECTURE.md 생성/갱신 |
 | 피드백 미반영 | 교정이 다음 세션에서 반복 | memory에 feedback 저장 |
 
+## Invariant Lifecycle
+
+발견 → 정의 → 강제의 3단계. 단계를 건너뛰지 않는다.
+
+1. **발견**: 장애 역추적, PR 반복 코멘트, absence 스캔 (`resources/07-invariant-taxonomy.md`)
+2. **정의**: ARCHITECTURE.md `## Invariants` 에 Why와 함께 기록 (`resources/04-architecture-guide.md`)
+3. **강제**: 기계적 검증 구현 (`resources/06-arch-test-tools.md`)
+   - 구조 → ArchUnit / eslint-plugin-boundaries
+   - 데이터 → 스키마 검증 테스트
+   - 보안 → PreToolUse hook + SAST
+
+강제 없는 정의는 드리프트한다. 정의 없는 강제는 "왜"를 모른다.
+
 ## 안티패턴
 
 ### 하네스 설계
@@ -253,6 +267,7 @@ User: "하네스 점검해줘"
 - Context Engineering 전략 + CLAUDE.md 작성법 + Level 시스템: `resources/02-context-engineering.md`
 - 참고 자료 (출처 + 핵심 인사이트): `resources/03-references.md`
 - 아키텍처 테스트 도구 가이드 (언어별 매핑 + 감지 방법): `resources/06-arch-test-tools.md`
+- 불변식 분류 체계 + 발견/우선순위: `resources/07-invariant-taxonomy.md`
 - Hook/Permission 구성: `update-config` skill 참조
 - Skill 생성/갱신: `my-skill-creator` skill 참조
 - CLAUDE.md 설계/구조: `claude-guide` skill 참조

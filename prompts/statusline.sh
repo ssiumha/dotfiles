@@ -65,6 +65,7 @@ GH_INNER=""
 [ -n "$GH_CI" ] && GH_INNER="${GH_INNER:+$GH_INNER }$GH_CI"
 [ -n "$GH_INNER" ] && GH_FMT="🐙${NBSP}gh:${GH_INNER}"
 
+# Sandbox status
 # Context window usage
 CTX_JSON=$(echo "$input" | jq -r '.context_window // empty')
 if [ -n "$CTX_JSON" ]; then
