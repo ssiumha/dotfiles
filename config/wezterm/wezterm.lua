@@ -10,7 +10,10 @@ table.insert(hyperlink_rules, {
 -- ref: https://wezfurlong.org/wezterm/config/lua/config
 return {
   hyperlink_rules = hyperlink_rules,
-  window_background_opacity = 0.9,
+  window_background_opacity = 0.65,
+  text_background_opacity = 0.8,
+  macos_window_background_blur = 0,
+  window_decorations = 'RESIZE',
 
   hide_tab_bar_if_only_one_tab = true,
   font_size = 12.0,
