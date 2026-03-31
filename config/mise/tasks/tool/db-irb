@@ -89,17 +89,89 @@ end
 db_connect_url = db_url.sub("@#{uri.host}:", "@#{connect_host}:")
 DB = Sequel.connect(db_connect_url)
 
+# Raw SQL 차단: DB["SELECT ..."] 대신 Sequel DSL 사용 유도
+class << DB
+  alias_method :_orig_bracket, :[]
+
+  def [](*args)
+    if args.first.is_a?(String)
+      puts "\e[31m✗ Raw SQL은 차단되어 있습니다. Sequel DSL을 사용하세요.\e[0m"
+      puts "\e[36m  예시:\e[0m"
+      puts "    User.where(id: 1).all          # SELECT * FROM users WHERE id = 1"
+      puts "    User.where { age > 20 }.all    # SELECT * FROM users WHERE age > 20"
+      puts "    User.select(:id, :name).all    # SELECT id, name FROM users"
+      puts "    raw_sql(\"SELECT ...\")           # 명시적 raw SQL 실행"
+      puts ""
+      return nil
+    end
+    _orig_bracket(*args)
+  end
+end
+
+def raw_sql(sql, *bind)
+  DB._orig_bracket(sql, *bind)
+end
+
 # prod는 기본 읽기 전용 (--write로 해제)
 is_prod = ssh_target.to_s.match?(/prod/i)
 readonly = is_prod && !write_mode
 READONLY = readonly  # import 함수에서 참조
+WRITE_SAFE = write_mode && !readonly && !exec_code
+
+def write_check
+  if READONLY
+    puts "\e[31mRead-only mode. Restart with --write\e[0m"
+    return :readonly
+  end
+  WRITE_SAFE ? :safe : :direct
+end
 
 if readonly
   DB.run("SET default_transaction_read_only = on")
 end
 
-# Sequel::Model 확장 (scope DSL + YAML export)
+# Safe Write: pending 참조 + WriteGuard + print_table
+$_pending_change = nil
+def pending; $_pending_change; end
+
+WRITE_GUARDS = {}
+def write_guard(table, &block)
+  (WRITE_GUARDS[table.to_sym] ||= []) << block
+end
+WriteContext = Struct.new(:operation, :count, :values, :dataset, :before, keyword_init: true)
+
+REVERSE_FK_MAP = Hash.new { |h, k| h[k] = [] }
+
+def print_table(rows, indent: 0)
+  return puts "#{"  " * indent}No rows" if rows.empty?
+  cols = rows.first.keys
+  widths = cols.map { |c| [c.to_s.length, rows.map { |r| r[c].to_s.length }.max].max }
+  prefix = "  " * indent
+  puts prefix + cols.zip(widths).map { |c, w| c.to_s.ljust(w) }.join("  ")
+  puts prefix + widths.map { |w| "-" * w }.join("  ")
+  rows.each { |r| puts prefix + cols.zip(widths).map { |c, w| r[c].to_s.ljust(w) }.join("  ") }
+end
+
+# Sequel::Model 확장 (scope DSL + YAML export + normalizes)
+Sequel::Model.plugin :validation_helpers
+
 class Sequel::Model
+  def self.normalizes(field, with:)
+    (@_normalizers ||= {})[field] = with
+  end
+
+  def self.normalizers
+    @_normalizers || {}
+  end
+
+  def self.apply_normalizers(values)
+    return values unless @_normalizers
+    values.each_with_object({}) do |(k, v), h|
+      normalizer = @_normalizers[k]
+      h[k] = normalizer ? normalizer.call(v) : v
+    end
+  end
+
   def self.scope(name, body)
     define_singleton_method(name) { |*args| dataset.instance_exec(*args, &body) }
   end
@@ -118,6 +190,10 @@ class Sequel::Model
     assocs.reduce(dataset) { |ds, a| ds.association_join(a) }
   end
 
+  def self.left_joins(*assocs)
+    assocs.reduce(dataset) { |ds, a| ds.association_left_join(a) }
+  end
+
   def self.where(*conds, &block)
     ds = dataset
     conds.each do |c|
@@ -131,6 +207,221 @@ class Sequel::Model
       end
     end
     ds.where(*conds, &block)
+  end
+
+  # Safe Write: Model instance update/delete override
+  alias_method :_orig_update, :update
+  alias_method :_orig_delete, :delete
+
+  def update(values = {})
+    case write_check
+    when :readonly then nil
+    when :direct then _orig_update(values)
+    when :safe then PendingChange.new(self, :update, values, before: self.values.dup)
+    end
+  end
+
+  def update!(values = {})
+    _orig_update(values)
+  end
+
+  def delete
+    case write_check
+    when :readonly then nil
+    when :direct then _orig_delete
+    when :safe then PendingChange.new(self, :delete, nil, before: self.values.dup)
+    end
+  end
+
+  def delete!
+    _orig_delete
+  end
+end
+
+# Safe Write: PendingChange (preview → confirm → execute)
+class PendingChange
+  attr_reader :count, :operation
+
+  def initialize(source, operation, values = nil, before: nil)
+    @source = source
+    @operation = operation
+    @before = before
+    @single = source.is_a?(Sequel::Model)
+    @blocked = false
+    @cascade_total = 0
+
+    if @single
+      @count = 1
+      @table = source.class.table_name
+      @dataset = source.this
+      @model_class = source.class
+    else
+      @count = source.count
+      @table = source.first_source_table rescue :unknown
+      @dataset = source
+      @model_class = table_to_class(@table) rescue nil
+    end
+
+    # normalizes 적용 (update만)
+    if @operation == :update && values
+      @values = @model_class ? @model_class.apply_normalizers(values) : values
+      @normalized = values.keys.select { |k| @values[k] != values[k] }
+    else
+      @values = values
+      @normalized = []
+    end
+
+    # validates 실행 (단건 update만)
+    if @single && @operation == :update
+      test_model = @source.class.load(@source.values.merge(@values))
+      unless test_model.valid?
+        @blocked = true
+        @errors = test_model.errors
+      end
+    end
+
+    run_guards
+    print_preview
+    $_pending_change = self
+  end
+
+  def apply!
+    if @blocked
+      puts "\e[31mBlocked: validation failed. Fix values and retry.\e[0m"
+      @errors&.each { |col, msgs| msgs.each { |m| puts "  #{col}: #{m}" } }
+      return nil
+    end
+
+    current = @dataset.count
+    if current != @count
+      puts "\e[33mWarning: count changed #{@count} -> #{current}\e[0m"
+    end
+
+    result = case @operation
+    when :update
+      @single ? @source._orig_update(@values) : @dataset._sequel_update(@values)
+    when :delete
+      @single ? @source._orig_delete : @dataset._sequel_delete
+    end
+
+    rows = case result
+           when Integer then result
+           when Sequel::Model then 1
+           else @count
+           end
+    puts "\e[32m[DONE] #{op_name} #{rows} rows\e[0m"
+    log_change(rows)
+    result
+  end
+
+  def inspect
+    status = @blocked ? " [BLOCKED]" : ""
+    cascade = @cascade_total > 0 ? " (+ #{@cascade_total} cascade)" : ""
+    "#<PendingChange #{op_name} #{@count} rows#{cascade}#{status} — _.apply! or pending.apply!>"
+  end
+  alias to_s inspect
+
+  private
+
+  def op_name = @operation == :update ? 'UPDATE' : 'DELETE'
+
+  def run_guards
+    guards = WRITE_GUARDS[@table] || []
+    ctx = WriteContext.new(
+      operation: @operation, count: @count,
+      values: @values, dataset: @dataset, before: @before
+    )
+    guards.each do |guard|
+      msg = guard.call(ctx)
+      puts "\e[33m#{msg}\e[0m" if msg.is_a?(String)
+    end
+  end
+
+  def print_preview
+    if @single && @operation == :update && @before
+      puts "\e[36m[PREVIEW] UPDATE #{@table} WHERE #{pk_desc}\e[0m"
+      @values.each do |col, new_val|
+        old_val = @before[col]
+        norm = @normalized.include?(col) ? " \e[35m(normalized)\e[0m" : ""
+        marker = old_val == new_val ? " " : "\e[33m*\e[0m"
+        puts "  #{marker} #{col}: #{old_val.inspect} → #{new_val.inspect}#{norm}"
+      end
+    elsif @single && @operation == :delete
+      puts "\e[36m[PREVIEW] DELETE #{@table} WHERE #{pk_desc}\e[0m"
+      puts "  #{@before.inspect}" if @before
+      print_cascade
+    else
+      puts "\e[36m[PREVIEW] #{op_name} #{@table} — #{@count} rows affected\e[0m"
+      if @operation == :update && @values
+        puts "  Changes: #{@values.map { |k, v| "#{k} → #{v.inspect}" }.join(', ')}"
+      end
+      sample = @dataset.limit(3).all
+      unless sample.empty?
+        puts "  Sample:"
+        rows = sample.map { |r| r.respond_to?(:values) ? r.values : r }
+        print_table(rows, indent: 2)
+      end
+      print_cascade if @operation == :delete
+    end
+
+    if @blocked && @errors
+      puts "\e[31m✗ Validation failed:\e[0m"
+      @errors.each { |col, msgs| msgs.each { |m| puts "  #{col}: #{m}" } }
+    end
+  end
+
+  def print_cascade
+    refs = REVERSE_FK_MAP[@table] || []
+    return if refs.empty?
+
+    cascade_refs = refs.select { |r| r[:on_delete] == :cascade }
+    set_null_refs = refs.select { |r| r[:on_delete] == :set_null }
+
+    if cascade_refs.any?
+      puts "  \e[31m⚠ CASCADE:\e[0m"
+      cascade_refs.each do |ref|
+        cnt = DB[ref[:from_table]].where(ref[:column] => @dataset.select(pk_column)).count
+        @cascade_total += cnt
+        puts "    #{ref[:from_table]} (#{ref[:column]}) — #{cnt} rows will be deleted" if cnt > 0
+      end
+    end
+
+    if set_null_refs.any?
+      puts "  \e[33m⚠ SET NULL:\e[0m"
+      set_null_refs.each do |ref|
+        cnt = DB[ref[:from_table]].where(ref[:column] => @dataset.select(pk_column)).count
+        puts "    #{ref[:from_table]} (#{ref[:column]}) — #{cnt} rows will be set to NULL" if cnt > 0
+      end
+    end
+  end
+
+  def pk_column
+    @source.is_a?(Sequel::Model) ? @source.class.primary_key : :id
+  end
+
+  def pk_desc
+    @source.is_a?(Sequel::Model) ? @source.pk_hash.map { |k, v| "#{k} = #{v}" }.join(', ') : "..."
+  end
+
+  def log_change(affected_rows)
+    require 'json'
+    require 'fileutils'
+    log_dir = File.join(ENV['MISE_PROJECT_ROOT'] || ENV['PWD'] || Dir.pwd, 'tmp', 'db-irb-changes')
+    FileUtils.mkdir_p(log_dir)
+    log_file = File.join(log_dir, "#{Date.today}.jsonl")
+
+    entry = {
+      at: Time.now.iso8601,
+      table: @table.to_s,
+      operation: @operation,
+      affected: affected_rows,
+      values: @values,
+      before: @before,
+      where: @single ? pk_desc : @dataset.select_sql
+    }
+    File.open(log_file, 'a') { |f| f.puts JSON.generate(entry) }
+  rescue => e
+    puts "\e[33mWarning: failed to log change: #{e.message}\e[0m"
   end
 end
 
@@ -148,11 +439,45 @@ class Sequel::Dataset
       end
     }, &block)
   end
+  def joins(*assocs)
+    assocs.reduce(self) { |ds, a| ds.association_join(a) }
+  end
+  def left_joins(*assocs)
+    assocs.reduce(self) { |ds, a| ds.association_left_join(a) }
+  end
   def to_yaml(path = nil)
     require 'yaml'
     data = self.all
     yaml = data.to_yaml
     path ? (File.write(File.expand_path(path), yaml); puts "Saved to #{path} (#{data.size} rows)") : puts(yaml)
+  end
+
+  # Safe Write: Dataset batch update/delete override
+  alias_method :_sequel_update, :update
+  alias_method :_sequel_delete, :delete
+
+  def update(values = nil)
+    case write_check
+    when :readonly then nil
+    when :direct then _sequel_update(values)
+    when :safe then PendingChange.new(self, :update, values)
+    end
+  end
+
+  def update!(values)
+    _sequel_update(values)
+  end
+
+  def delete
+    case write_check
+    when :readonly then nil
+    when :direct then _sequel_delete
+    when :safe then PendingChange.new(self, :delete)
+    end
+  end
+
+  def delete!
+    _sequel_delete
   end
 end
 
@@ -178,11 +503,40 @@ DB.tables.each do |table_name|
   next unless model
 
   DB.foreign_key_list(table_name).each do |fk|
+    # REVERSE_FK_MAP 구축 (CASCADE/SET NULL 감지용)
+    REVERSE_FK_MAP[fk[:table]] << {
+      from_table: table_name,
+      column: fk[:columns].first,
+      on_delete: fk[:on_delete]
+    }
+
     assoc_name = fk[:columns].first.to_s.sub(/_id$/, '').to_sym
     ref_class = table_to_class(fk[:table])
     next unless ref_class
     model.many_to_one assoc_name, class: ref_class  # belongs_to
-    ref_class.one_to_many table_name, class: model  # has_many
+    # 동일 테이블 다중 FK 충돌 방지: 이미 등록된 이름이면 _as_{assoc} 접미사
+    reverse_name = ref_class.associations.include?(table_name) ?
+      :"#{table_name}_as_#{assoc_name}" : table_name
+    ref_class.one_to_many reverse_name, class: model, key: fk[:columns].first  # has_many
+  end
+end
+
+# FK alias 매핑 (creator_id -> member 등 비표준 FK명 지원)
+FK_ALIAS_MAP = {}
+def fk_alias(mappings)
+  FK_ALIAS_MAP.merge!(mappings.transform_keys(&:to_sym).transform_values(&:to_sym))
+  mappings.each do |alias_name, target_table|
+    ref_class = table_to_class(target_table)
+    next unless ref_class
+    DB.tables.each do |t|
+      model = table_to_class(t)
+      next unless model
+      col = :"#{alias_name}_id"
+      next unless model.columns.include?(col)
+      next if model.associations.include?(alias_name.to_sym)
+      model.many_to_one alias_name.to_sym, class: ref_class, key: col
+      ref_class.one_to_many :"#{t}_as_#{alias_name}", class: model, key: col
+    end
   end
 end
 
@@ -207,8 +561,25 @@ DB.tables.each do |table_name|
     next unless ref_class
 
     model.many_to_one assoc_name.to_sym, class: ref_class, key: col
-    ref_class.one_to_many table_name, class: model, key: col
+    # 동일 테이블 다중 FK 충돌 방지
+    reverse_name = ref_class.associations.include?(table_name) ?
+      :"#{table_name}_as_#{assoc_name}" : table_name
+    ref_class.one_to_many reverse_name, class: model, key: col
   end
+end
+
+# Soft delete 헬퍼 (deleted_at IS NULL 자동 적용)
+def enable_soft_delete(*models)
+  targets = models.empty? ?
+    DB.tables.map { |t| table_to_class(t) }.compact :
+    models
+  count = 0
+  targets.each do |m|
+    next unless m.columns.include?(:deleted_at)
+    m.default_scope { where(deleted_at: nil) }
+    count += 1
+  end
+  puts "Soft delete enabled for #{count} models (use .unfiltered to bypass)"
 end
 
 # 프로젝트별 설정 로드 (.db-irb.rb)
@@ -392,11 +763,9 @@ def run_script(path)
   load expanded
 end
 
-# Help 함수
-def help
-  puts <<~HELP
-    == db-irb Quick Reference ==
-
+# Help 함수 (토픽별 조회 지원)
+HELP_TOPICS = {
+  model: <<~H,
     [Model Naming]
     테이블 → 클래스: split('_').map(&:capitalize).join
       users -> User, user_settings -> UserSettings
@@ -404,13 +773,15 @@ def help
     tables              # 전체 테이블 목록 (헬퍼)
     tables(/user/)      # 테이블 검색
     overview :users     # count + schema + fk 한번에
-
+  H
+  schema: <<~H,
     [Schema & Relations]
     schema :users                # 컬럼 상세 (타입, PK, nullable)
     fk :orders                   # 외래키 관계
     User.columns                 # 컬럼명 배열
     User.associations            # [:orders, :comments, ...] 심볼 배열
-
+  H
+  assoc: <<~H,
     [Association] (FK 기반 자동 설정 + _id 추론)
     user.orders                  # has_many -> Array<Order>
     user.orders_dataset          # has_many -> Dataset (lazy, 체이닝 가능)
@@ -420,7 +791,8 @@ def help
     User.first                   # -> Sequel::Model 인스턴스 (.values로 Hash)
     DB[:users].first             # -> Hash 직접 반환
     # Model: association, scope 사용 가능 / Raw: 가볍고 단순
-
+  H
+  where: <<~H,
     [Select & Filter]
     User.all / User.first / User[1]
     User.where(active: true).all
@@ -431,7 +803,21 @@ def help
     User.select_map(:email)             # -> ["a@b", "c@d"] 단일 컬럼 배열
     User.distinct.select(:role).all
     User.count / .sum(:amount) / .avg(:score)
+  H
+  like: <<~H,
+    [LIKE / Pattern Matching]
+    User.where { name.like('%foo%') }         # LIKE
+    User.where { name.ilike('%foo%') }        # ILIKE (case-insensitive)
+    Sequel.like(:name, '%foo%')               # 함수형 대안
+    Sequel.ilike(:name, '%foo%')              # 함수형 ILIKE
 
+    # 복합 조건
+    User.where { name.like('%foo%') & email.like('%@gmail%') }
+
+    # NOT LIKE
+    User.exclude { name.like('%test%') }
+  H
+  join: <<~H,
     [Join]
     DB[:users].join(:orders, user_id: :id)
       .select_all(:users)               # 필수! 없으면 컬럼 충돌
@@ -443,44 +829,82 @@ def help
       .where(oauth_accounts: { provider: 'google' })
       .select_all(:members).all
     Member.joins(:oauth_account, :team)    # 복수 join
+    Member.left_joins(:oauth_account)      # LEFT JOIN (optional 관계)
 
     [Auto-Join] (nested hash where → 자동 join)
     Member.where(oauth_accounts: { provider: 'google' }).all
       # association 매칭 → 자동 association_join
       # joins 생략 가능. 매칭 안 되면 join 없이 SQL 에러
-
+  H
+  group: <<~H,
     [Group & Aggregate]
     Order.group_and_count(:status).all
       # => [{status: "paid", count: 42}, ...]
     Order.group(:user_id)
       .select_append { sum(amount).as(total) }.all
-
+  H
+  order: <<~H,
     [Order & Pagination]
     User.order(:created_at).reverse.all
     User.order(:created_at).limit(10).offset(20).all
     sample :users              # limit(3).all 헬퍼
     sample User.where(active: true), 5
-
-    [Raw SQL]
-    DB["SELECT * FROM users WHERE id = ?", 1].all
-    DB.run("UPDATE users SET x = 1")
-    # -e에서는 DB["..."]가 shell escape 충돌 → %() 리터럴 사용:
-    #   -e 'DB[%(SELECT * FROM users WHERE id = ?), 1].all'
-    #   %()는 Ruby 쌍따옴표 문자열과 동일, 괄호 안에 " 불필요
-
+  H
+  sql: <<~H,
+    [Raw SQL] (DB["..."]는 차단됨 — Sequel DSL 사용 권장)
+    raw_sql("SELECT * FROM users WHERE id = ?", 1).all  # 명시적 raw SQL
+    # Sequel DSL 대안:
+    User.where(id: 1).all                               # 동일 결과
+    User.where { created_at > '2024-01-01' }.all        # 조건식
+  H
+  crud: <<~H,
     [Create/Update/Delete]
     User.create(name: "x")
-    user.update(name: "y")
-    User.where(...).update(name: "z")  # batch (즉시 실행!)
-    user.delete
-
+    user.update(name: "y")             # preview → _.apply!
+    User.where(...).update(name: "z")  # preview → _.apply!
+    user.update!(name: "y")            # 즉시 실행 (bypass)
+    user.delete / user.delete!
+  H
+  safe_write: <<~H,
+    [Safe Write] (--write 모드에서 자동 활성화)
+    user.update(name: "x")              # 단건: before→after diff
+    User.where(...).update(x: 1)        # 배치: count + sample
+    _.apply!  또는  pending.apply!       # 확인 후 실행
+    .update!(x: 1) / .delete!           # 즉시 실행 (bypass)
+    pending                              # 마지막 PendingChange 참조
+    # CASCADE 감지: delete 시 연쇄 삭제/SET NULL 자동 표시
+  H
+  validates: <<~H,
+    [Validates & Normalizes] (.db-irb.rb에서 등록)
+    # Sequel validation_helpers (자동 활성화)
+    User.class_eval do
+      def validate
+        super
+        validates_presence [:name, :email]
+        validates_format /\\A.+@.+\\z/, :email
+      end
+    end
+    # Normalizes (Rails 7.1+ 스타일)
+    User.normalizes :email, with: ->(v) { v&.strip&.downcase }
+    User.normalizes :phone, with: ->(v) { v&.gsub(/[^0-9]/, '') }
+  H
+  write_guard: <<~H,
+    [Write Guard] (.db-irb.rb에서 등록)
+    write_guard :users do |ctx|
+      # ctx.operation, ctx.count, ctx.values, ctx.dataset, ctx.before
+      "경고 메시지" if ctx.count > 100   # 문자열 → 경고 표시
+      raise "차단" if ctx.count > 1000   # raise → 생성 시 예외
+    end
+  H
+  export: <<~H,
     [Export]
     to_csv  User.all              # stdout
     to_csv  User.all, "~/a.csv"   # 파일
     to_json User.limit(10)
     to_clip User.first(5)         # 클립보드
     User.first.to_yaml
-
+  H
+  analysis: <<~H,
     [Analysis]
     load_json "~/logs.json"              # 외부 JSON -> Ruby 배열/해시
     index_by  users, :id                 # [{id:1,...},...] -> {1 => {...}}
@@ -491,18 +915,21 @@ def help
       details: merged_data
     }, "~/report.json")
     run_script "~/analysis.rb"           # 외부 Ruby 스크립트 실행
-
+  H
+  import: <<~H,
     [Import] (--write 필요 for prod)
     from_csv :users, "~/a.csv"              # dry-run
     from_csv :users, "~/a.csv", run: true   # 실제 insert
-
+  H
+  exec: <<~H,
     [-e Mode]
     mise run db:irb - <url> -e 'User.count'
     mise run db:irb - <url> -e 'User.where(active: true).limit(5)'
     # 출력: Dataset/Array<Hash> -> 테이블, nil -> 무시, 그 외 -> pp
     # 여러 문장: -e 'x = User.first; x.orders.all'
-    # 주의: shell escape 때문에 Raw SQL(DB["..."]) 대신 Sequel DSL 사용
-
+    # DB["..."]는 차단됨. raw_sql("...") 또는 Sequel DSL 사용
+  H
+  workflow: <<~H,
     [Explore Workflow]
     # 1. 테이블 목록 확인
     tables                       # 또는 tables(/keyword/)
@@ -514,12 +941,30 @@ def help
     sample :users
     # 5. 분석 쿼리
     User.group_and_count(:role).all
-
+  H
+  fk_alias: <<~H,
+    [FK Alias] (비표준 FK명 → 테이블 매핑)
+    # .db-irb.rb에서 선언:
+    fk_alias creator: :member, singer: :member
+    # → Song.joins(:creator), song.creator 자동 작동
+    # 선언 즉시 모든 테이블의 해당 _id 컬럼에 association 생성
+  H
+  soft_delete: <<~H,
+    [Soft Delete]
+    enable_soft_delete              # 전체 테이블 (deleted_at 컬럼 있는 것만)
+    enable_soft_delete Match, Song  # 특정 모델만
+    # → .where(deleted_at: nil) 자동 적용
+    # 해제: Model.unfiltered.where(...)
+  H
+  custom: <<~H,
     [Custom Helpers]
     # .db-irb.rb에 프로젝트별 도메인 헬퍼 정의 (자동 로드)
     # 위치: $MISE_PROJECT_ROOT/.db-irb.rb 또는 $PWD/.db-irb.rb
     #
     # 예시 (.db-irb.rb):
+    #   fk_alias creator: :member
+    #   enable_soft_delete
+    #
     #   def votes_by(member_id)
     #     Vote.where(member_id: member_id)
     #       .order(Sequel.desc(:created_at)).all
@@ -532,7 +977,43 @@ def help
     #
     # run_script으로 외부 스크립트도 실행 가능:
     #   run_script "~/scripts/abuse_analysis.rb"
-  HELP
+  H
+}
+
+# 토픽 별명 (help :filter → where 등)
+HELP_ALIASES = {
+  filter: :where, select: :where, find: :where,
+  association: :assoc, relation: :assoc,
+  page: :order, pagination: :order, sort: :order,
+  aggregate: :group, count: :group,
+  raw: :sql,
+  create: :crud, update: :crud, delete: :crud,
+  csv: :export, json: :export, clip: :export, yaml: :export,
+  e: :exec,
+  pattern: :like, ilike: :like, match: :like,
+  fkalias: :fk_alias,
+  softdelete: :soft_delete, soft: :soft_delete,
+  explore: :workflow,
+  safe: :safe_write, pending: :safe_write, apply: :safe_write,
+  validate: :validates, normalize: :validates, normalizes: :validates,
+  guard: :write_guard,
+}
+
+def help(topic = nil)
+  if topic
+    key = topic.to_s.downcase.to_sym
+    key = HELP_ALIASES[key] || key
+    if HELP_TOPICS[key]
+      puts HELP_TOPICS[key]
+    else
+      puts "Unknown topic: #{topic}"
+      puts "Available: #{HELP_TOPICS.keys.join(', ')}"
+    end
+  else
+    puts "== db-irb Quick Reference ==\n\n"
+    HELP_TOPICS.each_value { |v| puts v }
+    puts "\nTip: help :topic (e.g. help :like, help :join, help :where)"
+  end
 end
 
 # 환경 감지 (dev/prod/local)
@@ -548,22 +1029,17 @@ readonly_msg = readonly ? " \e[33m[READ-ONLY]\e[0m" : ""
 
 # -e 모드: 코드 실행 후 종료
 if exec_code
-  def print_table(rows)
-    return puts "No rows" if rows.empty?
-    cols = rows.first.keys
-    widths = cols.map { |c| [c.to_s.length, rows.map { |r| r[c].to_s.length }.max].max }
-    puts cols.zip(widths).map { |c, w| c.to_s.ljust(w) }.join("  ")
-    puts widths.map { |w| "-" * w }.join("  ")
-    rows.each { |r| puts cols.zip(widths).map { |c, w| r[c].to_s.ljust(w) }.join("  ") }
-    puts "(#{rows.size} rows)"
+  def print_table_with_count(rows)
+    print_table(rows)
+    puts "(#{rows.size} rows)" unless rows.empty?
   end
 
   def print_result(result)
     case result
-    when Sequel::Dataset then print_table(result.all)
+    when Sequel::Dataset then print_table_with_count(result.all)
     when Array
       if result.empty? then puts "[]"
-      elsif result.first.is_a?(Hash) then print_table(result)
+      elsif result.first.is_a?(Hash) then print_table_with_count(result)
       else pp result
       end
     when nil then nil
