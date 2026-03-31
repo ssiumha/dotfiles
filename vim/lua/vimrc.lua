@@ -277,11 +277,24 @@ require('pckr').add{
     })
   end },
 
-  { 'WTFox/jellybeans.nvim', config = function()
-    vim.cmd.colorscheme('jellybeans')
-  end },
+  'WTFox/jellybeans.nvim',
 
 }
+
+vim.cmd.packadd('jellybeans.nvim')
+require('jellybeans').setup({ transparent = true })
+vim.cmd.colorscheme('jellybeans')
+
+-- WinSeparator: split 경계선 가시성
+-- NormalNC: 비활성 윈도우 배경 dim
+vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#444444', bg = 'NONE' })
+vim.api.nvim_set_hl(0, 'NormalNC', { bg = '#1a1a1a' })
+vim.api.nvim_create_autocmd('ColorScheme', {
+  callback = function()
+    vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#444444', bg = 'NONE' })
+    vim.api.nvim_set_hl(0, 'NormalNC', { bg = '#1a1a1a' })
+  end,
+})
 
 -- neov-ime: Neovide IME preedit support (requires nvim 0.12.0+, neovide nightly)
 if vim.g.neovide and vim.fn.has('nvim-0.12.0') == 1 then

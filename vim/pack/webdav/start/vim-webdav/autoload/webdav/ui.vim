@@ -78,6 +78,20 @@ endfunction
 " Display directory listing for WebDAV path
 " Parameters: path (default '/'), server_name (default '')
 function! webdav#ui#list(path = '/', server_name = '')
+  " Guard: don't destroy unsaved file edits
+  if &filetype == 'webdav' && &modified
+    let choice = confirm('Unsaved changes will be lost. Save first?', "&Save\n&Discard\n&Cancel", 3)
+    if choice == 1
+      call webdav#file#put()
+      if &modified  " save failed
+        return
+      endif
+    elseif choice == 3 || choice == 0
+      return
+    endif
+    " choice == 2: discard and continue
+  endif
+
   " Determine server to use
   if !empty(a:server_name)
     " Use explicitly provided server
@@ -88,10 +102,10 @@ function! webdav#ui#list(path = '/', server_name = '')
     if exists('b:webdav_original_path')
       " WebDAV file buffer - extract directory from file path
       let file_path = b:webdav_original_path
-      let current_path = a:path == '/' ? substitute(file_path, '[^/]*$', '', '') : a:path
+      let current_path = (a:path == '/' || empty(a:path)) ? substitute(file_path, '[^/]*$', '', '') : a:path
     elseif exists('b:webdav_current_path')
       " WebDAVList buffer - use current path directly
-      let current_path = a:path == '/' ? b:webdav_current_path : a:path
+      let current_path = (a:path == '/' || empty(a:path)) ? b:webdav_current_path : a:path
     else
       let current_path = a:path
     endif

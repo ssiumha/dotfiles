@@ -12,9 +12,8 @@ set linespace=2
 
 set nocursorcolumn
 set conceallevel=2
-set concealcursor=nci
 set splitright
-color spacemacs-theme
+silent! color spacemacs-theme
 
 " lightweight
 set indentexpr=
@@ -35,17 +34,73 @@ let g:slime_target = "vimterminal"
 let g:slime_vimterminal_cmd = "/bin/zsh"
 let g:slime_vimterminal_config = {"term_finish": "close"}
 
-let s:session_path = '~/.local/vim/neovide_session.vim'
-let s:default_dir = '~/org'
-let s:default_file = 'index.md'
+" Dashboard — g:note_dashboard 기반 시작 화면
+function! NoteDashboard() abort
+  let g:_dashboard_opening = 1
+  enew
+  setlocal buftype=nofile bufhidden=wipe noswapfile nobuflisted
+  setlocal nonumber norelativenumber nocursorline nocursorcolumn
+  setlocal signcolumn=no foldcolumn=0
+  let b:is_dashboard = 1
 
-function! RestoreOrDefault()
-  execute 'cd ' . s:default_dir
-  silent! execute 'edit ' . s:default_file
+  let items = get(g:, 'note_dashboard', [])
+  if empty(items)
+    call setline(1, '  g:note_dashboard not configured')
+    setlocal nomodifiable
+    let g:_dashboard_opening = 0
+    return
+  endif
+
+  " 수직 센터링
+  let content_height = len(items) + 4
+  let top_pad = max([(winheight(0) - content_height) / 2, 2])
+  let lines = repeat([''], top_pad)
+
+  " 타이틀
+  let title = get(g:, 'note_dashboard_title', 'Notes')
+  call add(lines, '      ' . title)
+  call add(lines, '')
+
+  " 항목
+  for item in items
+    if !has_key(item, 'key')
+      call add(lines, '')
+    else
+      call add(lines, '      ' . item.key . '  ' . item.label)
+    endif
+  endfor
+
+  call add(lines, '')
+  call setline(1, lines)
+
+  " 키매핑 — 각 키가 item.cmd 실행
+  for item in items
+    if has_key(item, 'key')
+      execute printf(
+        \ "nnoremap <buffer><nowait><silent> %s :call <SID>DashboardRun('%s')<CR>",
+        \ item.key, escape(item.cmd, "'"))
+    endif
+  endfor
+  nnoremap <buffer><nowait> q :q<CR>
+
+  setlocal nomodifiable
+
+  " 하이라이트
+  syntax match DashboardKey /^\s\+\zs.\ze\s\s/ contained
+  syntax match DashboardItem /^\s\+.\s\s.*$/ contains=DashboardKey
+  execute 'syntax match DashboardTitle /^\s\+' . escape(title, '/\') . '$/'
+  hi DashboardKey guifg=#ff5f00 gui=bold
+  hi DashboardTitle guifg=#e6b422 gui=bold
+  hi DashboardItem guifg=#aaaaaa
+  let g:_dashboard_opening = 0
 endfunction
 
-autocmd VimLeave * mksession! ~/.local/vim/neovide_session.vim
-autocmd VimEnter * ++nested if argc() == 0 && !exists("s:std_in") | call RestoreOrDefault() | endif
+function! s:DashboardRun(cmd) abort
+  let g:_dashboard_opening = 1
+  bwipeout
+  execute a:cmd
+  let g:_dashboard_opening = 0
+endfunction
 
 let g:timeline_perl =<< trim EOF
 if (/^@{1,2}(\d{3}-\d{2}-\d{2})\b/) {
@@ -103,52 +158,56 @@ runtime note/outline.vim
 runtime note/move.vim
 runtime note/bookmark.vim
 
+function! s:SetupFoldToggle() abort
+  if get(b:, 'note_fold_toggle_set', 0) | return | endif
+  let b:note_fold_toggle_set = 1
+  autocmd InsertEnter <buffer> setlocal foldmethod=manual
+  autocmd InsertLeave <buffer> setlocal foldmethod=expr
+endfunction
+
 augroup MyMarkdown
   autocmd!
-  autocmd FileType markdown silent! TableModeEnable
-  autocmd FileType markdown setlocal comments=b:-,b:*,b:+,n:>
-  autocmd FileType markdown setlocal tabstop=2 shiftwidth=2 softtabstop=-1 expandtab
-  autocmd FileType markdown setlocal nowrap linebreak breakindent breakindentopt=shift:2
-  autocmd FileType markdown setlocal foldmethod=expr foldexpr=MarkdownFoldExpr() foldenable
-  autocmd FileType markdown setlocal foldtext=getline(v:foldstart).'...'
-  autocmd FileType markdown nnoremap <buffer> <tab> za
-  autocmd FileType markdown setlocal formatoptions+=ro
-  autocmd FileType markdown inoremap <buffer><expr> <CR>
+  autocmd FileType markdown,webdav setlocal concealcursor=nci
+  autocmd FileType markdown,webdav silent! TableModeEnable
+  autocmd FileType markdown,webdav setlocal comments=b:-,b:*,b:+,n:>
+  autocmd FileType markdown,webdav setlocal tabstop=2 shiftwidth=2 softtabstop=-1 expandtab
+  autocmd FileType markdown,webdav setlocal nowrap linebreak breakindent breakindentopt=shift:2
+  autocmd FileType markdown,webdav setlocal foldmethod=expr foldexpr=MarkdownFoldExpr() foldenable
+  autocmd FileType markdown,webdav setlocal foldtext=getline(v:foldstart).'...'
+  autocmd FileType markdown,webdav nnoremap <buffer> <tab> za
+  autocmd FileType markdown,webdav setlocal formatoptions+=ro
+  autocmd FileType markdown,webdav inoremap <buffer><expr> <CR>
         \ getline('.') =~# '^\s*[-*+]\s*$' ? '<Esc>S<CR>' : '<CR>'
   " Copilot accept: <C-]> (Tab은 리스트 indent용)
-  autocmd FileType markdown imap <buffer><silent><script><expr> <C-]> copilot#Accept("\<CR>")
-  autocmd FileType markdown nnoremap <buffer> <cr> :call OpenWiki()<cr>
-  autocmd FileType markdown nnoremap <buffer> <c-c><c-l> :call SmartLink()<cr>
-  autocmd FileType markdown inoremap <buffer> <C-c><C-l> <C-o>:call SmartLink()<CR>
-  autocmd FileType markdown nnoremap <buffer> <c-c><c-p> :call DataviewProperty()<cr>
-  autocmd FileType markdown nnoremap <buffer> <c-c><c-o> :call MarkdownOutline()<cr>
+  autocmd FileType markdown,webdav imap <buffer><silent><script><expr> <C-]> copilot#Accept("\<CR>")
+  autocmd FileType markdown,webdav nnoremap <buffer> <cr> :call OpenWiki()<cr>
+  autocmd FileType markdown,webdav nnoremap <buffer> <c-c><c-l> :call SmartLink()<cr>
+  autocmd FileType markdown,webdav inoremap <buffer> <C-c><C-l> <C-o>:call SmartLink()<CR>
+  autocmd FileType markdown,webdav nnoremap <buffer> <c-c><c-p> :call DataviewProperty()<cr>
+  autocmd FileType markdown,webdav nnoremap <buffer> <c-c><c-o> :call MarkdownOutline()<cr>
   autocmd FileType markdown nnoremap <buffer> <c-c><c-w> :MoveFileFzf<cr>
-  autocmd FileType markdown nnoremap <buffer> <c-c><c-t> :call TransformUrlFzf()<cr>
-  autocmd FileType markdown nnoremap <buffer> <M-b> :BookmarkPick<cr>
+  autocmd FileType markdown,webdav nnoremap <buffer> <c-c><c-t> :call TransformUrlFzf()<cr>
+  autocmd FileType markdown,webdav nnoremap <buffer> <M-b> :BookmarkPick<cr>
 
-  autocmd FileType markdown nnoremap <buffer> <C-c>. :PickDateAtCursor<CR>
-  autocmd FileType markdown inoremap <buffer> <C-c>. <c-o>:PickDateAtCursor<CR>
+  autocmd FileType markdown,webdav nnoremap <buffer> <C-c>. :PickDateAtCursor<CR>
+  autocmd FileType markdown,webdav inoremap <buffer> <C-c>. <c-o>:PickDateAtCursor<CR>
 
-  autocmd FileType markdown inoremap <buffer> [[ <C-o>:call LocalLinkFzf()<CR>
-  autocmd FileType markdown let b:complete_chain = ['NoteComplete', 'SnippetComplete']
-  autocmd FileType markdown inoremap <buffer><expr> <C-n> NoteSmartCN()
-  autocmd FileType markdown inoremap <buffer><expr> <C-p> NoteSmartCP()
+  autocmd FileType markdown,webdav inoremap <buffer> [[ <C-o>:call LocalLinkFzf()<CR>
+  autocmd FileType markdown,webdav let b:complete_chain = ['NoteComplete', 'SnippetComplete']
+  autocmd FileType markdown,webdav inoremap <buffer><expr> <C-n> NoteSmartCN()
+  autocmd FileType markdown,webdav inoremap <buffer><expr> <C-p> NoteSmartCP()
 
-  autocmd FileType markdown noremap <S-Up>    :call TableOrDate('k', 1)<CR>
-  autocmd FileType markdown noremap <S-Down>  :call TableOrDate('j', -1)<CR>
-  autocmd FileType markdown noremap <S-Left>  :call TableOrDate('h', -1, 'day')<CR>
-  autocmd FileType markdown noremap <S-Right> :call TableOrDate('l', 1, 'day')<CR>
+  autocmd FileType markdown,webdav noremap <S-Up>    :call TableOrDate('k', 1)<CR>
+  autocmd FileType markdown,webdav noremap <S-Down>  :call TableOrDate('j', -1)<CR>
+  autocmd FileType markdown,webdav noremap <S-Left>  :call TableOrDate('h', -1, 'day')<CR>
+  autocmd FileType markdown,webdav noremap <S-Right> :call TableOrDate('l', 1, 'day')<CR>
 
-  autocmd InsertEnter *.md setlocal foldmethod=manual
-  autocmd InsertLeave *.md setlocal foldmethod=expr
+  autocmd FileType markdown,webdav call s:SetupFoldToggle()
 
   autocmd VimLeavePre *.md mkview
   autocmd FileType markdown silent! loadview
 
-  " autocmd FileType markdown nnoremap <buffer> <leader>fc zM
-  " autocmd FileType markdown nnoremap <buffer> <leader>fa zR
-
-  autocmd FileType markdown ++once {
+  autocmd FileType markdown,webdav ++once {
     hi Folded gui=bold guifg=#ff5f00 guibg=NONE
     hi markdownH1 gui=bold guifg=#e6b422
     hi markdownH2 gui=bold guifg=#d75f5f

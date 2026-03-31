@@ -112,6 +112,7 @@ function M.open(opts)
     multiline = 2,
     actions = shared_actions(),
     previewer = 'builtin',
+    _fmt = { from = restore_entry },
     winopts = {
       preview = {
         layout = 'vertical',
@@ -126,17 +127,20 @@ function M.open(opts)
     },
     -- 디렉토리 dim 처리: 경로는 유지하되 시각적으로 파일명 강조
     fn_transform = function(line)
-      local dir, rest = line:match('^(.*/)(.+)$')
-      if dir and rest:match('^[^/]+:%d+:') then
-        local file, loc, text = rest:match('^([^:]+)(:%d[%d:]*:)(.*)')
-        if file then
-          if is_test_path(dir, file) then
-            return '\027[90m' .. dir .. '\n  ' .. file .. loc .. text .. '\027[0m'
-          end
-          return '\027[90m' .. dir .. '\027[0m\n  '
-            .. file .. '\027[33m' .. loc .. '\027[0m' .. text
+      -- 1-step 4-group 매치: 내용에 / 포함되어도 backtrack으로 올바른 분리
+      local dir, file, loc, text = line:match('^(.*/)([^/]+)(:%d[%d:]*:)(.*)')
+      if dir then
+        if is_test_path(dir, file) then
+          return '\027[90m' .. dir .. '\n  ' .. file .. loc .. text .. '\027[0m'
         end
-        return '\027[90m' .. dir .. '\027[0m\n  ' .. rest
+        return '\027[90m' .. dir .. '\027[0m\n  '
+          .. file .. '\027[33m' .. loc .. '\027[0m' .. text
+      end
+      -- dir 없지만 file:line: 패턴 (루트 파일) → 2줄 통일
+      local file2, loc2, text2 = line:match('^([^/]+)(:%d[%d:]*:)(.*)')
+      if file2 then
+        return '\027[90m./\027[0m\n  '
+          .. file2 .. '\027[33m' .. loc2 .. '\027[0m' .. text2
       end
       return line
     end,

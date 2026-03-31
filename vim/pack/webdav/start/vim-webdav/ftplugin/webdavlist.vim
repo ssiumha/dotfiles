@@ -33,3 +33,9 @@ nnoremap <buffer> R :call webdav#operations#rename()<CR>
 nnoremap <buffer> D :call webdav#operations#delete()<CR>
 
 let b:undo_ftplugin = "setlocal buftype< bufhidden< noswapfile< nomodifiable< nowrap< cursorline< conceallevel< statusline<"
+      \ . " | silent! nunmap <buffer> <CR>"
+      \ . " | silent! nunmap <buffer> t"
+      \ . " | silent! nunmap <buffer> -"
+      \ . " | silent! nunmap <buffer> r"
+      \ . " | silent! nunmap <buffer> R"
+      \ . " | silent! nunmap <buffer> D"

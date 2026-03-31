@@ -93,7 +93,11 @@ let g:netrw_keepdir = 1 " disable auto cd
 "----------------
 
 set foldminlines=3
-set fillchars=fold:\ ,vert:│
+if has('nvim')
+  set fillchars=fold:\ ,vert:│,horiz:─,horizup:┴,horizdown:┬,vertleft:┤,vertright:├,verthoriz:┼
+else
+  set fillchars=fold:\ ,vert:│
+endif
 " set foldcolumn=2
 " set foldtext=MyFoldText()
 " func! MyFoldText()
@@ -363,21 +367,59 @@ Plug 'voldikss/vim-floaterm'
         \   { path -> execute('read ' . path) }, 'filepath')
   nnoremap <space>f <esc>:MySnip<cr>
 
+  " Text Transform — visual select → fzf → replace
+  function! s:TxVisualSelection() abort
+    let l:tempfile = tempname()
+    let l:lines = getline("'<", "'>")
+    let l:vmode = visualmode()
+    if l:vmode ==# 'v'
+      let [l:sc, l:ec] = [col("'<"), col("'>")]
+      if len(l:lines) == 1
+        let l:lines = [l:lines[0][l:sc-1 : l:ec-1]]
+      else
+        let l:lines[0] = l:lines[0][l:sc-1:]
+        let l:lines[-1] = l:lines[-1][:l:ec-1]
+      endif
+    endif
+    call writefile(l:lines, l:tempfile)
+    call FloatermCmd(
+      \ printf('%s %s', expand('$HOME/dots/bin/tx'), l:tempfile),
+      \ { out -> s:TxReplace(out) })
+  endfunction
+
+  function! s:TxReplace(output) abort
+    if empty(a:output) || (len(a:output) == 1 && a:output[0] == '')
+      return
+    endif
+    normal! gv"_d
+    call append(line('.') - 1, a:output)
+  endfunction
+
+  xnoremap <space>t :<C-u>call <SID>TxVisualSelection()<CR>
+
+  " Text Generate — normal mode → fzf → insert at cursor
+  function! s:TxGenerate() abort
+    call FloatermCmd(
+      \ printf('%s generate', expand('$HOME/dots/bin/tx')),
+      \ { out -> s:TxInsert(out) })
+  endfunction
+
+  function! s:TxInsert(output) abort
+    if empty(a:output) || (len(a:output) == 1 && a:output[0] == '')
+      return
+    endif
+    call append(line('.'), a:output)
+  endfunction
+
+  nnoremap <space>t :call <SID>TxGenerate()<CR>
+
   command! -bang -nargs=* Rg
     \ call fzf#vim#grep(
     \   'rg --column --line-number --no-heading --color=always --smart-case'
     \   .' --glob "!*.log" --glob "!*.lock" --glob "!*.min.*" --glob "!*.map"'
     \   .' -- '.fzf#shellescape(<q-args>),
-    \   fzf#vim#with_preview(), <bang>0)
-  nnoremap <silent> <space>a <Cmd>call <SID>RgCword()<CR>
-  function! s:RgCword()
-    let word = expand('<cword>')
-    call fzf#vim#grep(
-      \ 'rg --column --line-number --no-heading --color=always --smart-case'
-      \ .' --glob "!*.log" --glob "!*.lock" --glob "!*.min.*" --glob "!*.map"'
-      \ .' -- '.fzf#shellescape(word),
-      \ fzf#vim#with_preview({'options': '--query '.shellescape(word)}), 0)
-  endfunction
+    \   fzf#vim#with_preview({'options': ['--bind', 'alt-a:select-all,alt-d:deselect-all']}), <bang>0)
+  nnoremap <space>a :Rg<space>
 
 Plug 'tpope/vim-fugitive'
 Plug 'rbong/vim-flog', { 'on': ['Flog', 'Flogsplit', 'Floggit'] }
@@ -470,7 +512,9 @@ Plug 'itchyny/lightline.vim'
   endfunction
 
 
-Plug 'nanotech/jellybeans.vim'
+if !has('nvim')
+  Plug 'nanotech/jellybeans.vim'
+endif
 
 " Utils
 Plug 'tpope/vim-dadbod', { 'on': ['DB'] }
@@ -611,7 +655,9 @@ call plug#end()
 "----------------
 " plug:after
 "----------------
-colorscheme jellybeans
+if !has('nvim')
+  colorscheme jellybeans
+endif
 
 " foldexpr is set globally via vim.treesitter.foldexpr() in vimrc.lua
 autocmd FileType yaml setlocal nofoldenable
@@ -659,7 +705,15 @@ let g:webdav_note_patterns.fleeting = {
   \ 'prompt_title': '%y%m%d '
   \ }
 
-nnoremap <space>ou :WebDAVUIFzf<CR>
+let g:webdav_note_patterns.know = {
+  \ 'server': 'know',
+  \ 'path': '/{title}.md',
+  \ 'template': '',
+  \ 'unit': 'day',
+  \ 'prompt_title': v:null
+  \ }
+
+nnoremap <space>ou :call NoteDashboard()<CR>
 nnoremap <space>od :WebDAVNote daily<CR>
 nnoremap <space>om :WebDAVNote monthly<CR>
 nnoremap <space>of :WebDAVNote fleeting<CR>
@@ -726,13 +780,10 @@ if has('ide') "ideavimrc
   nnoremap <space>r :action RunClass<cr>
 endif
 
-if exists('g:neovide')
-  source ~/dots/vim/note.vim
-endif
-
 if has('gui_macvim')
   set guifont=Menlo:h17
-  set nospell nowrap concealcursor=
+  set nospell nowrap
+  set autoread
 
   let &undodir = expand('$HOME/.cache/macvim/undo')
   let &backupdir = expand('$HOME/.cache/macvim/backup')
@@ -741,18 +792,39 @@ if has('gui_macvim')
     if !isdirectory(s:d) | call mkdir(s:d, 'p') | endif
   endfor
 
-  source ~/dots/vim/note.vim
-  " autocmd VimEnter * if argc() == 0
-  "       \| exe 'cd ~/docs' | edit index.md
-  "       \| endif
+  " Auto-realign markdown tables on open and external reload
+  function! s:RealignAllTables() abort
+    if !exists(':TableModeRealign')
+      return
+    endif
+    let save_pos = getpos('.')
+    call cursor(1, 1)
+    while search('^|', 'W')
+      silent! TableModeRealign
+      while getline('.') =~# '^|' && line('.') < line('$')
+        call cursor(line('.') + 1, 1)
+      endwhile
+    endwhile
+    call setpos('.', save_pos)
+    set nomodified
+  endfunction
 
-  " :h macvim-prefs
-  "
-  "   MMLoginShellArgument =
-  "   defaults read org.vim.MacVim
-  "   defaults write org.vim.MacVim MMTranslateCtrlClick 0
-  "   defaults delete org.vim.MacVim
-  "
-  " let &shellcmdflag=-l\ -c
-  " not working MISE_CACHE_PATH
+  augroup MacVimMarkdownTable
+    autocmd!
+    autocmd FileType markdown TableModeEnable
+    autocmd BufReadPost,FileChangedShellPost *.md call s:RealignAllTables()
+  augroup END
+endif
+
+if exists('g:neovide') || has('gui_macvim')
+  source ~/dots/vim/note.vim
+
+  augroup NoteDashboard
+    autocmd!
+    autocmd VimEnter * ++nested if argc() == 0
+          \| call NoteDashboard()
+          \| let g:note_dashboard_ready = 1
+          \| endif
+    autocmd VimResized * if get(b:, 'is_dashboard', 0) | call NoteDashboard() | endif
+  augroup END
 endif
