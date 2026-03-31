@@ -16,3 +16,4 @@ config/raycast/**
 !config/claude/roles/**
 !config/raycast/scripts/**
 __pycache__
+dist
