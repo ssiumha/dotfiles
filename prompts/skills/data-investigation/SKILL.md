@@ -63,6 +63,20 @@ argument-hint: "[investigation-name]"
    - 소스 간 공통 키 결정 (exact match vs approximate match)
    - 매칭 불일치 가능성 사전 인지 (타임스탬프 오차, ID 체계 차이 등)
 
+4. **db-irb `to_json` 주의**
+   - db-irb의 `to_json` 함수는 `Hash#values`를 호출하여 **키를 삭제**한다 (DB raw 쿼리 결과가 배열로 변환됨)
+   - collect.rb에서 DB 쿼리 결과를 저장할 때는 `to_json` 대신 직접 `JSON.pretty_generate`를 사용하거나, 키를 보존하는 `save_json` 헬퍼를 정의할 것:
+     ```ruby
+     require 'json'
+     def save_json(data, path)
+       rows = data.is_a?(Array) ? data : [data]
+       rows = rows.map { |r| r.is_a?(Sequel::Model) ? r.values : r }
+       rows = rows.map { |r| r.is_a?(Hash) ? r.transform_values { |v| v.is_a?(Time) ? v.to_s : v } : r }
+       File.write(File.expand_path(path), JSON.pretty_generate(rows))
+       puts "Saved to #{path} (#{rows.size} rows)"
+     end
+     ```
+
 4. **수집 결과 검증**
    - 건수 확인: 기대값과 비교
    - 정합성 체크: 누락 필드, 이상값
@@ -87,7 +101,30 @@ argument-hint: "[investigation-name]"
    - Cross Validation: 수집 건수 vs 기대값
    - 지표 계산 + 그룹별 집계
 
-3. **차트 생성**
+3. **SPA Page View 클러스터링** (웹/앱 접속 로그 분석 시)
+   - React/SPA 앱은 한 화면 진입 시 여러 API를 동시 호출함 (평균 3~6 calls/page view)
+   - raw request count를 그대로 사용하면 실제 사용량을 과대 표기
+   - **2초 이내 연속 요청을 1 page view로 클러스터링**하여 실제 사용자 행동 단위로 집계
+   - 리포트에서 "requests" 대신 "page views"로 표기
+   - 클러스터링 코드 예시:
+     ```python
+     def cluster_to_pageviews(entries, gap=2.0):
+         """Cluster sorted entries into page views using gap threshold."""
+         page_views, current = [], []
+         for e in entries:
+             if not current:
+                 current = [e]
+             elif (e['ts'] - current[-1]['ts']).total_seconds() <= gap:
+                 current.append(e)
+             else:
+                 page_views.append(current)
+                 current = [e]
+         if current:
+             page_views.append(current)
+         return page_views
+     ```
+
+4. **차트 생성**
    - Read `resources/01-chart-patterns.md` → 조사 목적에 맞는 차트 패턴 선택
    - 파이차트는 카테고리 5개 이하 + 편중 없을 때만 사용. 편중 분포(80%+)는 수평 바차트 권장
    - 차트는 `charts/` 하위에 `{번호}_{이름}.png` 형식으로 저장
@@ -170,6 +207,13 @@ argument-hint: "[investigation-name]"
 3. **수집과 분석 분리**: 수집 스크립트와 분석 스크립트를 분리하여, 데이터 갱신 시 수집만 재실행하면 된다.
 4. **차트 목적 적합**: `resources/01-chart-patterns.md`에서 조사 목적에 맞는 차트 패턴을 선택한다. 불필요한 차트를 남발하지 않는다.
 5. **증분 실행**: 각 Phase는 독립적으로 재실행 가능해야 한다. 데이터 추가 → analyze.py 재실행 → 리포트 재생성.
+6. **session duration 사용 금지**: "첫 요청 ~ 마지막 요청" 간격은 실제 사용 시간이 아님. 하루 2번 접속해도 24시간으로 잡혀서 오해를 유발한다. 체류 시간 대신 **page view 수**, **방문 시간대 히트맵**, **재방문 일수** 등으로 활동량을 표현할 것.
+7. **리포트 정제 원칙** (읽는 사람 관점):
+   - 차트에 이미 표현된 데이터를 테이블로 중복하지 않는다
+   - 개발 용어 (API 경로, 내부 ID, 기술 구조 설명 등) 비노출
+   - 주관적 해석/판단 표현 금지 ("anomalous", "consistent with", "suggesting" 등)
+   - 민감한 표현 주의: "automated", "bot", "script", "abuse" 등은 리포트에 절대 포함하지 않는다
+   - v1 → v2 → final 식의 **반복 정제**가 기본. 스냅샷을 남기며 진행
 
 ## Examples
 

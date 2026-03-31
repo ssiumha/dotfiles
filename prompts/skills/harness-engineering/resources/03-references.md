@@ -48,6 +48,7 @@
 |------|---------------|
 | [Lint Against the Machine — AI Coding Agent Anti-Patterns](https://medium.com/@montes.makes/lint-against-the-machine-a-field-guide-to-catching-ai-coding-agent-anti-patterns-3c4ef7baeb9e) | AI 생성 코드의 copy/paste 8.3%→12.3% 증가, 리팩토링 25%→10% 감소 |
 | [NxCode — Harness Engineering Complete Guide](https://www.nxcode.io/resources/news/harness-engineering-complete-guide-ai-agent-codex-2026) | Kitchen Sink 세션, 사전 최적화, 기능적 서브에이전트 분리는 작동하지 않음 |
+| [revfactory/harness — Claude Code Agent Team Plugin](https://github.com/revfactory/harness) | 6개 에이전트 팀 아키텍처 패턴(Pipeline, Fan-out, Expert Pool, Producer-Reviewer, Supervisor, Hierarchical). Skill = "How to do" vs Agent = "Who does" 구분. 트리거 검증 + 드라이런 방법론 |
 
 ## 아키텍처 테스트 / 의존 방향
 

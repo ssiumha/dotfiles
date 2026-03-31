@@ -23,6 +23,19 @@ Claude Code **운용 패턴** 레퍼런스. 설정/구조는 INSTRUCTIONS.md 본
 
 ---
 
+## Permission Mode: Auto
+
+`defaultMode: "auto"` 사용 시 참고사항:
+
+- **Classifier**: 별도 Sonnet 4.6 모델이 모든 shell 명령/네트워크 요청을 사전 심사. 읽기/파일 편집은 classifier 호출 없이 통과
+- **Subagent 상속**: auto mode에서 스폰된 subagent도 auto mode 상속. `mode` 파라미터에 다른 값을 지정해도 auto mode가 우선
+- **Allow rule 자동 삭제**: `Bash(*)`, `Bash(python*)`, `Agent` 등 광범위한 rule은 auto mode 진입 시 drop됨. 좁은 rule(`Bash(git commit:*)`)만 유지
+- **Fallback**: 3회 연속 또는 세션 내 20회 차단 시 수동 승인 모드로 전환
+- **`autoMode.environment`**: settings.json에 신뢰 도메인/인프라를 prose로 명시하면 false positive 감소
+- **비용**: classifier 호출분 토큰 추가 소비
+
+---
+
 ## 백그라운드 실행 패턴
 
 ```

@@ -92,11 +92,11 @@ Simple query (Logseq 내장). Datalog 기반 advanced query와 별개.
 | 상황 | 위치 |
 |------|------|
 | TODO, 간단한 메모, 회의 메모 | 당일 저널 |
-| 트러블슈팅 완료 (조사+결론 있음) | `pages/troubleshoot___{제목}.md` |
-| 중요 결정 확정 | `pages/decision___{제목}.md` |
-| QA 체크리스트/결과 | `pages/qa___{제목}.md` |
-| 기능 스펙/요구사항 정리 | `pages/spec___{제목}.md` |
-| 배포 실패/인프라 이슈 | `pages/incident___{제목}.md` |
+| 트러블슈팅 완료 (조사+결론 있음) | `pages/pj-{name}___troubleshoot___{제목}.md` |
+| 중요 결정 확정 | `pages/pj-{name}___decision___{제목}.md` |
+| QA 체크리스트/결과 | `pages/pj-{name}___qa___{제목}.md` |
+| 기능 스펙/요구사항 정리 | `pages/pj-{name}___spec___{제목}.md` |
+| 배포 실패/인프라 이슈 | `pages/pj-{name}___incident___{제목}.md` |
 | 새 도메인 개념 | `pages/{개념명}.md` (기존 방식) |
 | 기타 필요 시 | 새 namespace 자유 생성 |
 
@@ -119,9 +119,37 @@ Simple query (Logseq 내장). Datalog 기반 advanced query와 별개.
 
 ## namespace 페이지 작성 규격
 
+### namespace 소속 판단
+
+| 기준 | namespace | 예시 |
+|------|-----------|------|
+| 특정 프로젝트에 종속 | `pj-{name}/{type}/{제목}` | `pj-foo/decision/배포 전략` |
+| 프로젝트 무관 범용 | `{type}/{제목}` | `decision/Git worktree 운용 원칙` |
+| 순수 개념 | 루트 `{개념명}` | `스테이블코인`, `온오프램프` |
+
+**판단 기준**: 이 문서가 특정 프로젝트 없이 의미가 있는가?
+- No → `pj-{name}/{type}/{제목}` (대부분의 decision, troubleshoot, debrief, qa, spec, incident)
+- Yes → `{type}/{제목}` (루트)
+
+### 문서 간 의존 방향
+
+안정도: 개념(L0) > 결정/스펙(L1) > 이벤트(L2) > 저널/세션(L3)
+
+- **의존은 항상 안정한 쪽을 향한다** — L3→L2→L1→L0
+- 저널/세션이 decision이나 concept을 `[[링크]]`로 참조 → OK
+- concept이 session을 참조 → NG
+- 같은 계층 간 참조 → OK (decision ↔ decision)
+
+### 깊이 제한
+
+- 최대 2단: `pj-{name}/{type}/{제목}` (3 segment)
+- `pj-{name}/{type}/{sub-type}/{제목}` 같은 4단 이상 금지
+- 프로젝트 허브 페이지 `pj-{name}.md`는 `{{query (namespace pj-{name})}}` 로 하위 집계
+
 ### 파일 네이밍
 
-- `pages/{type}___{제목}.md` → Logseq에서 `{type}/{제목}`로 표시
+- 프로젝트 종속: `pages/pj-{name}___{type}___{제목}.md` → Logseq에서 `pj-{name}/{type}/{제목}`로 표시
+- 프로젝트 무관: `pages/{type}___{제목}.md` → Logseq에서 `{type}/{제목}`로 표시
 - 제목: 한국어 설명적 제목, 간결하게
 - 모든 콘텐츠는 outliner 형식 (`- ` prefix) 으로 작성
 - 체크리스트는 `TODO`/`DONE` 키워드 사용. `[ ]`/`[x]` 마크다운 체크박스 사용 금지 (Logseq TODO 시스템과 통합되지 않음)
@@ -210,4 +238,90 @@ status: open / resolved / recurring
 
 ## 작성 후 필수 작업
 
-- `qmd update && qmd embed` 실행하여 인덱스 갱신
+페이지 작성이 완료되면 아래 3단계를 순서대로 수행한다.
+
+**예외**: 자동화 hook(session sync 등)에서 호출되는 경우 Step 1, 2는 생략하고 Step 3만 실행한다. 사용자가 직접 `/logseq-write`를 호출하거나 `/debrief` 등 사용자 initiated skill에서 호출할 때만 Step 1, 2를 수행한다.
+
+### Step 1: 미생성 키워드 제안
+
+작성한 페이지에서 `[[링크]]`로 감싼 키워드를 모두 추출하고, 실제 Logseq 페이지가 없는 것을 식별한다.
+
+**추출 대상에서 제외:**
+- 프로퍼티 값: `project::`, `date::` 등의 값으로 쓰인 링크
+- 저널 날짜: `[[YYYY-MM-DD]]` 패턴
+- 프로젝트 태그: `[[pj-*]]` 패턴
+- namespace 자기 참조: 작성 중인 페이지 자신
+
+**페이지 존재 확인:**
+
+```bash
+# 일반 페이지
+test -f ~/Documents/logseq/pages/{키워드}.md
+
+# namespace 페이지 (슬래시 → 트리플 언더스코어)
+# [[pj-{name}/troubleshoot/제목]] → pages/pj-{name}___troubleshoot___제목.md
+test -f ~/Documents/logseq/pages/{type}___{제목}.md
+```
+
+**미생성 키워드가 있으면** 사용자에게 목록을 보여주고 확인을 요청한다:
+
+```
+다음 키워드가 아직 Logseq 페이지로 존재하지 않습니다:
+- [[키워드A]] — 본문에서 {사용 맥락 한 줄}
+- [[키워드B]] — 본문에서 {사용 맥락 한 줄}
+
+생성할 키워드를 선택해주세요 (전체/일부/스킵).
+```
+
+사용자가 선택하면 개념 페이지를 Atomic Notes 원칙에 따라 생성한다:
+
+```markdown
+alias:: {영문 또는 대체 표현이 있으면}
+description:: {한 줄 설명 — 작성한 페이지의 맥락에서 추론}
+
+- {원래 페이지에서의 사용 맥락을 기반으로 1-2줄 기본 내용}
+- 관련: [[원래 작성한 페이지]]
+```
+
+### Step 2: 관련 개념 능동 탐색
+
+작성된 페이지의 핵심 키워드 3-5개를 추출하여 `qmd search`로 관련 기존 페이지를 탐색한다.
+
+**키워드 추출 기준:**
+- 페이지 제목의 핵심어
+- 본문에서 반복 등장하는 도메인 용어
+- 이미 `[[링크]]`로 연결한 것은 **제외** (이미 연결됨)
+
+**탐색 실행:**
+
+```bash
+qmd search "{키워드}" -n 5 --files
+```
+
+**결과 필터링:**
+- 이미 본문에서 `[[링크]]`로 연결한 페이지는 제외
+- 자기 자신, 저널 페이지(`journals/`) 제외
+
+**관련 페이지가 있으면** 사용자에게 연결을 제안한다:
+
+```
+작성한 내용과 관련될 수 있는 기존 페이지:
+- [[페이지A]] — {페이지 설명 또는 첫 줄}
+- [[페이지B]] — {페이지 설명 또는 첫 줄}
+
+본문에 연결을 추가할까요?
+```
+
+사용자가 선택하면 작성한 페이지의 적절한 위치에 `[[링크]]`를 추가한다.
+
+### Step 3: 인덱스 갱신
+
+```bash
+qmd update
+```
+
+```bash
+qmd embed
+```
+
+Step 1에서 새 페이지가 생성되었을 수 있으므로, 반드시 모든 작업 완료 후 마지막에 실행한다.

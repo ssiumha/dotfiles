@@ -1,6 +1,6 @@
 ---
 name: harness-engineering
-description: Audits, improves, and tracks Claude Code agent harness (CLAUDE.md, rules, hooks, skills, settings, memory, architecture, knowledge base). Use when reviewing harness quality, adding constraints/rules/hooks, optimizing agent performance, diagnosing agent misbehavior, setting up harness for a new repository, or managing documentation freshness. Do NOT use for creating new skills (use my-skill-creator) or basic Claude Code setup (use claude-guide).
+description: Audits, improves, and tracks Claude Code agent harness (CLAUDE.md, rules, hooks, skills, agents, settings, memory, architecture, knowledge base). Use when reviewing harness quality, adding constraints/rules/hooks, designing agent teams/orchestration, optimizing agent performance, diagnosing agent misbehavior, setting up harness for a new repository, or managing documentation freshness. Do NOT use for creating new skills (use my-skill-creator) or basic Claude Code setup (use claude-guide).
 ---
 
 # Harness Engineering
@@ -49,6 +49,13 @@ description: Audits, improves, and tracks Claude Code agent harness (CLAUDE.md, 
 | **Git Hooks** | 커밋/푸시 전 품질 게이트 | `.githooks/`, pre-commit, pre-push |
 | **Permissions** | 도구 접근 제어 | `settings.json` allow/deny |
 
+### Orchestration Layer (협업을 구조화)
+
+| 구성 요소 | 역할 | 파일 |
+|-----------|------|------|
+| **Agents** | 전문가 페르소나 정의. 역할, 원칙, I/O 프로토콜 | `.claude/agents/{name}.md` |
+| **Team Patterns** | 에이전트 간 협업 토폴로지 (Pipeline, Fan-out, Expert Pool 등) | `resources/08-agent-team-patterns.md` |
+
 ## Instructions
 
 ### 워크플로우 1: Audit (하네스 감사)
@@ -63,6 +70,7 @@ Instruction Layer:
 - `Read CLAUDE.md` — 프로젝트 instructions (분량 확인)
 - `Glob .claude/rules/*.md` — 규칙 파일 목록
 - `Glob .claude/skills/*/SKILL.md` — 프로젝트 skills
+- `Glob .claude/agents/*.md` — 에이전트 정의 파일
 
 Enforcement Layer:
 - `Read .claude/settings.json` — hooks, permissions
@@ -70,7 +78,7 @@ Enforcement Layer:
 - 커스텀 린터/ArchUnit 존재 여부
 - 아키텍처 테스트 구성 확인 — 스택별 감지 (`resources/06-arch-test-tools.md` 참조)
 
-**2. 7차원 진단**
+**2. 다차원 진단 (7+1)**
 
 각 차원을 0-3으로 평가. 상세 체크리스트: `resources/01-audit-checklist.md`.
 
@@ -83,13 +91,14 @@ Enforcement Layer:
 | **Enforcement** | hooks/린터로 품질 강제, 린트 에러가 수정 지침을 포함하는가 |
 | **Memory** | MEMORY.md 200줄 이내, 중복/obsolete 없음 |
 | **Entropy Management** | 문서 신선도 검증, 품질 등급, 정기 정리 프로세스 |
+| **Orchestration** (조건부) | agents/ 정의 품질, 팀 토폴로지, 검증 — `.claude/agents/` 존재 시만 |
 
 **3. 감사 보고서 출력**
 
 ```
 ## Harness Audit Report — {project}
 
-### Score: {총점}/21
+### Score: {총점}/21 (또는 /24 — Orchestration 포함 시)
 
 | 차원 | 점수 | 핵심 발견 |
 |------|------|-----------|
@@ -118,17 +127,23 @@ Enforcement Layer:
 3. `CLAUDE.md` 작성 — 목차 역할 (~100줄). ARCHITECTURE.md 참조 포함
 4. 핵심 rules 추가 — 가장 자주 위반되는 컨벤션부터 (Why + 예시 필수)
 
+**Phase 2.5 — Orchestration** (반복 멀티스텝 워크플로우가 있는 프로젝트만)
+5. 에이전트 팀 설계 — 상세: `resources/08-agent-team-patterns.md`
+   - 에이전트 정의: `.claude/agents/{name}.md` (역할, 원칙, I/O 프로토콜)
+   - 실행 모드 선택: Agent Teams(2+ 에이전트 협업) vs Sub-agents(일회성)
+   - 검증: 트리거 검증(should-trigger / should-NOT-trigger) + 드라이런
+
 **Phase 3 — Enforcement** (실수를 불가능하게)
-5. Git hooks 설정 (pre-commit: fmt+lint, pre-push: full check)
-6. Claude Code hooks 설정 — 보호 파일 Edit 차단 등
-7. Permissions 설정 — 위험 명령 deny, 파괴적 git 명령 ask
-8. 아키텍처 테스트 설정 제안 — 스택에 맞는 도구 안내 (`resources/06-arch-test-tools.md` 참조)
+6. Git hooks 설정 (pre-commit: fmt+lint, pre-push: full check)
+7. Claude Code hooks 설정 — 보호 파일 Edit 차단 등
+8. Permissions 설정 — 위험 명령 deny, 파괴적 git 명령 ask
+9. 아키텍처 테스트 설정 제안 — 스택에 맞는 도구 안내 (`resources/06-arch-test-tools.md` 참조)
    - ARCHITECTURE.md에 불변식이 있으면 해당 불변식을 테스트로 전환
    - CI에 아키텍처 테스트 단계 추가 권장
 
 **Phase 4 — Knowledge Base** (리포지터리를 기록 시스템으로)
-9. `docs/` 구조 설계 — 프로젝트 규모에 맞게
-10. 기존 외부 문서(Slack, Google Docs)를 리포지터리로 인코딩
+10. `docs/` 구조 설계 — 프로젝트 규모에 맞게
+11. 기존 외부 문서(Slack, Google Docs)를 리포지터리로 인코딩
 
 ### 워크플로우 3: Improve (하네스 개선)
 
@@ -140,6 +155,8 @@ Enforcement Layer:
 | Hook 추가 | 결정론적 강제 필요 | `update-config` skill로 위임 |
 | 아키텍처 테스트 도입 | Constraints Score 2 + ARCHITECTURE.md 불변식 존재 | 스택에 맞는 아키텍처 테스트 도구 제안 (`resources/06-arch-test-tools.md`) |
 | 불변식 커버리지 확장 | Audit에서 특정 유형 불변식 미비 | `resources/07-invariant-taxonomy.md`로 미커버 유형 식별 후 추가 |
+| 에이전트 정의 추가 | 반복되는 전문 역할 패턴 관찰 | `.claude/agents/{name}.md` 생성 (`resources/08-agent-team-patterns.md`) |
+| 팀 토폴로지 설계 | 2+ 에이전트 협업 필요 | 6개 팀 패턴에서 선택, 검증 후 적용 |
 | 문서 인코딩 | 외부에만 있는 지식 발견 | docs/에 마크다운으로 기록 |
 | CLAUDE.md 다이어트 | 100줄 초과 | rules로 분리, 목차만 남기기 |
 | Gardening 스킬 생성 | Audit 후 doc-gardening 스킬 부재 | 워크플로우 4 → 4단계 실행 |
@@ -204,6 +221,8 @@ Level 2+ 프로젝트(ARCHITECTURE.md + rules 존재)에서, `.claude/skills/doc
 | 컨텍스트 과부하 | CLAUDE.md가 백과사전화 | 목차로 전환, rules로 분리 |
 | 탐색 비용 | Codebase Map 없이 매 세션 Glob/Grep | ARCHITECTURE.md 생성/갱신 |
 | 피드백 미반영 | 교정이 다음 세션에서 반복 | memory에 feedback 저장 |
+| 에이전트 역할 중복 | 여러 에이전트가 같은 작업을 수행 | Agent 통합 또는 Expert Pool로 전환 |
+| 팀 통신 실패 | 에이전트 간 산출물 연결 끊김 | I/O 프로토콜 재정의, 드라이런 검증 |
 
 ## Invariant Lifecycle
 
@@ -239,8 +258,15 @@ Level 2+ 프로젝트(ARCHITECTURE.md + rules 존재)에서, `.claude/skills/doc
 | 지식이 Slack/Google Docs에만 존재 | 리포지터리 docs/에 인코딩 — "에이전트가 접근 못 하면 없는 것" |
 | `/init` 자동생성 CLAUDE.md 방치 | "제거해도 실수 안 하면 삭제" |
 | 문서를 한 번 쓰고 방치 | 정기 gardening으로 신선도 유지 |
-| 데이터 형태를 추측하여 처리 (YOLO style) | 경계에서 파싱/검증. 유형 지정된 SDK나 스키마에 의존하여 추측 기반 구현 방지 |
 | Kitchen Sink 세션 | 작업 범위를 좁혀 세션 분리 |
+
+### 에이전트 오케스트레이션
+
+| 문제 | 대안 |
+|------|------|
+| 모든 작업에 에이전트 팀 적용 | 일회성/통신 불필요 → Sub-agent. 팀은 2+ 에이전트 협업 시만 |
+| 에이전트에 역할 없이 도구만 할당 | 역할, 원칙, I/O 프로토콜을 `.claude/agents/`에 명시 |
+| 검증 없이 팀 배포 | 트리거 검증 + 드라이런으로 데이터 흐름 확인 후 적용 (`resources/08-agent-team-patterns.md`) |
 
 ## Examples
 
@@ -256,7 +282,7 @@ User: "에이전트가 자꾸 timezone을 잘못 처리해"
 
 ### 문서 부패 감지
 User: "하네스 점검해줘"
-→ 워크플로우 1: 7차원 진단
+→ 워크플로우 1: 다차원 진단
 → 워크플로우 4: ARCHITECTURE.md에 새 패키지 3개 누락 발견, rules 2개 outdated → 갱신 PR
 
 ## Technical Details
@@ -268,6 +294,7 @@ User: "하네스 점검해줘"
 - 참고 자료 (출처 + 핵심 인사이트): `resources/03-references.md`
 - 아키텍처 테스트 도구 가이드 (언어별 매핑 + 감지 방법): `resources/06-arch-test-tools.md`
 - 불변식 분류 체계 + 발견/우선순위: `resources/07-invariant-taxonomy.md`
+- 에이전트 팀 패턴 + 정의 구조 + 검증: `resources/08-agent-team-patterns.md`
 - Hook/Permission 구성: `update-config` skill 참조
 - Skill 생성/갱신: `my-skill-creator` skill 참조
 - CLAUDE.md 설계/구조: `claude-guide` skill 참조

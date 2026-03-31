@@ -24,16 +24,15 @@
 Python3가 설치되어 있으면 스크립트로 전체 파이프라인을 실행한다.
 
 ```bash
-python3 {SKILL_DIR}/scripts/build-graph.py \
+mise run vis:graph dep \
   --root {PROJECT_ROOT} \
-  --template {SKILL_DIR}/templates/dep.html \
   --output dep-graph.html \
   [--scope {scope}] [--depth {depth}] [--exclude {pattern}]
 ```
 
-- `{SKILL_DIR}`: 이 스킬의 디렉토리 경로 (SKILL.md가 있는 곳)
 - `{PROJECT_ROOT}`: 분석 대상 프로젝트 루트
 - 인자는 사용자 입력(`--scope`, `--depth`, `--exclude`)이 있으면 전달
+- 템플릿은 mise task 내부에서 자동 해석됨
 
 스크립트가 성공하면 **Phase 4-4 결과 보고**로 바로 이동.
 실패 시 Phase 1부터 수동 진행.

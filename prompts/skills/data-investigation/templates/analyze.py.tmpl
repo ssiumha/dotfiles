@@ -50,10 +50,21 @@ def load_json(filename):
 
 
 def parse_ts(s):
-    """Parse timestamp string to datetime (UTC)."""
+    """Parse timestamp string to datetime (UTC).
+    CloudWatch timestamps have no timezone — they are UTC.
+    fromisoformat may return naive datetime, so always ensure UTC is set.
+    """
     if not s:
         return None
-    for fmt in ["%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"]:
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except (ValueError, AttributeError):
+        pass
+    for fmt in ["%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d %H:%M:%S.%f %z",
+                "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"]:
         try:
             dt = datetime.strptime(s, fmt)
             if dt.tzinfo is None:

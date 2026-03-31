@@ -2,6 +2,8 @@
 
 파일 의존성 그래프(dep), DB 스키마 ERD(schema), Logseq 지식 그래프(logseq)를 vis-network 기반 인터랙티브 HTML로 시각화합니다.
 
+**실행 방식**: mise task (`mise run vis:graph <command>`)로 동작. 이 skill은 래퍼.
+
 ## Mode Routing
 
 | 인자 패턴 | 모드 | 상세 |
@@ -15,42 +17,24 @@
 
 ---
 
-## Install Mode (모든 모드 공통)
-
-`/vis-graph <mode> install <target-dir>`
-
-스크립트 + 템플릿을 대상 디렉토리에 복사하여 독립 실행 가능하게 한다.
-설치 후에는 대상 디렉토리에서 `python <script>` 만으로 HTML이 갱신된다.
-
-| 모드 | 복사 파일 | 기본 대상 |
-|------|-----------|-----------|
-| logseq | `vis_graph_common.py` + `logseq-graph.py` + `logseq.html` | `~/Documents/logseq/` |
-| dep | `vis_graph_common.py` + `build-graph.py` + `dep.html` | 프로젝트 루트 |
-| schema | `vis_graph_common.py` + `extract-schema.py` + `schema.html` | 프로젝트 루트 |
-
-**설치 절차**:
-1. `{SKILL_DIR}/scripts/<script>`를 `<target-dir>/`에 복사
-2. `{SKILL_DIR}/templates/<template>`를 `<target-dir>/`에 복사
-3. 사용자에게 실행 방법 안내
-
----
-
 ## 공통 패턴
 
-### Phase 0: 스크립트 실행 우선
+### Phase 0: mise task 실행 우선
 
-모든 모드는 Python 3.10+ 스크립트를 우선 실행한다.
-스크립트 성공 시 결과 보고로 이동, 실패 시 수동 폴백 (Phase 1~).
+모든 모드는 `mise run vis:graph <command>` 를 우선 실행한다.
+성공 시 결과 보고로 이동, 실패 시 수동 폴백 (Phase 1~).
 
-### 데이터 주입
+스크립트와 템플릿은 `config/mise/tasks/vis-graph/`에 위치:
+- `scripts/` — Python 스크립트
+- `templates/dist/` — 플래트닝된 단일 HTML 템플릿
+- `resources/` — 참조 문서 (SQL 쿼리, 패턴 등)
 
-모든 템플릿은 `{{GRAPH_DATA}}` 플레이스홀더를 사용한다.
-JSON 치환 시 반드시 `<`/`>` 이스케이프:
+### 외부 도구 연동 (render 서브커맨드)
 
-```python
-js = json.dumps(graph_data, ensure_ascii=False)
-js = js.replace("<", "\\u003c").replace(">", "\\u003e")
-html = template.replace("{{GRAPH_DATA}}", js)
+GRAPH_DATA JSON을 stdin으로 받아 HTML을 렌더링할 수 있다:
+
+```bash
+echo '{"nodes":...}' | mise run vis:graph render --type schema --output out.html
 ```
 
 ### 출력

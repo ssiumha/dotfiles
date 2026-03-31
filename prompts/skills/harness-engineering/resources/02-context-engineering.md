@@ -152,3 +152,6 @@ Sub-agent는 압축된 응답을 반환해야 한다:
 
 - Parent = 고성능 모델 (판단/계획)
 - Sub-agent = 경량 모델 (탐색/검색)
+
+> 2+ 에이전트 협업이 필요한 경우(Agent Teams)는 `resources/08-agent-team-patterns.md` 참조.
+> Sub-agent = 컨텍스트 격리, Agent Team = 오케스트레이션 — 관심사가 다르다.

@@ -11,10 +11,47 @@ if ! git -C "$GIT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   GIT_DIR="$DIR"
 fi
 
-FOLDER="${GIT_DIR##*/}"
+NBSP=$(printf '\xc2\xa0')
+
+# Worktree detection — use structured JSON fields when available
+WT_NAME=$(echo "$input" | jq -r '.worktree.name // empty')
+WT_ORIG=$(echo "$input" | jq -r '.worktree.original_branch // empty')
+
+if [ -n "$WT_NAME" ]; then
+  FOLDER="${WT_NAME}${WT_ORIG:+ (from ${WT_ORIG})}"
+else
+  FOLDER="${GIT_DIR##*/}"
+fi
+
 BRANCH=$(git -C "$GIT_DIR" branch --show-current 2>/dev/null)
 DIRTY=$(git -C "$GIT_DIR" status --porcelain 2>/dev/null | head -1)
-NBSP=$(printf '\xc2\xa0')
+
+# Background fetch + cache (60s TTL)
+REPO_HASH=$(printf '%s' "$GIT_DIR" | md5 2>/dev/null || printf '%s' "$GIT_DIR" | md5sum 2>/dev/null | cut -d' ' -f1)
+FETCH_CACHE="/tmp/claude-statusline-fetch-${REPO_HASH}"
+NOW=$(date +%s)
+LAST_FETCH=$(cat "$FETCH_CACHE" 2>/dev/null || echo 0)
+if [ $((NOW - LAST_FETCH)) -ge 60 ]; then
+  echo "$NOW" > "$FETCH_CACHE"
+  git -C "$GIT_DIR" fetch --quiet 2>/dev/null &
+fi
+
+# Ahead/behind upstream
+AB_FMT=""
+AHEAD_BEHIND=$(git -C "$GIT_DIR" rev-list --left-right --count HEAD...@{upstream} 2>/dev/null)
+if [ -n "$AHEAD_BEHIND" ]; then
+  AHEAD=$(echo "$AHEAD_BEHIND" | cut -f1)
+  BEHIND=$(echo "$AHEAD_BEHIND" | cut -f2)
+  if [ "$AHEAD" -gt 0 ] && [ "$BEHIND" -gt 0 ]; then
+    AB_FMT="↑${AHEAD}↓${BEHIND}"
+  elif [ "$AHEAD" -gt 0 ]; then
+    AB_FMT="↑${AHEAD}"
+  elif [ "$BEHIND" -gt 0 ]; then
+    AB_FMT="↓${BEHIND}"
+  else
+    AB_FMT="≡"
+  fi
+fi
 
 # PR (subshell cd for gh context)
 PR_JSON=$(cd "$GIT_DIR" && gh pr view --json number,state,statusCheckRollup,url 2>/dev/null)
@@ -65,20 +102,39 @@ GH_INNER=""
 [ -n "$GH_CI" ] && GH_INNER="${GH_INNER:+$GH_INNER }$GH_CI"
 [ -n "$GH_INNER" ] && GH_FMT="🐙${NBSP}gh:${GH_INNER}"
 
-# Sandbox status
-# Context window usage
-CTX_JSON=$(echo "$input" | jq -r '.context_window // empty')
-if [ -n "$CTX_JSON" ]; then
-  CTX_PCT=$(echo "$CTX_JSON" | jq -r '.used_percentage // empty')
-  if [ -n "$CTX_PCT" ]; then
-    CTX_FMT="💬 ${CTX_PCT}%"
+# Rate limit (5h window) — progress bar
+RL_PCT=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+if [ -n "$RL_PCT" ]; then
+  RL_INT=${RL_PCT%.*}
+  RL_FILLED=$((RL_INT / 10))
+  RL_EMPTY=$((10 - RL_FILLED))
+  RL_BAR=$(printf '█%.0s' $(seq 1 $RL_FILLED 2>/dev/null) ; printf '░%.0s' $(seq 1 $RL_EMPTY 2>/dev/null))
+  RL_RESET=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
+  if [ -n "$RL_RESET" ]; then
+    RL_LEFT=$((RL_RESET - NOW))
+    if [ "$RL_LEFT" -gt 0 ]; then
+      RL_H=$((RL_LEFT / 3600))
+      RL_M=$(( (RL_LEFT % 3600) / 60 ))
+      RL_TIME="${RL_H}h${RL_M}m"
+    else
+      RL_TIME="reset"
+    fi
+    RL_FMT="⚡${RL_BAR}${NBSP}${RL_INT}%${NBSP}(${RL_TIME})"
+  else
+    RL_FMT="⚡${RL_BAR}${NBSP}${RL_INT}%"
   fi
 fi
 
+# Context window usage
+CTX_PCT=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+if [ -n "$CTX_PCT" ]; then
+  CTX_FMT="💬${NBSP}${CTX_PCT}%"
+fi
+
 # Build segments
-LINE1="📁 $FOLDER 🌿 $BRANCH${DIRTY:+*}"
+LINE1="📁 $FOLDER 🌿 $BRANCH${DIRTY:+*}${AB_FMT}"
 LINE2=""
-for seg in "$GH_FMT" "$CTX_FMT"; do
+for seg in "$GH_FMT" "$RL_FMT" "$CTX_FMT"; do
   [ -n "$seg" ] && LINE2="${LINE2:+$LINE2 }$seg"
 done
 

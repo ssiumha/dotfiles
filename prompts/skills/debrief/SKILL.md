@@ -49,7 +49,7 @@ gh pr view --json title,body,url,number
 
 ### 페이지 구조
 
-파일명: `pages/debrief___{제목}.md`
+파일명: `pages/pj-{name}___debrief___{제목}.md`
 
 ```
 project:: [[pj-{name}]]
@@ -88,11 +88,11 @@ pr:: PR {number}
 
 `/logseq-write` skill의 규격을 따라 페이지를 생성한다:
 
-1. `~/Documents/logseq/pages/debrief___{제목}.md` 에 페이지 작성
+1. `~/Documents/logseq/pages/pj-{name}___debrief___{제목}.md` 에 페이지 작성 (프로젝트 하위 namespace)
 2. 당일 저널에 링크 추가:
    ```
    - DONE {작업 요약} #pj-{project}
-     - -> [[debrief/{제목}]]
+     - -> [[pj-{name}/debrief/{제목}]]
    ```
 3. `qmd search`로 관련 기존 페이지를 찾아 Related 섹션에 `[[링크]]` 연결
 

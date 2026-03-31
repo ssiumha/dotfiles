@@ -23,17 +23,16 @@ Logseq 페이지 간 `[[wikilink]]`와 `#tag` 연결을 분석하여 vis-network
 ### Phase 0: 스크립트 실행 (권장)
 
 ```bash
-python3 {SKILL_DIR}/scripts/logseq-graph.py \
+mise run vis:graph logseq \
   --pages {PAGES_DIR} \
-  --template {SKILL_DIR}/templates/logseq.html \
   --output knowledge-graph.html \
   [--include-session] [--include-date] [--no-orphans] \
   [--namespace <name>] [--min-links <N>]
 ```
 
-- `{SKILL_DIR}`: 이 스킬의 디렉토리 경로
 - `{PAGES_DIR}`: Logseq pages 디렉토리 (기본: `~/Documents/logseq/pages`)
 - 인자는 사용자 입력이 있으면 전달
+- 템플릿은 mise task 내부에서 자동 해석됨
 
 스크립트가 성공하면 **결과 보고**로 바로 이동.
 

@@ -18,9 +18,27 @@ if echo "$command" | grep -qE '^cd\s+.*\.claude/worktrees'; then
   exit 0
 fi
 
-# Block: git -C <path> ...
-if echo "$command" | grep -qE '^git\s+-C\s'; then
-  echo '{"decision":"block","reason":"git -C 금지. worktree에서 직접 git 명령을 실행하세요."}'
+# Block: git -C <path> ... (worktree 경로만 차단, 다른 프로젝트 접근은 허용)
+if echo "$command" | grep -qE '^git\s+-C\s+.*\.claude/worktrees'; then
+  echo '{"decision":"block","reason":"git -C로 worktree 접근 금지. worktree에서 직접 git 명령을 실행하세요."}'
+  exit 0
+fi
+
+# Block: GIT_DIR= 환경변수로 다른 저장소 접근
+if echo "$command" | grep -qE 'GIT_DIR='; then
+  echo '{"decision":"block","reason":"GIT_DIR= 금지. worktree에서 직접 git 명령을 실행하세요."}'
+  exit 0
+fi
+
+# Block: --git-dir 옵션으로 다른 저장소 접근
+if echo "$command" | grep -qE 'git\s+.*--git-dir'; then
+  echo '{"decision":"block","reason":"--git-dir 금지. worktree에서 직접 git 명령을 실행하세요."}'
+  exit 0
+fi
+
+# Block: --work-tree 옵션으로 다른 작업 디렉토리 지정
+if echo "$command" | grep -qE 'git\s+.*--work-tree'; then
+  echo '{"decision":"block","reason":"--work-tree 금지. worktree에서 직접 git 명령을 실행하세요."}'
   exit 0
 fi
 

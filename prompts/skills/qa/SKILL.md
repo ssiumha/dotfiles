@@ -99,7 +99,7 @@ argument-hint: "[create|run|list] [feature-name]"
 2. **선택적 작업**
    - **초기화**: 체크박스 전부 `[ ]`로 리셋 (재검증용)
    - **아카이브**: 완료된 QA를 `.claude/qa/archive/`로 이동
-   - **Logseq 기록**: QA 완료 시 `pages/qa___{feature}.md`로 결과 기록 제안
+   - **Logseq 기록**: QA 완료 시 `pages/pj-{name}___qa___{feature}.md`로 결과 기록 제안
 
 ## 중요 원칙
 
