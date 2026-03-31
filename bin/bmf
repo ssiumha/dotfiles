@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bmf - bookmark fzf: harvest and open links from ~/org markdown files
+# bmf - bookmark fzf: harvest and open links from ~/org and ~/Documents/logseq markdown files
 # Usage:
 #   bmf              # interactive pick (default)
 #   bmf harvest      # dump all links (TSV)
@@ -7,6 +7,7 @@
 set -euo pipefail
 
 ORG_DIR="${ORG_DIR:-$HOME/org}"
+LOGSEQ_DIR="${LOGSEQ_DIR:-$HOME/Documents/logseq}"
 
 # --- options ---
 
@@ -23,88 +24,105 @@ if [[ "$BMF_POPUP" -eq 1 ]]; then
   export FZF_DEFAULT_OPTS="--layout=reverse --border $(echo "${FZF_DEFAULT_OPTS:-}" | sed -E 's/--tmux[= ][^ ]*//g; s/--tmux//g')"
 fi
 
+# --- resolve_source ---
+# source label → absolute path (logseq/pages/foo.md → $LOGSEQ_DIR/pages/foo.md)
+
+resolve_source() {
+  case "$1" in
+    logseq/*) echo "$LOGSEQ_DIR/${1#logseq/}" ;;
+    *) echo "$ORG_DIR/$1" ;;
+  esac
+}
+
 # --- harvest ---
 # Output: display\ttarget\tsource (tab-separated, deduped by target)
 
 harvest() {
-  local org="$ORG_DIR"
   local t=$'\t'
 
   {
-    # [name](https://url) — named external links (with line context)
-    rg -N '\[([^\]]+)\]\((https?://[^)]+)\)' \
-      --glob '*.md' "$org" 2>/dev/null \
-      | sed "s|^$org/||" \
-      | awk -v t="$t" '{
-          idx=index($0,":")
-          file=substr($0,1,idx-1)
-          line=substr($0,idx+1)
-          if(match(line,/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/)){
-            full=substr(line,RSTART,RLENGTH)
-            name=full; sub(/^\[/,"",name); sub(/\].*$/,"",name)
-            url=full; sub(/^[^(]*\(/,"",url); sub(/\)$/,"",url)
-            ctx=line
-            gsub(/\[[^\]]*\]\([^)]*\)/,"",ctx)
-            gsub(/- \[.\] /,"",ctx)
-            gsub(/🗓️[^ ]*/,"",ctx)
-            gsub(/➕[^ ]*/,"",ctx)
-            gsub(/^ +| +$/,"",ctx)
-            gsub(/^[-*>#|,. ]+$/,"",ctx)
-            if(length(name)<=8 && length(ctx)>0)
-              printf "%s" t "%s" t "%s\n", ctx, url, file
-            else
-              printf "%s" t "%s" t "%s\n", name, url, file
-          }
-        }' || true
+    for dir in "$ORG_DIR" "$LOGSEQ_DIR"; do
+      [[ -d "$dir" ]] || continue
 
-    # [name](local_path) — named local links (with line context, exclude http, anchors)
-    rg -N '\[([^\]]+)\]\(([^)#][^)]*)\)' \
-      --glob '*.md' "$org" 2>/dev/null \
-      | sed "s|^$org/||" \
-      | awk -v t="$t" '{
-          idx=index($0,":")
-          file=substr($0,1,idx-1)
-          line=substr($0,idx+1)
-          if(match(line,/\[([^\]]+)\]\(([^)#][^)]*)\)/)){
-            full=substr(line,RSTART,RLENGTH)
-            name=full; sub(/^\[/,"",name); sub(/\].*$/,"",name)
-            url=full; sub(/^[^(]*\(/,"",url); sub(/\)$/,"",url)
-            if(url ~ /^https?:\/\//) next
-            ctx=line
-            gsub(/\[[^\]]*\]\([^)]*\)/,"",ctx)
-            gsub(/- \[.\] /,"",ctx)
-            gsub(/🗓️[^ ]*/,"",ctx)
-            gsub(/➕[^ ]*/,"",ctx)
-            gsub(/^ +| +$/,"",ctx)
-            gsub(/^[-*>#|,. ]+$/,"",ctx)
-            if(length(name)<=8 && length(ctx)>0)
-              printf "%s" t "%s" t "%s\n", ctx, url, file
-            else
-              printf "%s" t "%s" t "%s\n", name, url, file
-          }
-        }' || true
+      local prefix=""
+      [[ "$dir" == "$LOGSEQ_DIR" ]] && prefix="logseq/"
 
-    # [[wikilink]] — wiki-style links
-    rg -oN '\[\[([^\]]+)\]\]' --replace $'$1\t$1.md' \
-      --glob '*.md' "$org" 2>/dev/null \
-      | sed "s|^$org/||" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
+      # [name](https://url) — named external links (with line context)
+      rg -N '\[([^\]]+)\]\((https?://[^)]+)\)' \
+        --glob '*.md' --glob '!archives/' "$dir" 2>/dev/null \
+        | sed "s|^$dir/|$prefix|" \
+        | awk -v t="$t" '{
+            idx=index($0,":")
+            file=substr($0,1,idx-1)
+            line=substr($0,idx+1)
+            if(match(line,/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/)){
+              full=substr(line,RSTART,RLENGTH)
+              name=full; sub(/^\[/,"",name); sub(/\].*$/,"",name)
+              url=full; sub(/^[^(]*\(/,"",url); sub(/\)$/,"",url)
+              ctx=line
+              gsub(/\[[^\]]*\]\([^)]*\)/,"",ctx)
+              gsub(/- \[.\] /,"",ctx)
+              gsub(/🗓️[^ ]*/,"",ctx)
+              gsub(/➕[^ ]*/,"",ctx)
+              gsub(/^ +| +$/,"",ctx)
+              gsub(/^[-*>#|,. ]+$/,"",ctx)
+              if(length(name)<=8 && length(ctx)>0)
+                printf "%s" t "%s" t "%s\n", ctx, url, file
+              else
+                printf "%s" t "%s" t "%s\n", name, url, file
+            }
+          }' || true
 
-    # onetab: url | title
-    rg -oN '^(https?://\S+)\s+\|\s*(.+)$' --replace $'$2\t$1' \
-      --glob '*.md' "$org" 2>/dev/null \
-      | sed "s|^$org/||" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
+      # [name](local_path) — named local links (with line context, exclude http, anchors)
+      rg -N '\[([^\]]+)\]\(([^)#][^)]*)\)' \
+        --glob '*.md' --glob '!archives/' "$dir" 2>/dev/null \
+        | sed "s|^$dir/|$prefix|" \
+        | awk -v t="$t" '{
+            idx=index($0,":")
+            file=substr($0,1,idx-1)
+            line=substr($0,idx+1)
+            if(match(line,/\[([^\]]+)\]\(([^)#][^)]*)\)/)){
+              full=substr(line,RSTART,RLENGTH)
+              name=full; sub(/^\[/,"",name); sub(/\].*$/,"",name)
+              url=full; sub(/^[^(]*\(/,"",url); sub(/\)$/,"",url)
+              if(url ~ /^https?:\/\//) next
+              ctx=line
+              gsub(/\[[^\]]*\]\([^)]*\)/,"",ctx)
+              gsub(/- \[.\] /,"",ctx)
+              gsub(/🗓️[^ ]*/,"",ctx)
+              gsub(/➕[^ ]*/,"",ctx)
+              gsub(/^ +| +$/,"",ctx)
+              gsub(/^[-*>#|,. ]+$/,"",ctx)
+              if(length(name)<=8 && length(ctx)>0)
+                printf "%s" t "%s" t "%s\n", ctx, url, file
+              else
+                printf "%s" t "%s" t "%s\n", name, url, file
+            }
+          }' || true
 
-    # onetab: url | (no title)
-    rg -oN '^(https?://\S+)\s+\|\s*$' --replace $'$1\t$1' \
-      --glob '*.md' "$org" 2>/dev/null \
-      | sed "s|^$org/||" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
+      # [[wikilink]] — wiki-style links
+      rg -oN '\[\[([^\]]+)\]\]' --replace $'$1\t$1.md' \
+        --glob '*.md' --glob '!archives/' "$dir" 2>/dev/null \
+        | sed "s|^$dir/|$prefix|" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
 
-    # bare URLs (last — named links win dedup)
-    rg -oN 'https?://[^\s)>\]"]+' --glob '*.md' "$org" 2>/dev/null \
-      | sed "s|^$org/||" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\2${t}\\1|" || true
+      # onetab: url | title
+      rg -oN '^(https?://\S+)\s+\|\s*(.+)$' --replace $'$2\t$1' \
+        --glob '*.md' --glob '!archives/' "$dir" 2>/dev/null \
+        | sed "s|^$dir/|$prefix|" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
 
+      # onetab: url | (no title)
+      rg -oN '^(https?://\S+)\s+\|\s*$' --replace $'$1\t$1' \
+        --glob '*.md' --glob '!archives/' "$dir" 2>/dev/null \
+        | sed "s|^$dir/|$prefix|" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\1|" || true
+
+      # bare URLs (last — named links win dedup)
+      rg -oN 'https?://[^\s)>\]"]+' --glob '*.md' --glob '!archives/' "$dir" 2>/dev/null \
+        | sed "s|^$dir/|$prefix|" | sed "s|^\([^:]*\):\(.*\)|\\2${t}\\2${t}\\1|" || true
+
+    done
   } | awk -F'\t' '!seen[$2]++ {
     name = $1; target = $2; source = $3
+    if (target ~ /^archives\//) next
     domain = ""
     if (target ~ /^https?:\/\//) {
       domain = target
@@ -121,12 +139,17 @@ harvest() {
 # --- resolve ---
 
 resolve() {
-  local target="$1"
+  local target="$1" source="${2:-}"
+  local base_dir
+  case "$source" in
+    logseq/*) base_dir="$LOGSEQ_DIR" ;;
+    *) base_dir="$ORG_DIR" ;;
+  esac
   case "$target" in
     http://*|https://*) echo "$target" ;;
     ~/*) echo "${HOME}/${target:2}" ;;
     /*) echo "$target" ;;
-    *) echo "$ORG_DIR/$target" ;;
+    *) echo "$base_dir/$target" ;;
   esac
 }
 
@@ -156,9 +179,13 @@ pick() {
     --preview='
       target={2}; source={3}
       org='"'$ORG_DIR'"'
+      logseq='"'$LOGSEQ_DIR'"'
       home='"'$HOME'"'
+      case "$source" in
+        logseq/*) src_path="$logseq/${source#logseq/}" ;;
+        *) src_path="$org/$source" ;;
+      esac
       if [[ "$target" == http://* || "$target" == https://* ]]; then
-        src_path="$org/$source"
         printf "\033[1;34m%s\033[0m\n" "$target"
         printf "\033[2m%s\033[0m\n\n" "$source"
         if [[ -f "$src_path" ]]; then
@@ -175,7 +202,11 @@ pick() {
         fi
       else
         resolved="$target"
-        [[ "$resolved" != /* && "$resolved" != ~/* ]] && resolved="$org/$resolved"
+        case "$source" in
+          logseq/*) base="$logseq" ;;
+          *) base="$org" ;;
+        esac
+        [[ "$resolved" != /* && "$resolved" != ~/* ]] && resolved="$base/$resolved"
         [[ "$resolved" == ~/* ]] && resolved="$home/${resolved:2}"
         if [[ -f "$resolved" ]]; then
           bat --color=always --style=numbers "$resolved" 2>/dev/null || cat "$resolved"
@@ -197,7 +228,7 @@ pick() {
   local target source resolved
   target=$(printf '%s' "$pick" | cut -f2)
   source=$(printf '%s' "$pick" | cut -f3)
-  resolved=$(resolve "$target")
+  resolved=$(resolve "$target" "$source")
 
   case "$key" in
     ctrl-y)
@@ -205,7 +236,8 @@ pick() {
       [[ -n "${TMUX:-}" ]] && tmux display-message "Copied: $resolved"
       ;;
     ctrl-e)
-      local src_path="$ORG_DIR/$source"
+      local src_path
+      src_path=$(resolve_source "$source")
       local sock
       sock=$(find /tmp -maxdepth 2 -name '*.0' -path '*/nvim.*' 2>/dev/null | head -1)
       if [[ -n "${sock:-}" ]]; then
@@ -223,7 +255,8 @@ pick() {
           ;;
         *)
           local line
-          line=$(rg -Fn "$target" "$ORG_DIR/$source" 2>/dev/null | head -1 | cut -d: -f1)
+          src_path=$(resolve_source "$source")
+          line=$(rg -Fn "$target" "$src_path" 2>/dev/null | head -1 | cut -d: -f1)
           mvim --remote-tab-silent ${line:+"+$line"} "$resolved"
           ;;
       esac
