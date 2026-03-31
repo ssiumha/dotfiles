@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# tmux-swap: fzf로 pane 선택하여 swap-pane 실행
+# Usage: tmux-swap [--popup]
+set -euo pipefail
+
+# --- config ---
+
+current_pane="${TMUX_PANE}"
+
+# --- functions ---
+
+list_panes() {
+  tmux list-panes -a \
+    -F "#{session_name}:#{window_index}.#{pane_index} │ #{pane_id} │ #{window_name} │ #{pane_current_command} │ #{pane_width}x#{pane_height}" \
+    | grep -v "│ ${current_pane} │"
+}
+
+extract_pane_id() {
+  echo "$1" | awk -F '│' '{gsub(/ /, "", $2); print $2}'
+}
+
+do_swap() {
+  local panes
+  panes=$(list_panes) || true
+  [ -z "$panes" ] && { tmux display-message "No other panes"; exit 0; }
+
+  local fzf_opts=(
+    --tmux 80%,60%
+    --header "enter:swap  ctrl-s:swap(keep focus)"
+    --expect "ctrl-s"
+    --preview "tmux capture-pane -p -t \$(echo {} | awk -F '│' '{gsub(/ /, \"\", \$2); print \$2}')"
+    --preview-window "bottom,60%,wrap"
+  )
+
+  local selected
+  selected=$(echo "$panes" | fzf "${fzf_opts[@]}") || true
+  [ -z "$selected" ] && exit 0
+
+  local key pick pane_id
+  key=$(echo "$selected" | head -1)
+  pick=$(echo "$selected" | tail -1)
+  [ -z "$pick" ] && exit 0
+
+  pane_id=$(extract_pane_id "$pick")
+
+  case "$key" in
+    ctrl-s)
+      tmux swap-pane -d -t "$pane_id"
+      ;;
+    *)
+      tmux swap-pane -t "$pane_id"
+      ;;
+  esac
+}
+
+# --- main ---
+
+do_swap
