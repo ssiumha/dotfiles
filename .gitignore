@@ -15,3 +15,4 @@ config/raycast/**
 !config/claude/commands/**
 !config/claude/roles/**
 !config/raycast/scripts/**
+__pycache__

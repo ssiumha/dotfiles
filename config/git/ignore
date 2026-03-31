@@ -4,9 +4,9 @@
 ################
 # LOCAL
 ################
-**/*.local*
+mise.local.toml
+/.local/
 tmp
-.tmp
 
 ################
 # TOOLS
@@ -15,48 +15,18 @@ tmp
 ## apps
 .idea
 .ignore
-.note
 
 ## AI
-.aider*
-.clinerules
-.ai
-.roast
-.serena
-.claude
-.plan
-claude-swarm.yml
 **/.claude/settings.local.json
-**/.claude/designs/**
-**/.claude/plans/**
+**/.claude/designs
+**/.claude/projects
+**/.claude/screenshots
 
 ## asdf, env
 .direnv/
-.editorconfig
 .envrc
-# mise.toml
-# .mise.toml
-# .mise/
-# .mise
-.tool-versions
+.db-irb_history
 
 ## vim
-tags
-!tags/
-
-################
-# LANGUAGES
-################
-
-## python
-*.pyc
-
-## terraform
-.terraform
-
-## ruby
-vendor/bundle/
-.bundle/ruby
-
-## solidity
-cache/
+# tags
+# !tags/
