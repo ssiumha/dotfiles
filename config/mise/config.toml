@@ -65,6 +65,8 @@ typos-lsp = "github:tekumara/typos-lsp"
 usage = "https://github.com/jdx/mise-usage.git"
 gws = "github:googleworkspace/cli"
 xq = "github:sibprogrammer/xq"
+code-review-graph = "pipx:code-review-graph"
+opendataloader-pdf = "pipx:opendataloader-pdf"
 
 [tasks."yarn:latest"]
 description = "set yarn version to latest"
