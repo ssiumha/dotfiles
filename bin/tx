@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+# tx — Text Transform & Generate tool
+# Usage:
+#   tx <input-file>                 # Interactive fzf picker with preview
+#   tx <input-file> <transform-id>  # Direct transform (used by fzf preview)
+#   tx generate                     # Generate mode: fzf picker for value generation
+#   tx generate <gen-id>            # Direct generate (used by fzf preview)
+set -euo pipefail
+
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+# ── Transform Registry ──────────────────────────────────────────────
+# Format: id<TAB>category<TAB>label
+# Actual commands are dispatched in run_transform()
+read -r -d '' MENU <<'MENU_EOF' || true
+case-lower	Case	lowercase
+case-upper	Case	UPPERCASE
+case-camel	Case	camelCase
+case-snake	Case	snake_case
+case-kebab	Case	kebab-case
+case-title	Case	Title Case
+case-constant	Case	CONSTANT_CASE
+case-header	Case	Header-Case
+case-sentence	Case	Sentence case
+base64-enc	Encode	Base64 encode
+base64-dec	Encode	Base64 decode
+url-enc	Encode	URL encode
+url-dec	Encode	URL decode
+hex-enc	Encode	Hex encode
+hex-dec	Encode	Hex decode
+hash-md5	Hash	MD5
+hash-sha256	Hash	SHA256
+json-pretty	JSON	Pretty print
+json-compact	JSON	Compact
+json-sort	JSON	Sort keys
+yaml-to-json	Format	YAML → JSON
+json-to-yaml	Format	JSON → YAML
+ruby-to-json	Format	Ruby Hash → JSON
+py-to-json	Format	Python dict → JSON
+html-format	Format	HTML prettify
+html-esc	Encode	HTML escape
+html-unesc	Encode	HTML unescape
+extract-url	Extract	Extract URLs
+extract-email	Extract	Extract emails
+md-list-to-table	Markdown	List → Table
+md-table-to-list	Markdown	Table → List
+md-strip	Markdown	Strip formatting
+md-table-align	Markdown	Align table columns
+md-to-csv	Table	Markdown → CSV
+md-to-tsv	Table	Markdown → TSV
+csv-to-md	Table	CSV → Markdown
+tsv-to-md	Table	TSV → Markdown
+sort	Text	Sort lines
+sort-u	Text	Sort unique
+reverse	Text	Reverse lines
+trim	Text	Trim whitespace
+number	Text	Number lines
+uniq	Text	Remove consecutive dupes
+MENU_EOF
+
+read -r -d '' GEN_MENU <<'GEN_EOF' || true
+gen-uuid	Generate	UUID v4
+gen-date	Generate	Today (YYYY-MM-DD)
+gen-ts	Generate	ISO timestamp
+gen-epoch	Generate	Unix epoch
+gen-lorem	Generate	Lorem ipsum
+GEN_EOF
+
+# ── Transform Dispatcher ────────────────────────────────────────────
+
+run_transform() {
+  local id="$1"
+  local file="$2"
+
+  case "$id" in
+    # Case — delegate to ut
+    case-lower)    ut case lower - < "$file" ;;
+    case-upper)    ut case upper - < "$file" ;;
+    case-camel)    ut case camel - < "$file" ;;
+    case-snake)    ut case snake - < "$file" ;;
+    case-kebab)    ut case kebab - < "$file" ;;
+    case-title)    ut case title - < "$file" ;;
+    case-constant) ut case constant - < "$file" ;;
+    case-header)   ut case header - < "$file" ;;
+    case-sentence) ut case sentence - < "$file" ;;
+
+    # Encoding — delegate to ut
+    base64-enc) ut base64 encode - < "$file" ;;
+    base64-dec) ut base64 decode - < "$file" ;;
+    url-enc)    ut url encode - < "$file" ;;
+    url-dec)    ut url decode - < "$file" ;;
+    hex-enc)    ut hex encode - < "$file" ;;
+    hex-dec)    ut hex decode - < "$file" ;;
+
+    # Hash — delegate to ut
+    hash-md5)    ut hash md5 - < "$file" ;;
+    hash-sha256) ut hash sha256 - < "$file" ;;
+
+    # JSON
+    json-pretty)  jq . < "$file" ;;
+    json-compact) jq -c . < "$file" ;;
+    json-sort)    jq -S . < "$file" ;;
+
+    # Format
+    yaml-to-json) yq -o=json . < "$file" ;;
+    json-to-yaml) yq -P . < "$file" ;;
+
+    ruby-to-json) ruby -rjson -e '
+      puts JSON.pretty_generate(eval(STDIN.read))
+    ' < "$file" ;;
+
+    py-to-json) ruby -rjson -e '
+      s = STDIN.read
+      s.gsub!(/'\''/, "\"")
+      s.gsub!(/\bTrue\b/, "true")
+      s.gsub!(/\bFalse\b/, "false")
+      s.gsub!(/\bNone\b/, "null")
+      puts JSON.pretty_generate(JSON.parse(s))
+    ' < "$file" ;;
+
+    # Markdown
+    md-list-to-table) ruby -e '
+      lines = STDIN.readlines.map(&:chomp)
+      rows = lines.map do |l|
+        l.sub(/^\s*[-*]\s*/, "").split(/:\s*/, 2)
+      end
+      ws = rows.transpose.map { |c| c.map { |v| v.to_s.length }.max }
+      puts "| " + ["Key", "Value"].each_with_index.map { |h, i| h.ljust(ws[i] || h.length) }.join(" | ") + " |"
+      puts "| " + ws.map { |w| "-" * w }.join(" | ") + " |"
+      rows.each do |r|
+        puts "| " + r.each_with_index.map { |v, i| v.to_s.ljust(ws[i]) }.join(" | ") + " |"
+      end
+    ' < "$file" ;;
+
+    md-table-to-list) ruby -e '
+      STDIN.readlines.each do |l|
+        l.strip!
+        next if l =~ /^\|[\s:|:-]+\|$/
+        next unless l =~ /^\|/
+        cols = l.split("|").map(&:strip).reject(&:empty?)
+        puts "- #{cols.join(": ")}"
+      end
+    ' < "$file" ;;
+
+    md-table-align) ruby -e '
+      lines = STDIN.readlines.map(&:chomp)
+      # parse: split by | and take inner cells
+      rows = lines.map { |l|
+        cells = l.split("|")
+        cells.shift if cells.first&.strip&.empty?
+        cells.pop if cells.last&.strip&.empty?
+        cells.map(&:strip)
+      }
+      sep_indices = lines.each_index.select { |i| lines[i] =~ /^\|[\s:|:-]+\|$/ }
+      ncols = rows.map(&:length).max || 0
+      ws = (0...ncols).map { |i| rows.reject { |r| sep_indices.include?(rows.index(r)) }.map { |r| (r[i] || "").length }.max || 3 }
+      rows.each_with_index do |r, i|
+        if sep_indices.include?(i)
+          puts "| " + ws.map { |w| "-" * [w, 3].max }.join(" | ") + " |"
+        else
+          puts "| " + (0...ncols).map { |j| (r[j] || "").ljust(ws[j]) }.join(" | ") + " |"
+        end
+      end
+    ' < "$file" ;;
+
+    md-strip) sed -E \
+      -e 's/\*\*([^*]+)\*\*/\1/g' \
+      -e 's/\*([^*]+)\*/\1/g' \
+      -e 's/__([^_]+)__/\1/g' \
+      -e 's/_([^_]+)_/\1/g' \
+      -e 's/~~([^~]+)~~/\1/g' \
+      -e 's/`([^`]+)`/\1/g' \
+      -e 's/^#{1,6}[[:space:]]*//' \
+      -e 's/\[([^]]+)\]\([^)]+\)/\1/g' \
+      -e 's/!\[([^]]*)\]\([^)]+\)/\1/g' \
+      < "$file" ;;
+
+    # HTML
+    html-format) xmllint --html --format - < "$file" 2>/dev/null ;;
+
+    # Encode (HTML)
+    html-esc)   ruby -rcgi -e 'puts CGI.escapeHTML(STDIN.read)' < "$file" ;;
+    html-unesc) ruby -rcgi -e 'puts CGI.unescapeHTML(STDIN.read)' < "$file" ;;
+
+    # Extract
+    extract-url)   grep -oE 'https?://[^ >"'"'"')\]]+' < "$file" || echo "(no URLs found)" ;;
+    extract-email) grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' < "$file" || echo "(no emails found)" ;;
+
+    # Table conversions
+    md-to-csv) ruby -e '
+      STDIN.readlines.each do |l|
+        l.strip!
+        next if l =~ /^\|[\s:|:-]+\|$/
+        next unless l =~ /^\|/
+        puts l.split("|").map(&:strip).reject(&:empty?).join(",")
+      end
+    ' < "$file" ;;
+
+    md-to-tsv) ruby -e '
+      STDIN.readlines.each do |l|
+        l.strip!
+        next if l =~ /^\|[\s:|:-]+\|$/
+        next unless l =~ /^\|/
+        puts l.split("|").map(&:strip).reject(&:empty?).join("\t")
+      end
+    ' < "$file" ;;
+
+    csv-to-md) ruby -rcsv -e '
+      rows = CSV.parse(STDIN.read)
+      ws = rows.transpose.map { |c| c.map { |v| v.to_s.length }.max }
+      rows.each_with_index do |r, i|
+        puts "| " + r.each_with_index.map { |v, j| v.to_s.ljust(ws[j]) }.join(" | ") + " |"
+        if i == 0
+          puts "| " + ws.map { |w| "-" * w }.join(" | ") + " |"
+        end
+      end
+    ' < "$file" ;;
+
+    tsv-to-md) ruby -e '
+      rows = STDIN.readlines.map { |l| l.chomp.split("\t") }
+      ws = rows.transpose.map { |c| c.map { |v| v.to_s.length }.max }
+      rows.each_with_index do |r, i|
+        puts "| " + r.each_with_index.map { |v, j| v.to_s.ljust(ws[j]) }.join(" | ") + " |"
+        if i == 0
+          puts "| " + ws.map { |w| "-" * w }.join(" | ") + " |"
+        end
+      end
+    ' < "$file" ;;
+
+    # Text
+    sort)    sort < "$file" ;;
+    sort-u)  sort -u < "$file" ;;
+    reverse) tail -r < "$file" ;;
+    trim)    sed 's/^[[:space:]]*//;s/[[:space:]]*$//' < "$file" ;;
+    number)  nl -ba < "$file" ;;
+    uniq)    uniq < "$file" ;;
+
+    *)
+      echo "Unknown transform: $id" >&2
+      return 1
+      ;;
+  esac
+}
+
+# ── Generate Dispatcher ──────────────────────────────────────────────
+
+run_generate() {
+  local id="$1"
+
+  case "$id" in
+    gen-uuid)  uuidgen ;;
+    gen-date)  date +%Y-%m-%d ;;
+    gen-ts)    date +%Y-%m-%dT%H:%M:%S ;;
+    gen-epoch) date +%s ;;
+    gen-lorem) echo "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua." ;;
+    *)
+      echo "Unknown generator: $id" >&2
+      return 1
+      ;;
+  esac
+}
+
+# ── Menu Builder ─────────────────────────────────────────────────────
+
+format_menu() {
+  while IFS=$'\t' read -r id category label; do
+    printf '%s\t[%s]\t%s\n' "$id" "$category" "$label"
+  done
+}
+
+# ── Main ─────────────────────────────────────────────────────────────
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: tx <input-file> [transform-id] | tx generate [gen-id]" >&2
+  exit 1
+fi
+
+# ── Generate mode ────────────────────────────────────────────────────
+if [[ "$1" == "generate" ]]; then
+  # Direct generate
+  if [[ $# -ge 2 ]]; then
+    run_generate "$2"
+    exit
+  fi
+
+  # Interactive generate
+  selected=$(echo "$GEN_MENU" | format_menu | fzf \
+    --delimiter='\t' \
+    --with-nth='2,3' \
+    --header='Generate value' \
+    --preview "$SELF generate {1}" \
+    --preview-window='bottom:40%:wrap' \
+    --bind='ctrl-/:toggle-preview' \
+  )
+
+  if [[ -z "$selected" ]]; then
+    exit 1
+  fi
+
+  GEN_ID=$(echo "$selected" | cut -f1)
+  run_generate "$GEN_ID"
+  exit
+fi
+
+# ── Transform mode ──────────────────────────────────────────────────
+INPUT_FILE="$1"
+
+if [[ ! -f "$INPUT_FILE" ]]; then
+  echo "File not found: $INPUT_FILE" >&2
+  exit 1
+fi
+
+# Direct transform mode (called by fzf preview)
+if [[ $# -ge 2 ]]; then
+  run_transform "$2" "$INPUT_FILE"
+  exit
+fi
+
+# Interactive fzf mode
+selected=$(echo "$MENU" | format_menu | fzf \
+  --delimiter='\t' \
+  --with-nth='2,3' \
+  --header='Select transform' \
+  --preview "$SELF $INPUT_FILE {1}" \
+  --preview-window='bottom:60%:wrap' \
+  --bind='ctrl-/:toggle-preview' \
+)
+
+if [[ -z "$selected" ]]; then
+  exit 1
+fi
+
+TRANSFORM_ID=$(echo "$selected" | cut -f1)
+run_transform "$TRANSFORM_ID" "$INPUT_FILE"
