@@ -485,6 +485,17 @@ _fzf_complete_m_post() {
   awk '{print $1}'
 }
 
+_fzf_complete_just() {
+  _fzf_complete --query "${@##* }" --min-height 15 -- "$@" < <(
+    just --list --unsorted 2>/dev/null
+  )
+}
+_fzf_complete_just_post() {
+  awk '{print $1}'
+}
+_fzf_complete_j() { _fzf_complete_just "$@" }
+_fzf_complete_j_post() { _fzf_complete_just_post "$@" }
+
 _fzf_complete_ghrepo() {
   local org=$1; shift
   _fzf_complete --ansi --delimiter=$'\t' --nth=1 --header="$org" \
