@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+#MISE description="인터랙티브 그래프 시각화 (dep/schema/logseq/render)"
+#MISE alias="vis:graph"
+
+"""vis-graph — unified CLI for interactive graph visualization.
+
+Usage:
+    mise run vis:graph dep --root . --scope src/
+    mise run vis:graph schema --conn postgresql://localhost/mydb
+    mise run vis:graph logseq --pages ~/Documents/logseq/pages
+    mise run vis:graph render --type schema < data.json
+    mise run vis:graph build-templates
+"""
+from __future__ import annotations
+
+import json
+import sys
+import importlib.util
+from pathlib import Path
+
+TASK_DIR = Path(__file__).resolve().parent.parent
+SCRIPT_DIR = TASK_DIR / "vis-graph" / "scripts"
+sys.path.insert(0, str(SCRIPT_DIR))
+
+
+def _load_module(name: str, filename: str):
+    spec = importlib.util.spec_from_file_location(name, SCRIPT_DIR / filename)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def cmd_dep(argv: list[str]) -> None:
+    _load_module("build_graph", "build-graph.py").main(argv)
+
+
+def cmd_schema(argv: list[str]) -> None:
+    _load_module("extract_schema", "extract-schema.py").main(argv)
+
+
+def cmd_logseq(argv: list[str]) -> None:
+    _load_module("logseq_graph", "logseq-graph.py").main(argv)
+
+
+def cmd_render(argv: list[str]) -> None:
+    """Render GRAPH_DATA JSON (stdin or file) into HTML using a pre-built template."""
+    import argparse
+    from vis_graph_common import inject_template
+
+    p = argparse.ArgumentParser(description="Render GRAPH_DATA JSON to HTML")
+    p.add_argument("--type", required=True, choices=["dep", "schema", "logseq"],
+                   help="Template type to use")
+    p.add_argument("--input", type=Path, help="JSON file (default: stdin)")
+    p.add_argument("--output", type=Path, default=Path("graph.html"), help="Output HTML file")
+    args = p.parse_args(argv)
+
+    dist_dir = TASK_DIR / "vis-graph" / "templates" / "dist"
+    template_path = dist_dir / f"{args.type}.html"
+    if not template_path.exists():
+        print(f"error: template not found: {template_path}", file=sys.stderr)
+        print("Run: mise run vis:graph build-templates", file=sys.stderr)
+        sys.exit(1)
+
+    if args.input:
+        data = json.loads(args.input.read_text(encoding="utf-8"))
+    else:
+        data = json.load(sys.stdin)
+
+    # Validate required fields
+    if not isinstance(data, dict):
+        print("error: GRAPH_DATA must be a JSON object", file=sys.stderr)
+        sys.exit(1)
+    missing = [f for f in ("nodes", "edges") if f not in data]
+    if missing:
+        print(f"error: missing required fields: {', '.join(missing)}", file=sys.stderr)
+        print("See vis-graph/SCHEMA.md for the expected format.", file=sys.stderr)
+        sys.exit(1)
+
+    inject_template(data, template_path, args.output)
+    n, e = len(data["nodes"]), len(data["edges"])
+    print(f"Rendered: {args.output} ({n} nodes, {e} edges)")
+
+
+def cmd_build_templates(argv: list[str]) -> None:
+    _load_module("build_templates", "build-templates.py").main(argv)
+
+
+COMMANDS = {
+    "dep": cmd_dep,
+    "schema": cmd_schema,
+    "logseq": cmd_logseq,
+    "render": cmd_render,
+    "build-templates": cmd_build_templates,
+}
+
+USAGE = """\
+usage: mise run vis:graph <command> [args...]
+
+commands:
+  dep              File dependency graph
+  schema           DB schema ERD
+  logseq           Logseq knowledge graph
+  render           Render GRAPH_DATA JSON to HTML
+  build-templates  Rebuild flattened templates from src/
+"""
+
+
+def main() -> None:
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(USAGE)
+        sys.exit(0)
+
+    cmd_name = sys.argv[1]
+    if cmd_name not in COMMANDS:
+        print(f"error: unknown command '{cmd_name}'", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        sys.exit(1)
+
+    COMMANDS[cmd_name](sys.argv[2:])
+
+
+if __name__ == "__main__":
+    main()

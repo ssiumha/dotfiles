@@ -1,0 +1,373 @@
+{% include partials/head.html title="Dependency Graph" %}
+
+  /* dep-specific */
+  #node-role { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+  #legend { max-width: 400px; }
+  .badge.danger { background: #fbe9e7; color: var(--danger); }
+  @media (prefers-color-scheme: dark) {
+    .badge.danger { background: #3e1a1a; }
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>Dependency Graph</h2>
+
+{% include partials/search.html placeholder="Filter files..." %}
+{% include partials/filter-section.html title="Directories" id="dir-filters" %}
+{% include partials/filter-section.html title="Roles" id="role-filters" %}
+{% include partials/stats.html %}
+
+  <div class="sidebar-section" id="node-detail">
+    <h3>Node Detail</h3>
+    <div id="node-name"></div>
+    <div id="node-role"></div>
+    <div style="margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);">Imports:</div>
+    <ul class="dep-list" id="node-imports"></ul>
+    <div style="margin: 6px 0; font-size: 12px; color: var(--text-secondary);">Imported by:</div>
+    <ul class="dep-list" id="node-importedby"></ul>
+    <button class="copy-btn" id="btn-copy-path" onclick="copySelectedNode()">Copy Path</button>
+  </div>
+</div>
+
+{% include partials/graph-container.html %}
+{% include partials/toolbar-btn.html class="" id="btn-color" tooltip="Toggle color mode" label="Color: Role" %}
+{% include partials/toolbar-btn.html class="" id="btn-external" tooltip="Toggle external deps" label="External" %}
+{% include partials/toolbar-btn.html class="" id="btn-circular" tooltip="Highlight circular deps" label="Circular" %}
+{% include partials/graph-end.html %}
+
+{% include partials/toast.html %}
+
+<script>
+{% include partials/base.js %}
+
+// --- DATA INJECTION POINT ---
+const GRAPH_DATA = {{GRAPH_DATA}};
+
+// --- Theme colors ---
+const COLORS = (() => {
+  return {
+    highlightNode: '#FFD600',
+    highlightEdge: '#FF6F00',
+    dimEdge: '#88888844',
+    fadedEdge: '#88888815',
+    circularEdge: '#E53935',
+    defaultNode: '#90A4AE',
+  };
+})();
+
+// --- Dep-specific state ---
+let externalVisible = false;
+let circularHighlighted = false;
+let colorMode = GRAPH_DATA.groupBy || 'role'; // 'dir' or 'role'
+const EDGE_STYLES = {
+  extends:    { color: '#1565C0', dashes: false },
+  implements: { color: '#2E7D32', dashes: [5, 5] },
+};
+
+function getNodeColor(node) {
+  const role = node._role ?? node.role;
+  const dir = node._dir ?? node.group;
+  if (colorMode === 'role' && GRAPH_DATA.roles && GRAPH_DATA.roles[role]) {
+    return GRAPH_DATA.roles[role].color;
+  }
+  return GRAPH_DATA.groups[dir]?.color || COLORS.defaultNode;
+}
+
+// --- Init ---
+function init() {
+  const nodes = GRAPH_DATA.nodes.map(n => {
+    const c = getNodeColor(n);
+    return {
+      id: n.id, label: n.label, title: n.title,
+      _dir: n.group, _role: n.role, _defaultOpacity: 1.0,
+      font: { color: '#fff', strokeWidth: 2, strokeColor: '#000' },
+      shape: 'dot',
+      size: Math.max(8, Math.min(30, (n.size || 1) * 3 + 5)),
+      color: { background: c, border: c, highlight: { background: COLORS.highlightNode, border: '#FFA000' } },
+      hidden: false,
+    };
+  });
+
+  const edges = GRAPH_DATA.edges.map(e => {
+    const style = EDGE_STYLES[e.type];
+    return {
+      ...e,
+      color: { color: style ? style.color : COLORS.dimEdge, highlight: COLORS.highlightEdge },
+      smooth: { type: 'cubicBezier', forceDirection: 'none', roundness: 0.4 },
+      dashes: style ? style.dashes : false,
+      width: style ? 1.5 : 1,
+    };
+  });
+
+  allNodes = nodes;
+  allEdges = edges;
+  nodesDataset = new vis.DataSet(nodes);
+  edgesDataset = new vis.DataSet(edges);
+
+  const container = document.getElementById('graph');
+  network = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, {
+    physics: {
+      enabled: true,
+      solver: 'forceAtlas2Based',
+      forceAtlas2Based: { gravitationalConstant: -40, centralGravity: 0.005, springLength: 120, springConstant: 0.02, damping: 0.4 },
+      stabilization: { iterations: 200, fit: true },
+    },
+    interaction: { hover: true, tooltipDelay: 100, navigationButtons: false, keyboard: false },
+    layout: { improvedLayout: true },
+  });
+
+  network.on('click', onNodeClick);
+  network.on('doubleClick', onNodeDoubleClick);
+
+  renderDirFilters();
+  renderRoleFilters();
+  renderStats();
+  renderLegend();
+  setupToolbar();
+  setupSearch();
+}
+
+// --- Directory Filters ---
+function renderDirFilters() {
+  const container = document.getElementById('dir-filters');
+  const groups = Object.keys(GRAPH_DATA.groups).sort();
+  container.innerHTML = groups.map(g => {
+    const count = allNodes.filter(n => n._dir === g).length;
+    const c = GRAPH_DATA.groups[g].color;
+    return `<label class="filter-item">
+      <input type="checkbox" checked data-group="${escapeHTML(g)}" />
+      <span class="filter-color" style="background:${c}"></span>
+      ${escapeHTML(g)} <span class="badge">${count}</span>
+    </label>`;
+  }).join('');
+  container.querySelectorAll('input').forEach(cb => cb.addEventListener('change', applyFilters));
+}
+
+// --- Role Filters ---
+function renderRoleFilters() {
+  const container = document.getElementById('role-filters');
+  const roles = GRAPH_DATA.roles ? Object.keys(GRAPH_DATA.roles).sort() : [];
+  container.innerHTML = roles.map(r => {
+    const count = allNodes.filter(n => n._role === r).length;
+    const c = GRAPH_DATA.roles[r].color;
+    return `<label class="filter-item">
+      <input type="checkbox" checked data-role="${escapeHTML(r)}" />
+      <span class="filter-color" style="background:${c}"></span>
+      ${escapeHTML(r)} <span class="badge">${count}</span>
+    </label>`;
+  }).join('');
+  container.querySelectorAll('input').forEach(cb => cb.addEventListener('change', applyFilters));
+}
+
+function applyFilters() {
+  const checkedGroups = new Set();
+  document.querySelectorAll('#dir-filters input:checked').forEach(cb => checkedGroups.add(cb.dataset.group));
+  const checkedRoles = new Set();
+  document.querySelectorAll('#role-filters input:checked').forEach(cb => checkedRoles.add(cb.dataset.role));
+
+  applyFilterVisibility((n, orig) => {
+    const matchGroup = n.external ? externalVisible : checkedGroups.has(orig._dir);
+    const matchRole = checkedRoles.has(orig._role || 'other');
+    return matchGroup && matchRole;
+  });
+}
+
+// --- Stats ---
+function renderStats() {
+  const s = GRAPH_DATA.stats;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat-row"><span>Files</span><span class="stat-value">${s.totalFiles}</span></div>
+    <div class="stat-row"><span>Dependencies</span><span class="stat-value">${s.totalEdges}</span></div>
+    <div class="stat-row"><span>Avg deps/file</span><span class="stat-value">${s.avgDependencies}</span></div>
+    <div class="stat-row"><span>Max fan-out</span><span class="stat-value" title="${escapeHTML(s.maxFanOut.file)}">${s.maxFanOut.count}</span></div>
+    <div class="stat-row"><span>Max fan-in</span><span class="stat-value" title="${escapeHTML(s.maxFanIn.file)}">${s.maxFanIn.count}</span></div>
+    <div class="stat-row"><span>Circular</span><span class="${s.circular.length > 0 ? 'stat-warn' : 'stat-value'}">${s.circular.length}</span></div>
+    <div class="stat-row"><span>External pkgs</span><span class="stat-value">${s.externalDeps.length}</span></div>
+  `;
+}
+
+// --- Legend ---
+function renderLegend() {
+  const container = document.getElementById('legend-items');
+  let html = '';
+  if (colorMode === 'role' && GRAPH_DATA.roles) {
+    html = Object.entries(GRAPH_DATA.roles)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([name, r]) =>
+        `<span class="legend-item"><span class="filter-color" style="background:${r.color}"></span>${escapeHTML(name)}</span>`
+      ).join('');
+  } else {
+    html = Object.entries(GRAPH_DATA.groups).map(([name, g]) =>
+      `<span class="legend-item"><span class="filter-color" style="background:${g.color}"></span>${escapeHTML(name)}</span>`
+    ).join('');
+  }
+
+  const hasTypedEdges = GRAPH_DATA.edges.some(e => e.type);
+  if (hasTypedEdges) {
+    const edgeLegend = [
+      { label: 'import', color: COLORS.dimEdge, dashes: false },
+      { label: 'extends', color: '#1565C0', dashes: false },
+      { label: 'implements', color: '#2E7D32', dashes: true },
+    ];
+    html += '<span style="display:inline-block;width:12px"></span>';
+    html += edgeLegend.map(e => {
+      const dash = e.dashes ? 'stroke-dasharray="5,5"' : '';
+      const svg = `<svg width="24" height="10" style="vertical-align:middle;margin-right:3px"><line x1="0" y1="5" x2="24" y2="5" stroke="${e.color}" stroke-width="2" ${dash}/></svg>`;
+      return `<span class="legend-item">${svg}${escapeHTML(e.label)}</span>`;
+    }).join('');
+  }
+  container.innerHTML = html;
+}
+
+// --- Recolor nodes ---
+function recolorNodes() {
+  const updates = [];
+  nodesDataset.forEach(n => {
+    const orig = allNodes.find(an => an.id === n.id);
+    if (!orig) return;
+    const c = getNodeColor(orig);
+    updates.push({ id: n.id, color: { background: c, border: c, highlight: { background: COLORS.highlightNode, border: '#FFA000' } } });
+  });
+  nodesDataset.update(updates);
+  renderLegend();
+}
+
+// --- Toolbar ---
+function setupToolbar() {
+  setupToolbarCommon();
+
+  document.getElementById('btn-color').addEventListener('click', function() {
+    colorMode = colorMode === 'role' ? 'dir' : 'role';
+    this.textContent = 'Color: ' + (colorMode === 'role' ? 'Role' : 'Dir');
+    recolorNodes();
+  });
+
+  document.getElementById('btn-external').addEventListener('click', function() {
+    externalVisible = !externalVisible;
+    this.classList.toggle('active', externalVisible);
+    applyFilters();
+  });
+
+  document.getElementById('btn-circular').addEventListener('click', function() {
+    circularHighlighted = !circularHighlighted;
+    this.classList.toggle('active', circularHighlighted);
+    if (circularHighlighted) {
+      selectedNodes.clear();
+      lastSelectedNode = null;
+      highlightCircular();
+    } else {
+      clearHighlight();
+    }
+  });
+}
+
+// --- Toolbar toggle deactivation ---
+deactivateToolbarToggles = function() {
+  if (circularHighlighted) {
+    circularHighlighted = false;
+    document.getElementById('btn-circular').classList.remove('active');
+  }
+};
+
+// --- Dep-specific: highlightMultiConnected override (respects EDGE_STYLES) ---
+function highlightMultiConnected(nodeIds) {
+  const connEdges = edgesDataset.get().filter(e => nodeIds.has(e.from) || nodeIds.has(e.to));
+  const connNodes = new Set(nodeIds);
+  connEdges.forEach(e => { connNodes.add(e.from); connNodes.add(e.to); });
+
+  const nodeUpdates = [];
+  nodesDataset.forEach(n => {
+    if (nodeIds.has(n.id)) {
+      nodeUpdates.push({ id: n.id, opacity: 1.0, borderWidth: 3, color: { border: COLORS.highlightEdge } });
+    } else if (connNodes.has(n.id)) {
+      nodeUpdates.push({ id: n.id, opacity: 1.0, borderWidth: 1 });
+    } else {
+      nodeUpdates.push({ id: n.id, opacity: 0.15, borderWidth: 1 });
+    }
+  });
+  nodesDataset.update(nodeUpdates);
+
+  const connEdgeIds = new Set(connEdges.map(e => e.id));
+  const edgeUpdates = [];
+  edgesDataset.forEach(e => {
+    const style = EDGE_STYLES[e.type];
+    if (connEdgeIds.has(e.id)) {
+      edgeUpdates.push({ id: e.id, color: { color: style ? style.color : COLORS.highlightEdge }, width: 2, dashes: style ? style.dashes : false });
+    } else {
+      edgeUpdates.push({ id: e.id, color: { color: COLORS.fadedEdge }, width: 1, dashes: style ? style.dashes : false });
+    }
+  });
+  edgesDataset.update(edgeUpdates);
+}
+
+// --- Circular highlight ---
+function highlightCircular() {
+  const circularNodes = new Set();
+  const circularEdgePairs = new Set();
+  (GRAPH_DATA.stats.circular || []).forEach(cycle => {
+    for (let i = 0; i < cycle.length; i++) {
+      circularNodes.add(cycle[i]);
+      if (i < cycle.length - 1) circularEdgePairs.add(cycle[i] + '\u2192' + cycle[i+1]);
+    }
+  });
+
+  const nodeUpdates = [];
+  nodesDataset.forEach(n => {
+    nodeUpdates.push({ id: n.id, opacity: circularNodes.has(n.id) ? 1.0 : 0.15 });
+  });
+  nodesDataset.update(nodeUpdates);
+
+  const edgeUpdates = [];
+  edgesDataset.forEach(e => {
+    const isCircular = circularEdgePairs.has(e.from + '\u2192' + e.to);
+    edgeUpdates.push({ id: e.id, color: { color: isCircular ? COLORS.circularEdge : COLORS.fadedEdge }, width: isCircular ? 3 : 1 });
+  });
+  edgesDataset.update(edgeUpdates);
+}
+
+// --- Clear highlight (restores EDGE_STYLES + borderWidth) ---
+function clearHighlight() {
+  const nodeUpdates = [];
+  nodesDataset.forEach(n => {
+    const orig = allNodes.find(an => an.id === n.id);
+    const c = orig ? getNodeColor(orig) : COLORS.defaultNode;
+    nodeUpdates.push({ id: n.id, opacity: 1.0, borderWidth: 1, color: { background: c, border: c } });
+  });
+  nodesDataset.update(nodeUpdates);
+
+  const edgeUpdates = [];
+  edgesDataset.forEach(e => {
+    const style = EDGE_STYLES[e.type];
+    edgeUpdates.push({ id: e.id, color: { color: style ? style.color : COLORS.dimEdge, highlight: COLORS.highlightEdge }, width: style ? 1.5 : 1, dashes: style ? style.dashes : false });
+  });
+  edgesDataset.update(edgeUpdates);
+}
+
+// --- Node detail ---
+function showNodeDetail(nodeId) {
+  const detail = document.getElementById('node-detail');
+  detail.classList.add('active');
+  document.getElementById('node-name').textContent = nodeId;
+  const orig = allNodes.find(n => n.id === nodeId);
+  const roleEl = document.getElementById('node-role');
+  if (orig && orig._role) {
+    const c = GRAPH_DATA.roles?.[orig._role]?.color || '';
+    roleEl.innerHTML = `<span class="filter-color" style="background:${c};display:inline-block;vertical-align:middle;margin-right:4px"></span>${escapeHTML(orig._role)} / ${escapeHTML(orig._dir)}`;
+  } else {
+    roleEl.textContent = '';
+  }
+
+  const imports = edgesDataset.get().filter(e => e.from === nodeId).map(e => e.to);
+  const importedBy = edgesDataset.get().filter(e => e.to === nodeId).map(e => e.from);
+
+  renderDepList('node-imports', imports);
+  renderDepList('node-importedby', importedBy);
+}
+
+// --- Start ---
+init();
+</script>
+</body>
+</html>
