@@ -142,14 +142,39 @@ WriteContext = Struct.new(:operation, :count, :values, :dataset, :before, keywor
 
 REVERSE_FK_MAP = Hash.new { |h, k| h[k] = [] }
 
-def print_table(rows, indent: 0)
-  return puts "#{"  " * indent}No rows" if rows.empty?
+def format_table(rows, indent: 0)
+  return "#{"  " * indent}No rows" if rows.empty?
   cols = rows.first.keys
   widths = cols.map { |c| [c.to_s.length, rows.map { |r| r[c].to_s.length }.max].max }
   prefix = "  " * indent
-  puts prefix + cols.zip(widths).map { |c, w| c.to_s.ljust(w) }.join("  ")
-  puts prefix + widths.map { |w| "-" * w }.join("  ")
-  rows.each { |r| puts prefix + cols.zip(widths).map { |c, w| r[c].to_s.ljust(w) }.join("  ") }
+  lines = []
+  lines << prefix + cols.zip(widths).map { |c, w| c.to_s.ljust(w) }.join("  ")
+  lines << prefix + widths.map { |w| "-" * w }.join("  ")
+  rows.each { |r| lines << prefix + cols.zip(widths).map { |c, w| r[c].to_s.ljust(w) }.join("  ") }
+  lines.join("\n")
+end
+
+def print_table(rows, indent: 0)
+  puts format_table(rows, indent: indent)
+end
+
+PAGER = system('which bat > /dev/null 2>&1') ? 'bat --plain --paging=always --color=never --wrap=never' : 'less -RS'
+
+def page(data = nil, &block)
+  output = if block
+    require 'stringio'
+    sio = StringIO.new
+    old = $stdout; $stdout = sio; block.call; $stdout = old
+    sio.string
+  elsif data
+    case data
+    when String then data
+    when Array then data.map(&:inspect).join("\n")
+    else data.inspect
+    end
+  end
+  IO.popen(PAGER, 'w') { |io| io.puts output }
+  nil
 end
 
 # Sequel::Model 확장 (scope DSL + YAML export + normalizes)
@@ -179,6 +204,65 @@ class Sequel::Model
   def self.default_scope(&block)
     set_dataset(dataset.instance_exec(&block))
   end
+
+  LABEL_CANDIDATES = %i[name title email username login label slug].freeze
+
+  def self.label_column(*cols)
+    @_label_columns = cols
+  end
+
+  def self.label_columns
+    @_label_columns || LABEL_CANDIDATES.select { |c| columns.include?(c) }
+  end
+
+  def self.ref_label(mappings)
+    (@_ref_labels ||= {}).merge!(mappings)
+    assoc_names = mappings.keys.select { |a| association_reflections.key?(a) }
+    set_dataset(dataset.eager(*assoc_names)) if assoc_names.any?
+  end
+
+  def self.ref_labels
+    @_ref_labels || {}
+  end
+
+  UUID_RE = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+
+  def inspect
+    pk_cols = Array(primary_key)
+    label_cols = self.class.label_columns
+    fk_cols = values.keys.select { |k| k.to_s.end_with?('_id') && !pk_cols.include?(k) }
+
+    parts = []
+    ref_parts = []
+    label_cols.each { |k| parts << "\e[36m#{k}:\e[0m #{fmt_val(values[k])}" if values.key?(k) && !pk_cols.include?(k) }
+    fk_cols.each do |k|
+      assoc_name = k.to_s.sub(/_id$/, '').to_sym
+      if (spec = self.class.ref_labels[assoc_name])
+        ref = associations.key?(assoc_name) ? associations[assoc_name] : (send(assoc_name) rescue nil)
+        if ref
+          ref_text = case spec
+            when Symbol then "→#{spec}: #{ref.values[spec]}"
+            when Array then spec.map { |c| "→#{c}: #{ref.values[c]}" }.join(', ')
+            when Proc then "→ #{spec.call(ref)}"
+            end
+          ref_parts << "\e[2m#{ref_text}\e[0m"
+        end
+      end
+    end
+    parts.concat(ref_parts)
+    pk_cols.each { |k| parts << "\e[33m#{k}:\e[0m #{fmt_val(values[k])}" }
+    fk_cols.each { |k| parts << "\e[35m#{k}:\e[0m #{fmt_val(values[k])}" }
+
+    "#<\e[1m#{self.class.name}\e[0m #{parts.join(', ')}>"
+  end
+
+  private def fmt_val(v)
+    case v
+    when String then v.match?(UUID_RE) ? v[0, 8] + '...' : v.inspect
+    else v.inspect
+    end
+  end
+  public
 
   def to_yaml(path = nil)
     require 'yaml'
@@ -445,9 +529,33 @@ class Sequel::Dataset
   def left_joins(*assocs)
     assocs.reduce(self) { |ds, a| ds.association_left_join(a) }
   end
+  alias pluck select_map
+
+  def find_each(batch_size: 1000, &block)
+    paged_each(rows_per_fetch: batch_size, &block)
+  end
+
+  ALL_LIMIT = 100
+
+  alias_method :_sequel_all, :all
+  def all(*args, &block)
+    return _sequel_all(*args, &block) if @opts[:limit] || @_safe_all_bypass
+    total = count
+    if total > ALL_LIMIT
+      puts "\e[33m#{total} rows total. Showing first #{ALL_LIMIT}. Use .all! or .limit(n) for more\e[0m"
+      limit(ALL_LIMIT)._sequel_all(*args, &block)
+    else
+      _sequel_all(*args, &block)
+    end
+  end
+
+  def all!(*args, &block)
+    clone.tap { |ds| ds.instance_variable_set(:@_safe_all_bypass, true) }._sequel_all(*args, &block)
+  end
+
   def to_yaml(path = nil)
     require 'yaml'
-    data = self.all
+    data = self._sequel_all
     yaml = data.to_yaml
     path ? (File.write(File.expand_path(path), yaml); puts "Saved to #{path} (#{data.size} rows)") : puts(yaml)
   end
@@ -533,7 +641,6 @@ def fk_alias(mappings)
       next unless model
       col = :"#{alias_name}_id"
       next unless model.columns.include?(col)
-      next if model.associations.include?(alias_name.to_sym)
       model.many_to_one alias_name.to_sym, class: ref_class, key: col
       ref_class.one_to_many :"#{t}_as_#{alias_name}", class: model, key: col
     end
@@ -576,7 +683,9 @@ def enable_soft_delete(*models)
   count = 0
   targets.each do |m|
     next unless m.columns.include?(:deleted_at)
+    next if m.instance_variable_get(:@_soft_delete_enabled)
     m.default_scope { where(deleted_at: nil) }
+    m.instance_variable_set(:@_soft_delete_enabled, true)
     count += 1
   end
   puts "Soft delete enabled for #{count} models (use .unfiltered to bypass)"
@@ -590,10 +699,41 @@ if File.exist?(local_config)
   puts "\e[36mLoaded #{local_config}\e[0m"
 end
 
+def reload!
+  project_dir = ENV['MISE_PROJECT_ROOT'] || ENV['PWD'] || Dir.pwd
+  local_config = File.join(project_dir, '.db-irb.rb')
+  unless File.exist?(local_config)
+    puts "\e[31m.db-irb.rb not found in #{project_dir}\e[0m"
+    return
+  end
+  WRITE_GUARDS.clear
+  FK_ALIAS_MAP.clear
+  DB.tables.each do |t|
+    m = table_to_class(t)
+    next unless m
+    m.instance_variable_set(:@_ref_labels, nil)
+  end
+  load local_config
+  puts "\e[36mReloaded #{local_config}\e[0m"
+end
+
+# 테이블 출력 헬퍼
+def to_tbl(data)
+  rows = case data
+         when Sequel::Dataset then data.all!
+         when Array then data.map { |r| r.respond_to?(:values) ? r.values : r }
+         else return puts("to_tbl: Dataset or Array expected")
+         end
+  return puts("No rows") if rows.empty?
+  output = format_table(rows)
+  IO.popen(PAGER, 'w') { |io| io.puts output }
+  rows.size
+end
+
 # Export 함수들
 def to_csv(dataset, path = nil)
   require 'csv'
-  data = dataset.is_a?(Array) ? dataset : dataset.all
+  data = dataset.is_a?(Array) ? dataset : dataset.all!
   data = data.map { |r| r.respond_to?(:values) ? r.values : r }
   return puts "No data" if data.empty?
 
@@ -612,7 +752,7 @@ end
 
 def to_json(dataset, path = nil)
   require 'json'
-  data = dataset.is_a?(Array) ? dataset : dataset.all
+  data = dataset.is_a?(Array) ? dataset : dataset.all!
   data = data.map { |r| r.respond_to?(:values) ? r.values : r }
   json = JSON.pretty_generate(data)
 
@@ -626,10 +766,27 @@ end
 
 def to_clip(dataset)
   require 'json'
-  data = dataset.is_a?(Array) ? dataset : dataset.all
+  data = dataset.is_a?(Array) ? dataset : dataset.all!
   data = data.map { |r| r.respond_to?(:values) ? r.values : r }
   IO.popen('pbcopy', 'w') { |io| io.puts JSON.pretty_generate(data) }
   puts "Copied to clipboard (#{data.size} rows)"
+end
+
+def to_yaml(data, path = nil)
+  require 'yaml'
+  rows = case data
+         when Sequel::Dataset then data.all!
+         when Array then data.map { |r| r.respond_to?(:values) ? r.values : r }
+         else data
+         end
+  yaml = rows.to_yaml
+  if path
+    File.write(File.expand_path(path), yaml)
+    puts "Saved to #{path}"
+  else
+    puts yaml
+  end
+  nil
 end
 
 # Import 함수들
@@ -705,6 +862,42 @@ def fk(table)
   end
   nil
 end
+
+# 관계 테이블 리스팅 (양방향)
+def relations(table)
+  model = table.is_a?(Class) ? table : table_to_class(table)
+  unless model
+    puts "\e[31mModel not found for :#{table}\e[0m"
+    return
+  end
+  table_name = model.table_name
+
+  refs = []  # belongs_to (이 테이블 → 상대)
+  deps = []  # has_many (상대 → 이 테이블)
+
+  model.association_reflections.each do |name, ref|
+    target = ref[:class_name] || ref[:class].to_s rescue name.to_s
+    case ref[:type]
+    when :many_to_one
+      refs << { name: name, target: target, key: ref[:key] }
+    when :one_to_many
+      deps << { name: name, target: target, key: ref[:key] }
+    end
+  end
+
+  puts "\e[36m:#{table_name} relations\e[0m"
+  if refs.any?
+    puts "  \e[33mbelongs_to:\e[0m"
+    refs.each { |r| puts "    %-20s -> %s (:%s)" % [r[:name], r[:target], r[:key]] }
+  end
+  if deps.any?
+    puts "  \e[33mhas_many:\e[0m"
+    deps.each { |r| puts "    %-20s <- %s (:%s)" % [r[:name], r[:target], r[:key]] }
+  end
+  puts "  (none)" if refs.empty? && deps.empty?
+  nil
+end
+alias rels relations
 
 # 테이블 검색
 def tables(pattern = nil)
@@ -794,8 +987,11 @@ HELP_TOPICS = {
   H
   where: <<~H,
     [Select & Filter]
-    User.all / User.first / User[1]
+    User.all                             # 100건 초과 시 자동 limit
+    User.all!                            # limit 없이 전체 반환
+    User.first / User[1]
     User.where(active: true).all
+    User.pluck(:name)                    # -> ["foo", "bar"] (select_map alias)
     User.where { created_at > Date.today - 30 }.all
     User.exclude(active: false)          # where의 반대
     User.where(name: 'foo').or(name: 'bar')
@@ -978,6 +1174,40 @@ HELP_TOPICS = {
     # run_script으로 외부 스크립트도 실행 가능:
     #   run_script "~/scripts/abuse_analysis.rb"
   H
+  relations: <<~H,
+    [Relations]
+    relations :users    # 양방향 관계 테이블 리스팅
+    rels :users         # alias
+                        # belongs_to: 이 테이블이 참조하는 테이블
+                        # has_many: 이 테이블을 참조하는 테이블
+  H
+  inspect: <<~'H',
+    [Inspect]
+    # 기본: PK + label(name/title/email) + FK 컬럼만 출력
+    User.first              # => #<User id: 1, name: "foo", org_id: 3>
+    user.values              # 전체 필드 Hash
+
+    [label_column] 대표 컬럼 커스터마이징 (.db-irb.rb)
+    User.label_column :nickname, :phone
+
+    [ref_label] FK에 참조 레코드 정보 표시 (.db-irb.rb)
+    # 단일 컬럼
+    ElsPortfolios.ref_label els_product: :product_name
+    # => →product_name: 테스트 스텝다운 ELS
+    # 여러 컬럼
+    ElsPortfolios.ref_label els_product: [:product_name, :status]
+    # => →product_name: 테스트 스텝다운 ELS, →status: active
+    # 람다 (자유 연산)
+    ElsPortfolios.ref_label els_product: ->(p) { "#{p.product_name} (#{p.status})" }
+    # => → 테스트 스텝다운 ELS (active)
+    # eager loading 자동 설정 → N+1 없음
+  H
+  reload: <<~H,
+    [Reload]
+    reload!             # .db-irb.rb 다시 로드 (세션 유지)
+                        # write_guard 초기화 후 재로드
+                        # fk_alias, enable_soft_delete는 멱등 처리
+  H
 }
 
 # 토픽 별명 (help :filter → where 등)
@@ -997,6 +1227,9 @@ HELP_ALIASES = {
   safe: :safe_write, pending: :safe_write, apply: :safe_write,
   validate: :validates, normalize: :validates, normalizes: :validates,
   guard: :write_guard,
+  label: :inspect, ref: :inspect, ref_label: :inspect,
+  rels: :relations, rel: :relations,
+  load: :reload,
 }
 
 def help(topic = nil)
