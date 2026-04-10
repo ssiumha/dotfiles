@@ -4,15 +4,13 @@ local parse = engine.parse_query
 
 T.describe('parse_query: mode dispatch', function()
   T.eq(parse('Wallet').mode, 'infer', 'PascalCase -> infer')
+  T.eq(parse('wallet').mode, 'infer', 'lowercase single word -> infer')
   T.eq(parse('GET /api').mode, 'router', 'HTTP method -> router')
   T.eq(parse('/users').mode, 'router', 'path prefix -> router')
-  T.eq(parse('m:User').mode, 'model', 'prefix m: -> model')
-  T.eq(parse('d:auth').mode, 'domain', 'prefix d: -> domain')
-  T.eq(parse('s:create').mode, 'symbol', 'prefix s: -> symbol')
+  T.eq(parse('$foo()').mode, 'ast', '$ prefix -> ast')
   T.eq(parse('&wallet').mode, 'context', '& prefix -> context')
   T.eq(parse('!').mode, 'git', '! prefix -> git')
-  T.eq(parse('model User').mode, 'model', 'keyword -> model')
-  T.eq(parse('hello world').mode, 'default', 'no specific match -> default')
+  T.eq(parse('hello world').mode, 'default', 'multi-word -> default')
 end)
 
 T.describe('parse_query: pipe filter', function()
@@ -29,11 +27,10 @@ T.describe('parse_query: pipe filter', function()
 end)
 
 T.describe('parse_query: query extraction', function()
-  T.eq(parse('m:User').query, 'User', 'm:User -> query=User')
   T.eq(parse('/users').query, 'users', '/path -> query without leading /')
   T.eq(parse('GET /api/users').query, '/api/users', 'GET path extraction')
   T.eq(parse('Wallet').query, 'Wallet', 'PascalCase query')
-  T.eq(parse('model User').query, 'user', 'keyword query (lowercased)')
+  T.eq(parse('oracle').query, 'oracle', 'lowercase query')
   T.eq(parse('').mode, 'grep', 'empty -> grep fallback')
   T.eq(parse('').query, '', 'empty -> empty query')
 end)
@@ -44,7 +41,7 @@ T.describe('parse_query: edge cases', function()
   T.eq(parse(nil).query, '', 'nil -> empty query')
 
   -- infer boundary: only strict PascalCase single word
-  T.eq(parse('wallet').mode, 'default', 'lowercase -> default (not infer)')
+  T.eq(parse('wallet').mode, 'infer', 'single word -> infer (case insensitive)')
   T.eq(parse('WALLET').mode, 'infer', 'all-caps -> infer (starts with upper)')
   T.eq(parse('Wallet Service').mode, 'default', 'multi-word -> default (not infer)')
   T.eq(parse('WalletService').mode, 'infer', 'PascalCase compound -> infer')
@@ -59,12 +56,9 @@ T.describe('parse_query: edge cases', function()
   T.eq(parse('staged handler').mode, 'git', 'keyword staged -> git')
   T.eq(parse('changed handler').mode, 'git', 'keyword changed -> git')
 
-  -- keyword case insensitivity
-  T.eq(parse('Model User').mode, 'model', 'capitalized keyword -> model')
-
-  -- router prefix
-  T.eq(parse('r:users').mode, 'router', 'r: prefix -> router')
-  T.eq(parse('r:users').query, 'users', 'r: prefix query')
+  -- removed prefixes now fall through to default/infer
+  T.eq(parse('Model User').mode, 'default', 'multi-word -> default (no keyword modes)')
+  T.eq(parse('r:users').mode, 'default', 'r:users -> default (r: prefix removed)')
 
   -- empty pipe filter
   T.eq(parse('Wallet |').pipe_filter, nil, 'empty pipe -> nil')
@@ -76,14 +70,14 @@ end)
 
 T.describe('parse_query: folder filter @path/', function()
   -- basic extraction
-  local p1 = parse('s:create @src/auth/')
-  T.eq(p1.mode, 'symbol', 'folder: mode preserved')
+  local p1 = parse('create @src/auth/')
+  T.eq(p1.mode, 'infer', 'folder: mode preserved')
   T.eq(p1.query, 'create', 'folder: query preserved')
   T.eq(p1.folder_filter, 'src/auth/', 'folder: extracted')
 
   -- folder at start
-  local p2 = parse('@src/ m:User')
-  T.eq(p2.mode, 'model', 'folder at start: mode ok')
+  local p2 = parse('@src/ User')
+  T.eq(p2.mode, 'infer', 'folder at start: mode ok')
   T.eq(p2.query, 'User', 'folder at start: query ok')
   T.eq(p2.folder_filter, 'src/', 'folder at start: extracted')
 
@@ -99,19 +93,55 @@ T.describe('parse_query: folder filter @path/', function()
   T.eq(p4.pipe_filter, 'auth', 'folder+pipe: pipe extracted')
 
   -- no folder (no @)
-  T.eq(parse('m:User').folder_filter, nil, 'no @ -> nil folder')
+  T.eq(parse('User').folder_filter, nil, 'no @ -> nil folder')
 
   -- @ without slash -> not a folder
-  T.eq(parse('s:create @auth').folder_filter, nil, '@ without / -> nil folder')
+  T.eq(parse('create @auth').folder_filter, nil, '@ without / -> nil folder')
 
   -- deep nested path
-  local p5 = parse('s:create @src/auth/controllers/')
+  local p5 = parse('create @src/auth/controllers/')
   T.eq(p5.folder_filter, 'src/auth/controllers/', 'deep nested path')
 
   -- multiple @ -> first wins, second stays in raw
-  local p6 = parse('s:create @src/ @lib/')
+  local p6 = parse('create @src/ @lib/')
   T.eq(p6.folder_filter, 'src/', 'multiple @: first wins')
-  T.eq(p6.mode, 'symbol', 'multiple @: mode still parsed')
+  T.eq(p6.mode, 'default', 'multiple @: leftover @lib/ makes multi-token -> default')
+end)
+
+T.describe('parse_query: glob filter *.ext', function()
+  local p1 = parse('User *.java')
+  T.eq(p1.mode, 'infer', 'glob: mode preserved')
+  T.eq(p1.query, 'User', 'glob: query preserved')
+  T.eq(p1.glob_filter, '*.java', 'glob: extracted')
+
+  -- glob at start
+  local p2 = parse('*.py User')
+  T.eq(p2.mode, 'infer', 'glob at start: mode ok')
+  T.eq(p2.glob_filter, '*.py', 'glob at start: extracted')
+
+  -- brace expansion
+  local p3 = parse('create *.{js,ts}')
+  T.eq(p3.mode, 'infer', 'glob brace: mode ok')
+  T.eq(p3.glob_filter, '*.{js,ts}', 'glob brace: extracted')
+
+  -- glob alone (default mode fallback)
+  local p4 = parse('*.rb')
+  T.eq(p4.mode, 'default', 'glob alone: default mode')
+  T.eq(p4.glob_filter, '*.rb', 'glob alone: extracted')
+
+  -- no glob
+  T.eq(parse('m:User').glob_filter, nil, 'no glob -> nil')
+
+  -- glob + folder + pipe combo
+  local p5 = parse('Wallet *.ts @src/ | auth')
+  T.eq(p5.glob_filter, '*.ts', 'combo: glob extracted')
+  T.eq(p5.folder_filter, 'src/', 'combo: folder extracted')
+  T.eq(p5.pipe_filter, 'auth', 'combo: pipe extracted')
+
+  -- git mode + glob
+  local p6 = parse('! handler *.py')
+  T.eq(p6.mode, 'git', 'glob + git: mode ok')
+  T.eq(p6.glob_filter, '*.py', 'glob + git: extracted')
 end)
 
 T.describe('parse_query: git mode pipe', function()
@@ -122,8 +152,8 @@ T.describe('parse_query: git mode pipe', function()
 end)
 
 T.describe('parse_query: folder exclude @!path/', function()
-  local p1 = parse('s:create @!test/')
-  T.eq(p1.mode, 'symbol', 'folder exclude: mode preserved')
+  local p1 = parse('create @!test/')
+  T.eq(p1.mode, 'infer', 'folder exclude: mode preserved')
   T.eq(p1.query, 'create', 'folder exclude: query preserved')
   T.eq(p1.folder_filter, 'test/', 'folder exclude: path extracted')
   T.eq(p1.folder_exclude, true, 'folder exclude: flag set')
@@ -134,7 +164,7 @@ T.describe('parse_query: folder exclude @!path/', function()
   T.eq(p2.folder_exclude, true, 'folder exclude: deep flag')
 
   -- include (no !) -> exclude nil
-  local p3 = parse('s:create @src/')
+  local p3 = parse('create @src/')
   T.eq(p3.folder_filter, 'src/', 'folder include: path ok')
   T.eq(p3.folder_exclude, nil, 'folder include: no exclude flag')
 end)

@@ -37,8 +37,8 @@ T.describe('dispatch: pipe_filter ordering', function()
   local parsed = parse('Wallet | client')
   local cmd = dispatch(parsed, mock_ctx)
   T.ok(cmd ~= nil, 'cmd generated')
-  -- rank awk must precede pipe_filter grep
-  T.match(cmd, 'awk.-grep.-client', 'rank awk before pipe_filter grep')
+  -- infer (grouped): filters before rank awk
+  T.match(cmd, 'grep.-client.-awk', 'grouped: pipe_filter before rank awk')
 end)
 
 T.describe('dispatch: nil for unmatched', function()
@@ -47,36 +47,28 @@ T.describe('dispatch: nil for unmatched', function()
 end)
 
 --------------------------------------------------------------------------------
--- symbol mode
+-- ast mode
 --------------------------------------------------------------------------------
 
-T.describe('dispatch: symbol AST -> sg cmd', function()
+T.describe('dispatch: ast $ -> sg cmd', function()
   local parsed = parse('$foo()')
-  T.eq(parsed.mode, 'symbol', 'ast query -> symbol mode')
-  T.ok(parsed.ast, 'ast flag set')
+  T.eq(parsed.mode, 'ast', 'ast query -> ast mode')
   local cmd = dispatch(parsed, mock_ctx_sg)
   T.match(cmd, 'sg run', 'uses ast-grep')
 end)
 
-T.describe('dispatch: symbol AST -> error when no sg', function()
+T.describe('dispatch: ast $ -> error when no sg', function()
   local parsed = parse('$foo()')
   local cmd = dispatch(parsed, mock_ctx)
   T.match(cmd, 'not found', 'error msg when sg missing')
-end)
-
-T.describe('dispatch: symbol rg fallback', function()
-  local parsed = parse('s:create')
-  local cmd = dispatch(parsed, mock_ctx)
-  T.match(cmd, 'rg', 'uses ripgrep')
-  T.match(cmd, 'create', 'query in command')
 end)
 
 --------------------------------------------------------------------------------
 -- folder filter (@path/)
 --------------------------------------------------------------------------------
 
-T.describe('dispatch: folder filter with symbol mode', function()
-  local parsed = parse('s:create @src/auth/')
+T.describe('dispatch: folder filter with infer mode', function()
+  local parsed = parse('create @src/auth/')
   local cmd = dispatch(parsed, mock_ctx)
   T.ok(cmd ~= nil, 'cmd generated')
   T.match(cmd, 'rg', 'base: uses ripgrep')
@@ -84,11 +76,12 @@ T.describe('dispatch: folder filter with symbol mode', function()
   T.match(cmd, "grep.*src/auth/", 'folder filter piped')
 end)
 
-T.describe('dispatch: folder filter ordering (rank → folder → pipe)', function()
+T.describe('dispatch: folder filter ordering (grouped: folder → pipe → rank)', function()
   local parsed = parse('Wallet @src/ | client')
   local cmd = dispatch(parsed, mock_ctx)
   T.ok(cmd ~= nil, 'cmd generated')
-  T.match(cmd, 'awk.-grep.-src/.-grep.-client', 'order: rank awk → folder grep → pipe grep')
+  -- infer (grouped): filters before rank awk
+  T.match(cmd, 'grep.-src/.-grep.-client.-awk', 'grouped: folder → pipe → rank awk')
 end)
 
 T.describe('dispatch: folder filter with git mode', function()
@@ -99,20 +92,12 @@ T.describe('dispatch: folder filter with git mode', function()
   T.match(cmd, "grep.*vim/", 'git: folder filter applied')
 end)
 
-T.describe('dispatch: folder filter with model mode', function()
-  local parsed = parse('m:User @src/domain/')
+T.describe('dispatch: folder filter with default mode', function()
+  local parsed = parse('User domain @src/domain/')
   local cmd = dispatch(parsed, mock_ctx)
   T.ok(cmd ~= nil, 'cmd generated')
-  T.match(cmd, 'User', 'model: query present')
-  T.match(cmd, "grep.*src/domain/", 'model: folder filter piped')
-end)
-
-T.describe('dispatch: folder filter with router mode', function()
-  local parsed = parse('r:users @src/routes/')
-  local cmd = dispatch(parsed, mock_ctx)
-  T.ok(cmd ~= nil, 'cmd generated')
-  T.match(cmd, 'users', 'router: query present')
-  T.match(cmd, "grep.*src/routes/", 'router: folder filter piped')
+  T.match(cmd, 'User', 'default: query present')
+  T.match(cmd, "grep.*src/domain/", 'default: folder filter piped')
 end)
 
 --------------------------------------------------------------------------------
@@ -196,20 +181,6 @@ T.describe('dispatch: router /path Spring monorepo finds cross-framework routes'
   T.no_match(cmd, 'rg %-%-files', 'no unrestricted file listing')
 end)
 
--- r: prefix + preset: content-only 매칭 유지
-T.describe('dispatch: router r: prefix with preset uses content filter', function()
-  local ctx_preset = {
-    root = '/tmp/test', preset_name = 'nextjs', has_sg = false,
-    preset = { router = {
-      { glob = 'app/**/route.{js,ts}', pattern = 'export.*(GET|POST|PUT|DELETE|PATCH)' },
-    }},
-  }
-  local parsed = parse('r:users')
-  local cmd = dispatch(parsed, ctx_preset)
-  T.ok(cmd ~= nil, 'cmd generated')
-  T.match(cmd, 'awk', 'r: prefix uses content-only AWK')
-end)
-
 -- GET /path + preset: method grep chain 유지 (변경 없음)
 T.describe('dispatch: router method+path with preset uses method grep', function()
   local ctx_preset = {
@@ -277,14 +248,14 @@ T.describe('dispatch: folder exclude @!path/', function()
 end)
 
 T.describe('dispatch: pipe exclude | !filter', function()
-  local parsed = parse('s:create | !Test')
+  local parsed = parse('create | !Test')
   local cmd = dispatch(parsed, mock_ctx)
   T.ok(cmd ~= nil, 'cmd generated')
   T.match(cmd, 'grep %-v %-i.*Test', 'pipe exclude: grep -v -i present')
 end)
 
 T.describe('dispatch: include filters unchanged (regression)', function()
-  local p1 = parse('s:create @src/auth/')
+  local p1 = parse('create @src/auth/')
   local cmd1 = dispatch(p1, mock_ctx)
   T.no_match(cmd1, 'grep %-v', 'folder include: no -v flag')
 
@@ -301,6 +272,110 @@ T.describe('dispatch: combo exclude @!path/ | !filter', function()
   T.match(cmd, 'grep %-v %-i.*Mock', 'combo: pipe exclude')
 end)
 
+--------------------------------------------------------------------------------
+-- glob filter (*.ext)
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+-- infer grouped mode
+--------------------------------------------------------------------------------
+
+T.describe('dispatch: infer grouped -> headers in awk', function()
+  local parsed = parse('Oracle')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'define', 'grouped: define header in awk')
+  T.match(cmd, 'reference', 'grouped: reference header in awk')
+end)
+
+T.describe('dispatch: infer grouped filter ordering (filters before rank)', function()
+  local parsed = parse('Oracle @src/')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  -- grep (folder filter) must appear BEFORE the grouped awk
+  T.match(cmd, 'grep.-src/.-awk', 'grouped: folder filter before rank awk')
+end)
+
+T.describe('dispatch: infer grouped pipe filter ordering', function()
+  local parsed = parse('Oracle | config')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'grep.-config.-awk', 'grouped: pipe filter before rank awk')
+end)
+
+T.describe('dispatch: infer grouped glob filter ordering', function()
+  local parsed = parse('Oracle *.java')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'grep.*%.java.*awk', 'grouped: glob filter before rank awk')
+end)
+
+T.describe('dispatch: non-grouped rank ordering unchanged', function()
+  -- model mode has no rank -> no awk at all, just verify no regression
+  local parsed = parse('m:User')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.no_match(cmd, 'define', 'non-grouped: no group headers')
+end)
+
+T.describe('dispatch: infer filter_bucket via opts', function()
+  local parsed = parse('Oracle')
+  local cmd = dispatch(parsed, mock_ctx, { filter_bucket = 1 })
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'awk', 'filter: awk present')
+  T.no_match(cmd, '── define ──', 'filter: no group headers')
+end)
+
+T.describe('dispatch: infer no filter_bucket -> all groups', function()
+  local parsed = parse('Oracle')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'define', 'no filter: has define header')
+  T.match(cmd, 'reference', 'no filter: has reference header')
+end)
+
+T.describe('dispatch: infer includes config file search', function()
+  local parsed = parse('Oracle')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, '%.yml', 'config: yml glob present')
+  T.match(cmd, '%.json', 'config: json glob present')
+end)
+
+--------------------------------------------------------------------------------
+-- glob filter (*.ext)
+--------------------------------------------------------------------------------
+
+T.describe('dispatch: glob filter *.java', function()
+  local parsed = parse('create *.java')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'grep.-E.*%.java:', 'glob: grep for .java:')
+end)
+
+T.describe('dispatch: glob filter brace *.{js,ts}', function()
+  local parsed = parse('create *.{js,ts}')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'grep.-E', 'glob brace: uses grep -E')
+  T.match(cmd, 'js|ts', 'glob brace: alternation')
+end)
+
+T.describe('dispatch: glob filter ordering (grouped: folder -> glob -> pipe -> rank)', function()
+  local parsed = parse('Wallet *.ts @src/ | client')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  -- infer (grouped): all filters before rank awk
+  T.match(cmd, 'grep.-src/.-grep.*%.ts.-grep.-client.-awk', 'grouped: folder -> glob -> pipe -> rank')
+end)
+
+T.describe('dispatch: glob alone *.rb', function()
+  local parsed = parse('*.rb')
+  local cmd = dispatch(parsed, mock_ctx)
+  T.ok(cmd ~= nil, 'cmd generated')
+  T.match(cmd, 'grep.-E.*%.rb:', 'glob alone: grep for .rb:')
+end)
+
 T.describe('dispatch: router GET /path generic', function()
   local parsed = parse('GET /api/users')
   local cmd = dispatch(parsed, mock_ctx)
@@ -309,9 +384,3 @@ T.describe('dispatch: router GET /path generic', function()
   T.match(cmd, '/api/users', 'path in filter')
 end)
 
-T.describe('dispatch: router r: prefix generic', function()
-  local parsed = parse('r:users')
-  local cmd = dispatch(parsed, mock_ctx)
-  T.match(cmd, 'rg', 'uses ripgrep')
-  T.match(cmd, 'users', 'query in filter')
-end)

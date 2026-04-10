@@ -6,8 +6,8 @@ local build_rg_cmd = engine.build_rg_cmd
 local build_sg_cmd = engine.build_sg_cmd
 local RG_SEARCH = engine.RG_SEARCH
 local RG_BASE = engine.RG_BASE
+local RG_PLAIN = engine.RG_PLAIN
 local keyword_matcher = engine.keyword_matcher
-local prefix_keyword_match = engine.prefix_keyword_match
 local extract_domain = engine.extract_domain
 
 -------------------------------------------------------------------------------
@@ -86,7 +86,6 @@ register_mode({
 
 -- 2. Router mode (priority 10)
 local HTTP_METHODS = { GET = true, POST = true, PUT = true, DELETE = true, PATCH = true }
-local router_kw = keyword_matcher({ 'route', 'endpoint' })
 --- 프레임워크 미감지 시 공통 라우터 패턴
 local GENERIC_ROUTER_PATTERN = table.concat({
   '@(Get|Post|Put|Delete|Patch|Request)Mapping',  -- Spring
@@ -100,8 +99,6 @@ local GENERIC_ROUTER_PATTERN = table.concat({
 register_mode({
   name = 'router',
   priority = 10,
-  prefix = 'r',
-  keywords = { 'route', 'endpoint' },
   match = function(raw)
     -- HTTP method prefix: GET /api/users
     local first_space = raw:find('%s')
@@ -118,19 +115,12 @@ register_mode({
     if raw:match('^/%w') then
       return { query = raw:sub(2), is_path = true }
     end
-    -- Short prefix: r:users
-    local rest = raw:match('^r:(.+)')
-    if rest then return { query = rest } end
-    -- Keyword: route users, endpoint users
-    local q = router_kw(raw)
-    if q then return { query = q } end
     return nil
   end,
   build_cmd = function(parsed, ctx)
     local preset = ctx.preset
     if preset and preset.router then
       if parsed.method then
-        -- method + query 분리 grep: { 복합명령; } | grep method | grep query
         local cmd = build_rg_cmd(preset.router)
         cmd = string.format('{ %s; } | grep -i %s', cmd, vim.fn.shellescape(parsed.method))
         if parsed.query and parsed.query ~= '' then
@@ -139,13 +129,10 @@ register_mode({
         return cmd
       end
       if parsed.is_path then
-        -- preset rg (감지된 프레임워크) + merged preset rg (모든 프레임워크 router 패턴)
-        -- WHY: Spring 감지되어도 Next.js page.tsx 등 다른 프레임워크 router 파일 함께 검색
         local preset_cmd = build_rg_cmd(preset.router, parsed.query, { path_match = true })
         local merged = ctx.merged_router
         if merged and #merged > 0 then
           local merged_cmd = build_rg_cmd(merged, parsed.query, { path_match = true })
-          -- 2>/dev/null: 매치 파일 없는 프레임워크 glob의 rg stderr 억제
           return string.format("{ %s; %s; } 2>/dev/null | awk -F: '!seen[$1]++'", preset_cmd, merged_cmd)
         end
         return preset_cmd
@@ -167,96 +154,36 @@ register_mode({
   end,
 })
 
--- 3. Model mode (priority 20)
-local model_kw = keyword_matcher({ 'model', 'schema', 'entity', 'table' })
+-- 3. AST pattern mode (priority 40) — $ 접두사로 ast-grep 실행
 register_mode({
-  name = 'model',
-  priority = 20,
-  prefix = 'm',
-  keywords = { 'model', 'schema', 'entity', 'table' },
-  match = prefix_keyword_match('m', model_kw),
-  build_cmd = function(parsed, ctx)
-    local preset = ctx.preset
-    if not preset or not preset.model then
-      return string.format(
-        '%s %s',
-        RG_SEARCH,
-        vim.fn.shellescape('(class|model|schema|entity|table)\\s+' .. parsed.query)
-      )
-    end
-    return build_rg_cmd(preset.model, parsed.query)
-  end,
-})
-
--- 4. Domain mode (priority 30)
-local domain_kw = keyword_matcher({ 'service', 'repository', 'repo', 'usecase', 'handler', 'middleware' })
-register_mode({
-  name = 'domain',
-  priority = 30,
-  prefix = 'd',
-  keywords = { 'service', 'repository', 'repo', 'usecase', 'handler', 'middleware' },
-  match = prefix_keyword_match('d', domain_kw),
-  build_cmd = function(parsed, ctx)
-    local preset = ctx.preset
-    if not preset or not preset.domain then
-      return string.format(
-        '%s --glob %s --glob %s --glob %s %s',
-        RG_SEARCH,
-        vim.fn.shellescape('**/services/**'),
-        vim.fn.shellescape('**/repositories/**'),
-        vim.fn.shellescape('**/handlers/**'),
-        vim.fn.shellescape(parsed.query)
-      )
-    end
-    return build_rg_cmd(preset.domain, parsed.query)
-  end,
-})
-
--- 5. Symbol mode (priority 40)
-local symbol_kw = keyword_matcher({
-  'def', 'fn', 'function', 'class', 'type', 'interface', 'enum', 'struct', 'trait', 'impl',
-})
-local symbol_base_match = prefix_keyword_match('s', symbol_kw)
-register_mode({
-  name = 'symbol',
+  name = 'ast',
   priority = 40,
-  prefix = 's',
-  keywords = { 'def', 'fn', 'function', 'class', 'type', 'interface', 'enum', 'struct', 'trait', 'impl' },
   match = function(raw)
-    -- AST pattern: $ 포함 (prefix/keyword 매칭보다 우선)
-    if raw:find('%$') then return { query = raw, ast = true } end
-    return symbol_base_match(raw)
+    if raw:find('%$') then return { query = raw } end
+    return nil
   end,
   build_cmd = function(parsed, ctx)
-    if parsed.ast then
-      if not ctx.has_sg then
-        return 'echo "[Stargazer] ast-grep (sg) not found — install: npm i -g @ast-grep/cli"'
-      end
-      return build_sg_cmd(parsed.query)
+    if not ctx.has_sg then
+      return 'echo "[Stargazer] ast-grep (sg) not found — install: npm i -g @ast-grep/cli"'
     end
-    return string.format(
-      '%s %s',
-      RG_SEARCH,
-      vim.fn.shellescape(
-        '(function|class|def|fn|type|interface|enum|struct|trait|impl)\\s+' .. parsed.query
-      )
-    )
+    return build_sg_cmd(parsed.query)
   end,
 })
 
--- 6. Infer mode (priority 50) — PascalCase 단어 복합 검색
+-- 6. Infer mode (priority 50) — PascalCase 단어 복합 검색 (역할별 그룹핑)
 register_mode({
   name = 'infer',
   priority = 50,
+  rank_grouped = true,
   rank = {
-    { pattern = '(class|interface|type|enum) \\w*{q}' },       -- 정의 + 이름에 쿼리
-    { pattern = '(class|interface|type|enum) ' },               -- 정의 (이름에 쿼리 없음)
-    { pattern = '@(entity|table|document|schema)' },            -- 모델 어노테이션
-    { pattern = '@(service|repository|component|injectable|controller)' },  -- 도메인 어노테이션
-    { pattern = '(def |function |fn )' },                       -- 메서드 정의
+    { pattern = '(class|interface|type|enum) [a-zA-Z]*{q}', header = 'define' },
+    { pattern = '\\.(yml|yaml|xml|json|properties|toml):', header = 'config' },
+    { pattern = '@(entity|table|document|schema)|create.table|add.column', header = 'schema' },
+    { pattern = '@(service|repository|component|injectable|controller)', header = 'domain' },
+    { pattern = '(def |function |fn )', header = 'method' },
   },
   match = function(raw)
-    if raw:match('^%u%w*$') then
+    if raw:match('^%w+$') then
       return { query = raw }
     end
     return nil
@@ -282,7 +209,16 @@ register_mode({
       vim.fn.shellescape('(class|interface|type|enum)\\s+.*' .. q)
     )
 
-    -- dedup은 dispatch의 build_rank_awk가 처리
+    -- 4. config 파일 검색 (RG_PLAIN: 확장자 제외 없음)
+    parts[#parts + 1] = string.format(
+      '%s --glob %s --glob %s --glob %s --glob %s --glob %s %s',
+      RG_PLAIN,
+      vim.fn.shellescape('*.yml'), vim.fn.shellescape('*.yaml'),
+      vim.fn.shellescape('*.xml'), vim.fn.shellescape('*.json'),
+      vim.fn.shellescape('*.toml'),
+      vim.fn.shellescape(q)
+    )
+
     return "{ " .. table.concat(parts, '; ') .. "; }"
   end,
 })

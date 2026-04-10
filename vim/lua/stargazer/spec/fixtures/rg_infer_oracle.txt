@@ -1,0 +1,13 @@
+src/config/OracleConfig.java:8:1:public class OracleConfig {
+src/model/OracleUser.java:5:1:@Entity
+src/model/OracleUser.java:10:1:public class OracleUser extends BaseEntity {
+src/db/V1__oracle_tables.sql:1:1:CREATE TABLE oracle_data
+src/model/OracleUser.java:3:1:@Table(name = "oracle_users")
+src/service/OracleService.java:7:1:@Service
+src/repository/OracleRepository.java:3:1:@Repository
+src/controller/PaymentController.java:42:1:oracleService.query(params)
+src/batch/BatchJob.java:88:1:oracleRepo.findAll()
+src/util/OracleHelper.java:15:1:import OracleUser
+config/application.yml:12:1:oracle.url=jdbc:oracle:thin:@localhost
+config/database.json:5:1:"oracle": {"host": "db.example.com"}
+src/service/OracleService.java:20:1:public void syncOracle() {

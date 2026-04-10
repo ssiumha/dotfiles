@@ -38,16 +38,13 @@ local function help_cmd()
     '',
     '\027[36mGET \027[90m/path\027[0m    router: HTTP method + path',
     '\027[36m/\027[90mpath\027[0m        router: path lookup',
-    '\027[36mr:\027[90mquery\027[0m      router: route search',
     '',
-    '\027[36mm:\027[90mquery\027[0m      model / schema / entity',
-    '\027[36md:\027[90mquery\027[0m      domain: service / repository',
-    '\027[36ms:\027[90mquery\027[0m      symbol: function / class / type',
-    '\027[36m$\027[90mpattern\027[0m    symbol: AST pattern (ast-grep)',
+    '\027[36m$\027[90mpattern\027[0m    AST pattern (ast-grep)',
     '',
-    '\027[33mPascalCase\027[0m     infer: find all related code',
+    '\027[33mword\027[0m           infer: find all related code (grouped)',
     '',
-    '\027[90mpipe: query | filter  ─  folder: query @path/  ─  exclude: @!path/ or | !filter\027[0m',
+    '\027[90mpipe: query | filter  ─  folder: query @path/  ─  glob: *.ext  ─  exclude: @!path/ or | !filter\027[0m',
+    '\027[33mctrl-g\027[0m  cycle group filter (define/config/schema/domain/method/reference)',
   }
   return 'printf ' .. vim.fn.shellescape(table.concat(lines, '\n'))
 end
@@ -66,9 +63,15 @@ local function wrap_action(action_fn)
   return function(selected, opts)
     local restored = {}
     for _, item in ipairs(selected) do
-      table.insert(restored, restore_entry(item))
+      local r = restore_entry(item)
+      -- 헤더/separator 라인 제외 (file:line 패턴이 아닌 줄)
+      if r:match('^[^:]+:%d+:') then
+        table.insert(restored, r)
+      end
     end
-    return action_fn(restored, opts)
+    if #restored > 0 then
+      return action_fn(restored, opts)
+    end
   end
 end
 
@@ -92,8 +95,26 @@ function M.open(opts)
   local fzf_lua = require('fzf-lua')
   local ctx = M.build_context()
 
+  -- g:stargazer_fzf_tmux — tmux popup 모드 (예: 'center,80%,70%')
+  local tmux_val = vim.g.stargazer_fzf_tmux
+
+  -- 그룹 필터 상태 (nil=전체, 1-6=특정 버킷)
+  local filter_bucket = nil
+  local group_names = engine.get_group_names('infer') or {}
+
+
   -- awk: 테스트 파일 라인을 버퍼에 저장, 일반 라인 먼저 출력, 끝에 버퍼 출력
   local TEST_REORDER = [[ | awk '/\/tests?\/|Test[^a-z]|_test\.|\.test\.|\.spec\./{buf[++n]=$0;next}{print}END{for(i=1;i<=n;i++)print buf[i]}']]
+
+  local fzf_opts = {
+    ['--multi'] = true,
+    ['--ansi'] = true,
+    ['--highlight-line'] = true,
+    ['--bind'] = 'alt-a:select-all,alt-d:deselect-all',
+  }
+  if tmux_val then
+    fzf_opts['--tmux'] = tmux_val
+  end
 
   fzf_lua.fzf_live(function(args)
     -- fzf-lua는 query를 table로 전달: args = { "query_string" }
@@ -102,15 +123,36 @@ function M.open(opts)
     query = tostring(query)
 
     local parsed = M.parse_query(query)
-    local cmd = M.dispatch(parsed, ctx)
+    local cmd = M.dispatch(parsed, ctx, { filter_bucket = filter_bucket })
     if not cmd then return cmd end
+    -- grouped 모드(infer)는 자체 정렬 + awk가 상태줄 출력, 그 외는 테스트 파일 후순위
+    if parsed and parsed.mode == 'infer' then
+      return cmd
+    end
     return cmd .. TEST_REORDER
   end, {
     prompt = 'Stargazer> ',
     query = opts.query or '',
     exec_empty_query = true,
     multiline = 2,
-    actions = shared_actions(),
+    actions = (function()
+      local actions = shared_actions()
+      -- F-key 그룹 필터 토글: 모드의 rank 배열에서 동적 생성
+      if #group_names > 0 then
+        -- ctrl-g: 그룹 순환 (define → config → ... → reference → all → ...)
+        actions['ctrl-g'] = {
+          fn = function()
+            if filter_bucket and filter_bucket < #group_names then
+              filter_bucket = filter_bucket + 1
+            else
+              filter_bucket = filter_bucket and nil or 1
+            end
+          end,
+          reload = true,
+        }
+      end
+      return actions
+    end)(),
     previewer = 'builtin',
     _fmt = { from = restore_entry },
     winopts = {
@@ -119,14 +161,17 @@ function M.open(opts)
         vertical = 'down:60%',
       },
     },
-    fzf_opts = {
-      ['--multi'] = true,
-      ['--ansi'] = true,
-      ['--highlight-line'] = true,
-      ['--bind'] = 'alt-a:select-all,alt-d:deselect-all',
-    },
+    fzf_opts = fzf_opts,
     -- 디렉토리 dim 처리: 경로는 유지하되 시각적으로 파일명 강조
     fn_transform = function(line)
+      -- 그룹 헤더/separator 라인 → 변환 없이 통과 (multiline=2 대응: 빈 줄 추가)
+      if line:match('^\027%[') and line:match('──') then
+        return line .. '\n '
+      end
+      -- "... +N more" 라인도 통과
+      if line:match('^\027%[90m') and line:match('%. %. %. %+') then
+        return line .. '\n '
+      end
       -- 1-step 4-group 매치: 내용에 / 포함되어도 backtrack으로 올바른 분리
       local dir, file, loc, text = line:match('^(.*/)([^/]+)(:%d[%d:]*:)(.*)')
       if dir then

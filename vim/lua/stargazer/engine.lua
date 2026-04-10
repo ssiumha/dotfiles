@@ -188,6 +188,16 @@ local function parse_query(raw)
     if pipe_filter == '' then pipe_filter = nil; pipe_exclude = nil end
   end
 
+  -- glob filter: *.ext or *.{ext1,ext2}
+  local glob_filter
+  do
+    local before, glob, after = raw:match('^(.-)(%*%.%S+)(.*)$')
+    if glob then
+      raw = (before .. after):match('^%s*(.-)%s*$')
+      glob_filter = glob
+    end
+  end
+
   -- folder filter: "@path/" → 결과를 특정 경로로 스코핑, "@!path/" → 제외
   local folder_filter, folder_exclude
   do
@@ -208,11 +218,18 @@ local function parse_query(raw)
     end
   end
 
-  if not parsed then return nil end
+  if not parsed then
+    if glob_filter then
+      parsed = { mode = 'default', query = '' }
+    else
+      return nil
+    end
+  end
   parsed.pipe_filter = pipe_filter
   parsed.pipe_exclude = pipe_exclude
   parsed.folder_filter = folder_filter
   parsed.folder_exclude = folder_exclude
+  parsed.glob_filter = glob_filter
   return parsed
 end
 
@@ -238,6 +255,9 @@ local RG_BASE = 'rg --line-number --no-heading --color=never ' .. RG_EXCLUDE
 
 --- rg search flags (직접 검색용 — column + smart-case 포함)
 local RG_SEARCH = 'rg --line-number --column --no-heading --color=never --smart-case ' .. RG_EXCLUDE
+
+--- rg plain flags (확장자 제외 없음 — config 파일 검색용)
+local RG_PLAIN = 'rg --line-number --column --no-heading --color=never --smart-case'
 
 --- rg 명령 빌드 (entries: {glob, pattern}[] + filter)
 ---@param entries StargazerPresetEntry[]
@@ -359,10 +379,12 @@ end
 -------------------------------------------------------------------------------
 
 --- rank 패턴 → dedup + 버킷 스코어링 awk 파이프 생성
----@param patterns {pattern: string}[]  우선순위 순 (첫 번째가 최고)
+---@param patterns {pattern: string, header?: string}[]  우선순위 순 (첫 번째가 최고)
 ---@param query? string                 검색어 ({q} 보간용)
+---@param grouped? boolean             true면 버킷 간 ANSI 헤더 삽입
+---@param filter_bucket? number        특정 버킷만 출력 (1-based, nil=전체)
 ---@return string  " | awk -F: '...'"
-local function build_rank_awk(patterns, query)
+local function build_rank_awk(patterns, query, grouped, filter_bucket)
   local q = query and query:lower() or ''
 
   local branches = {}
@@ -378,9 +400,61 @@ local function build_rank_awk(patterns, query)
   local last = #patterns + 1
   branches[#branches + 1] = string.format('else a%d[++n%d]=$0', last, last)
 
+  -- 그룹별 이름 수집 (상태줄용)
+  local all_headers = {}
+  for i, p in ipairs(patterns) do
+    all_headers[i] = p.header or ('group ' .. i)
+  end
+  all_headers[last] = 'reference'
+
   local end_parts = {}
-  for i = 1, last do
-    end_parts[#end_parts + 1] = string.format('for(i=1;i<=n%d;i++)print a%d[i]', i, i)
+  if grouped and filter_bucket then
+    -- 단일 버킷만 출력 (헤더 없음, cap 없음)
+    local idx = math.min(filter_bucket, last)
+    -- 상태줄: 선택된 그룹 강조 + 각 그룹 카운트
+    local status_parts = {}
+    for i = 1, last do
+      if i == idx then
+        status_parts[#status_parts + 1] = string.format(
+          '"\\033[1;7;36m %s("n%d") \\033[0m"', all_headers[i], i
+        )
+      else
+        status_parts[#status_parts + 1] = string.format(
+          '"\\033[90m%s("n%d")\\033[0m"', all_headers[i], i
+        )
+      end
+    end
+    end_parts[#end_parts + 1] = 'print ' .. table.concat(status_parts, '" "')
+    end_parts[#end_parts + 1] = string.format(
+      'for(i=1;i<=n%d;i++)print a%d[i]', idx, idx
+    )
+  elseif grouped then
+    -- 상태줄: 전체 모드 — 각 그룹 카운트 표시 (ctrl-g で순환)
+    local status_parts = {}
+    for i = 1, last do
+      status_parts[#status_parts + 1] = string.format(
+        '"\\033[33m%s\\033[0m("n%d")"', all_headers[i], i
+      )
+    end
+    end_parts[#end_parts + 1] = 'print ' .. table.concat(status_parts, '" "')
+    for i, p in ipairs(patterns) do
+      local hdr = p.header or ('group ' .. i)
+      end_parts[#end_parts + 1] = string.format(
+        'if(n%d>0){print "\\033[1;36m── %s ──\\033[0m";for(i=1;i<=n%d;i++)print a%d[i]}',
+        i, hdr, i, i
+      )
+    end
+    -- fallback(reference) 버킷: 20줄 cap
+    end_parts[#end_parts + 1] = string.format(
+      'if(n%d>0){print "\\033[1;36m── reference ──\\033[0m";'
+      .. 'lim=20;for(i=1;i<=n%d&&i<=lim;i++)print a%d[i];'
+      .. 'if(n%d>lim)print "\\033[90m  ... +" (n%d-lim) " more\\033[0m"}',
+      last, last, last, last, last
+    )
+  else
+    for i = 1, last do
+      end_parts[#end_parts + 1] = string.format('for(i=1;i<=n%d;i++)print a%d[i]', i, i)
+    end
   end
 
   return string.format(
@@ -397,9 +471,11 @@ end
 --- parsed 결과로 shell 명령 생성
 ---@param parsed table  parse_query 결과
 ---@param ctx table     {preset, root, ...}
+---@param opts? {filter_bucket?: number}  UI 옵션 (파싱과 분리)
 ---@return string
-local function dispatch(parsed, ctx)
+local function dispatch(parsed, ctx, opts)
   if not parsed then return nil end
+  opts = opts or {}
 
   local cmd, mode_ref
   for _, mode in ipairs(modes) do
@@ -411,9 +487,14 @@ local function dispatch(parsed, ctx)
   end
   if not cmd then return nil end
 
-  -- ranking (pipe_filter 이전에 적용)
+  -- ranking: grouped 모드면 필터 뒤에 적용 (헤더 보존), 아니면 즉시
+  local deferred_rank = nil
   if mode_ref and mode_ref.rank then
-    cmd = cmd .. build_rank_awk(mode_ref.rank, parsed.query)
+    if mode_ref.rank_grouped then
+      deferred_rank = build_rank_awk(mode_ref.rank, parsed.query, true, opts.filter_bucket)
+    else
+      cmd = cmd .. build_rank_awk(mode_ref.rank, parsed.query)
+    end
   end
 
   -- folder filter: 결과를 특정 경로로 스코핑 (@path/ / @!path/)
@@ -422,11 +503,31 @@ local function dispatch(parsed, ctx)
     cmd = string.format('%s | grep %s%s', cmd, flag, vim.fn.shellescape('^' .. parsed.folder_filter))
   end
 
+  -- glob filter: *.ext → 파일 확장자로 결과 필터링
+  if parsed.glob_filter then
+    local ext = parsed.glob_filter:match('^%*(.+)$')
+    if ext then
+      local brace = ext:match('^%.{(.+)}$')
+      if brace then
+        ext = '\\.(' .. brace:gsub(',', '|') .. '):'
+      else
+        ext = ext:gsub('%.', '\\.') .. ':'
+      end
+      cmd = string.format('%s | grep -E %s', cmd, vim.fn.shellescape(ext))
+    end
+  end
+
   -- 파이프 체인: "POST /health | wallet" / "| !filter" → 결과 내 grep / exclude
   if parsed.pipe_filter and parsed.pipe_filter ~= '' then
     local flag = parsed.pipe_exclude and '-v ' or ''
     cmd = string.format('%s | grep %s-i %s', cmd, flag, vim.fn.shellescape(parsed.pipe_filter))
   end
+
+  -- grouped rank: 모든 필터 뒤에 적용 (헤더가 필터에 걸리지 않도록)
+  if deferred_rank then
+    cmd = cmd .. deferred_rank
+  end
+
   return cmd
 end
 
@@ -501,6 +602,27 @@ local function build_context(root)
 end
 
 -------------------------------------------------------------------------------
+-- Group Names (모드의 rank 배열에서 그룹 이름 추출)
+-------------------------------------------------------------------------------
+
+--- 특정 모드의 그룹 이름 목록 반환 (rank_grouped 모드용)
+---@param mode_name string
+---@return string[]|nil  그룹 이름 목록 (fallback 'reference' 포함), 미발견 시 nil
+local function get_group_names(mode_name)
+  for _, mode in ipairs(modes) do
+    if mode.name == mode_name and mode.rank_grouped and mode.rank then
+      local names = {}
+      for _, p in ipairs(mode.rank) do
+        names[#names + 1] = p.header or ('group ' .. #names + 1)
+      end
+      names[#names + 1] = 'reference'
+      return names
+    end
+  end
+  return nil
+end
+
+-------------------------------------------------------------------------------
 -- Exports
 -------------------------------------------------------------------------------
 
@@ -516,8 +638,10 @@ M.build_sg_cmd = build_sg_cmd
 M.extract_domain = extract_domain
 M.RG_SEARCH = RG_SEARCH
 M.RG_BASE = RG_BASE
+M.RG_PLAIN = RG_PLAIN
 M.keyword_matcher = keyword_matcher
 M.prefix_keyword_match = prefix_keyword_match
+M.get_group_names = get_group_names
 
 -- Testing
 M._build_rank_awk = build_rank_awk
