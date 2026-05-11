@@ -1,3 +1,7 @@
+-- nvim-colorizer.lua, treesitter highlights 등 true-color 기반 플러그인이 요구.
+-- pckr/플러그인 config 실행 전에 설정해야 한다.
+vim.opt.termguicolors = true
+
 local function bootstrap_pckr()
   local pckr_path = vim.fn.stdpath('data') .. '/pckr/pckr.nvim'
   if not (vim.uv or vim.loop).fs_stat(pckr_path) then
@@ -378,6 +382,7 @@ end
 
 vim.api.nvim_create_user_command('Lw', function() require('fzf-lua').loclist() end, {})
 
+vim.g.stargazer_fzf_tmux = 'center,95%,90%'
 vim.keymap.set('n', '<space>s', function() require('stargazer').open() end)
 
 vim.api.nvim_create_user_command('FzfLuaTest', function()
@@ -627,30 +632,40 @@ do
 
 end
 
--- nvim-treesitter: auto-install parser on filetype enter (once per lang per session)
+-- nvim-treesitter: auto-install parser on filetype enter (once per lang per session).
+-- Also auto-recovers when the installed parser is older than the bundled queries
+-- (e.g. query references a node type the parser doesn't expose) by reinstalling.
 do
   local checked = {}
   local available = nil -- lazy-load available parsers list
+
+  local function ensure_install(lang)
+    if checked[lang] then return end
+    checked[lang] = true
+    if not available then
+      local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
+      available = ok and parsers or {}
+    end
+    if available[lang] then
+      require('nvim-treesitter').install { lang }
+    end
+  end
 
   vim.api.nvim_create_autocmd('FileType', {
     group = vim.api.nvim_create_augroup('ts_auto_install', { clear = true }),
     callback = function(ev)
       local lang = vim.treesitter.language.get_lang(ev.match) or ev.match
-      -- already installed → start treesitter highlighting
       if pcall(vim.treesitter.language.inspect, lang) then
-        vim.treesitter.start(ev.buf, lang)
+        local ok, err = pcall(vim.treesitter.start, ev.buf, lang)
+        if ok then return end
+        -- "Invalid node type" = query expects a node the installed parser lacks.
+        -- Trigger a reinstall; other errors are left alone to avoid install loops.
+        if type(err) == 'string' and err:find('Invalid node type', 1, true) then
+          ensure_install(lang)
+        end
         return
       end
-      -- auto-install: check once per lang per session
-      if checked[lang] then return end
-      checked[lang] = true
-      if not available then
-        local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
-        available = ok and parsers or {}
-      end
-      if available[lang] then
-        require('nvim-treesitter').install { lang }
-      end
+      ensure_install(lang)
     end,
   })
 end

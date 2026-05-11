@@ -171,7 +171,7 @@ augroup MyMarkdown
   autocmd FileType markdown,webdav silent! TableModeEnable
   autocmd FileType markdown,webdav setlocal comments=b:-,b:*,b:+,n:>
   autocmd FileType markdown,webdav setlocal tabstop=2 shiftwidth=2 softtabstop=-1 expandtab
-  autocmd FileType markdown,webdav setlocal nowrap linebreak breakindent breakindentopt=shift:2
+  autocmd FileType markdown,webdav setlocal wrap linebreak breakindent breakindentopt=shift:2
   autocmd FileType markdown,webdav setlocal foldmethod=expr foldexpr=MarkdownFoldExpr() foldenable
   autocmd FileType markdown,webdav setlocal foldtext=getline(v:foldstart).'...'
   autocmd FileType markdown,webdav nnoremap <buffer> <tab> za

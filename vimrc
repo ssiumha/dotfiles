@@ -222,7 +222,7 @@ call plug#begin(expand('$HOME/.local/vim/plugged'))
 Plug 'junegunn/fzf' ", { 'do': { -> fzf#install() } }
 Plug 'junegunn/fzf.vim'
   let g:fzf_vim = { 'grep_multi_line': 2 }
-  let $FZF_DEFAULT_COMMAND="fd -tf --hidden --no-ignore-vcs --follow"
+  let $FZF_DEFAULT_COMMAND="fd -tf --hidden --no-ignore-vcs --follow --exclude .claude/worktrees"
   if exists('$FZF_APPEND_COMMAND')
     let $FZF_DEFAULT_COMMAND .= ' ' . $FZF_APPEND_COMMAND
   endif
@@ -416,7 +416,7 @@ Plug 'voldikss/vim-floaterm'
   command! -bang -nargs=* Rg
     \ call fzf#vim#grep(
     \   'rg --column --line-number --no-heading --color=always --smart-case'
-    \   .' --glob "!*.log" --glob "!*.lock" --glob "!*.min.*" --glob "!*.map"'
+    \   .' --glob "!*.log" --glob "!*.lock" --glob "!*.min.*" --glob "!*.map" --glob "!.claude/worktrees/"'
     \   .' -- '.fzf#shellescape(<q-args>),
     \   fzf#vim#with_preview({'options': ['--bind', 'alt-a:select-all,alt-d:deselect-all']}), <bang>0)
   nnoremap <space>a :Rg<space>
