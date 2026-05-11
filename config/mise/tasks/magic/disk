@@ -1,6 +1,5 @@
 #!/usr/bin/env ruby
 #MISE description="Check OS Disk"
-#MISE usage="[--refresh] [--group=GROUP]"
 
 require_relative '../common'
 require 'json'

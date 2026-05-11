@@ -75,6 +75,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--no-orphans", action="store_true", help="Exclude orphan pages")
     p.add_argument("--namespace", help="Focus on specific namespace + direct connections")
     p.add_argument("--min-links", type=int, default=0, help="Min total connections to include")
+    p.add_argument("--ns-depth", type=int, default=1,
+                   help="Namespace depth for grouping (1=pj-xxx, 2=pj-xxx/task)")
     p.add_argument("--json", action="store_true", dest="json_output", help="Print JSON stats")
     return p.parse_args(argv)
 
@@ -91,11 +93,16 @@ def filename_to_page(filename: str) -> str:
     return stem.replace("___", "/")
 
 
-def get_namespace(page_name: str) -> str:
-    """Extract namespace (first segment before /)."""
-    if "/" in page_name:
-        return page_name.split("/", 1)[0]
-    return "_root"
+def get_namespace(page_name: str, depth: int = 1) -> str:
+    """Extract namespace up to given depth.
+
+    depth=1: pj-xxx/task/foo -> pj-xxx
+    depth=2: pj-xxx/task/foo -> pj-xxx/task
+    """
+    parts = page_name.split("/")
+    if len(parts) <= 1:
+        return "_root"
+    return "/".join(parts[:depth])
 
 
 def make_label(page_name: str) -> str:
@@ -190,8 +197,8 @@ def scan_pages_rg(pages_dir: Path) -> dict[str, dict]:
             if target and target != page_name:
                 pages[page_name]["wikilinks"].add(target)
 
-    # 2. Extract hashtags via rg
-    for m in _rg_json(r"(?:^|\s)#([a-zA-Z][a-zA-Z0-9_-]*)", pages_dir):
+    # 2. Extract hashtags via rg (include Korean Jamo+Hangul to match HASHTAG_RE)
+    for m in _rg_json(r"(?:^|\s)#([a-zA-Z\u3131-\u318E\uAC00-\uD7A3][a-zA-Z0-9\u3131-\u318E\uAC00-\uD7A3_-]*)", pages_dir):
         filepath = m["path"]["text"]
         page_name = filename_to_page(Path(filepath).name)
         if page_name not in pages:
@@ -199,9 +206,7 @@ def scan_pages_rg(pages_dir: Path) -> dict[str, dict]:
         for sub in m.get("submatches", []):
             tag = sub["match"]["text"]
             # rg returns full match; extract the tag part after #
-            if tag.startswith("#"):
-                tag = tag[1:]
-            elif " #" in tag:
+            if "#" in tag:
                 tag = tag.split("#", 1)[1]
             tag = tag.strip()
             if tag and tag != page_name:
@@ -281,9 +286,19 @@ def parse_page(filepath: Path) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def assign_namespace_color(ns: str, pj_counter: list[int]) -> str:
-    """Get color for a namespace."""
+    """Get color for a namespace.
+
+    For multi-level namespaces (e.g. pj-xxx/decision), checks the last
+    segment against known type colors first, then falls back to project
+    or general palette.
+    """
     if ns in NAMESPACE_COLORS:
         return NAMESPACE_COLORS[ns]
+    # Multi-level: check last segment for known type (decision, troubleshoot, etc.)
+    if "/" in ns:
+        last = ns.rsplit("/", 1)[1]
+        if last in NAMESPACE_COLORS:
+            return NAMESPACE_COLORS[last]
     if ns.startswith("pj-"):
         idx = pj_counter[0] % len(PROJECT_PALETTE)
         pj_counter[0] += 1
@@ -429,7 +444,7 @@ def build_graph(pages_dir: Path, args: argparse.Namespace) -> dict:
         focus_ns = args.namespace
         focused: set[str] = set()
         for pid in all_page_ids:
-            if get_namespace(pid) == focus_ns:
+            if get_namespace(pid, args.ns_depth) == focus_ns:
                 focused.add(pid)
         # Add direct connections
         connected: set[str] = set()
@@ -470,8 +485,9 @@ def build_graph(pages_dir: Path, args: argparse.Namespace) -> dict:
     # Build namespace info
     pj_counter = [0]
     ns_counts: dict[str, int] = defaultdict(int)
+    ns_depth = args.ns_depth
     for pid in all_page_ids:
-        ns = get_namespace(pid)
+        ns = get_namespace(pid, ns_depth)
         ns_counts[ns] += 1
 
     namespaces: dict[str, dict] = {}
@@ -485,7 +501,7 @@ def build_graph(pages_dir: Path, args: argparse.Namespace) -> dict:
     nodes: list[dict] = []
     orphan_count = 0
     for pid in sorted(all_page_ids):
-        ns = get_namespace(pid)
+        ns = get_namespace(pid, ns_depth)
         is_phantom = pid in phantom_ids
         is_orphan = pid not in connected_ids
         if is_orphan:

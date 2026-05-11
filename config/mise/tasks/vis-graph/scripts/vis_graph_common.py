@@ -30,12 +30,12 @@ def find_template(template_name: str, args_template: Path | None) -> Path:
         sys.exit(1)
 
     import inspect
-    caller_file = inspect.stack()[1].filename
+    caller_file = inspect.stack()[1].filename  # assumes direct caller; breaks if wrapped
     script_dir = Path(caller_file).resolve().parent
 
     for candidate in [
         script_dir / template_name,
-        script_dir.parent / "templates" / "dist" / template_name,
+        script_dir.parent / "templates" / "src" / template_name,
         script_dir.parent / "templates" / template_name,
     ]:
         if candidate.exists():
@@ -75,6 +75,8 @@ def _resolve_includes(content: str, template_dir: Path) -> str:
         if new_content == content:
             break
         content = new_content
+    if _INCLUDE_RE.search(content):
+        print("warn: unresolved includes remain after 5 passes", file=sys.stderr)
     return content
 
 
@@ -91,6 +93,10 @@ def inject_template(
     # Fallback: resolve includes if template is not pre-built
     if _INCLUDE_RE.search(tpl):
         tpl = _resolve_includes(tpl, template_path.parent)
+
+    if "{{GRAPH_DATA}}" not in tpl:
+        print("error: template has no {{GRAPH_DATA}} placeholder", file=sys.stderr)
+        sys.exit(1)
 
     js = json.dumps(graph_data, ensure_ascii=False)
     js = js.replace("<", "\\u003c").replace(">", "\\u003e")

@@ -54,11 +54,10 @@ def cmd_render(argv: list[str]) -> None:
     p.add_argument("--output", type=Path, default=Path("graph.html"), help="Output HTML file")
     args = p.parse_args(argv)
 
-    dist_dir = TASK_DIR / "vis-graph" / "templates" / "dist"
-    template_path = dist_dir / f"{args.type}.html"
+    tpl_dir = TASK_DIR / "vis-graph" / "templates" / "src"
+    template_path = tpl_dir / f"{args.type}.html"
     if not template_path.exists():
         print(f"error: template not found: {template_path}", file=sys.stderr)
-        print("Run: mise run vis:graph build-templates", file=sys.stderr)
         sys.exit(1)
 
     if args.input:

@@ -1,0 +1,199 @@
+#!/usr/bin/env ruby
+#MISE description="로컬 서비스 이름 기반 리버스 프록시 (Caddy)"
+
+require 'fileutils'
+require 'yaml'
+
+CADDY_DIR = File.expand_path('~/.config/caddy')
+ROUTES_DIR = File.join(CADDY_DIR, 'routes')
+STATE_FILE = File.join(CADDY_DIR, 'state.yml')
+
+NAME_PATTERN = /\A[a-z0-9][a-z0-9-]*\z/
+
+def ensure_dirs
+  FileUtils.mkdir_p(ROUTES_DIR)
+end
+
+def load_state
+  return { 'routes' => {} } unless File.exist?(STATE_FILE)
+  YAML.safe_load(File.read(STATE_FILE)) || { 'routes' => {} }
+end
+
+def save_state(state)
+  ensure_dirs
+  tmp = "#{STATE_FILE}.tmp.#{Process.pid}"
+  File.write(tmp, YAML.dump(state))
+  File.rename(tmp, STATE_FILE)
+end
+
+def route_file(name)
+  File.join(ROUTES_DIR, "#{name}.caddy")
+end
+
+def validate_name!(name)
+  unless name.match?(NAME_PATTERN)
+    abort "Invalid name: #{name} (must match [a-z0-9][a-z0-9-]*)"
+  end
+end
+
+def validate_port!(port_str)
+  port = port_str.to_i
+  abort "Invalid port: #{port_str}" unless port > 0 && port < 65536
+  port
+end
+
+def caddy_reload
+  system("caddy", "reload", "--config", File.join(CADDY_DIR, "Caddyfile"), err: "/dev/null")
+end
+
+def setup
+  # Install caddy
+  unless system("which caddy > /dev/null 2>&1")
+    puts "Installing caddy..."
+    system("brew install caddy") || abort("Failed to install caddy")
+  end
+
+  ensure_dirs
+
+  caddyfile = File.join(CADDY_DIR, 'Caddyfile')
+  unless File.exist?(caddyfile)
+    abort "Caddyfile not found at #{caddyfile}\nRun: ln -s ~/dots/config/caddy ~/.config/caddy"
+  end
+
+  puts "Starting caddy service (requires sudo for port 80)..."
+  system("sudo brew services start caddy")
+  puts "\e[32mSetup complete\e[0m"
+end
+
+def up(args)
+  tls = args.delete('--tls')
+
+  case args.size
+  when 1
+    name = derive_name
+    port_str = args[0]
+  when 2
+    name = args[0]
+    port_str = args[1]
+  else
+    abort "Usage: mise run proxy up [name] <port> [--tls]"
+  end
+
+  validate_name!(name)
+  port = validate_port!(port_str)
+
+  state = load_state
+
+  if state['routes'][name]
+    existing = state['routes'][name]
+    abort "\e[33m#{name}\e[0m already registered → localhost:#{existing['port']}\nUse 'mise run proxy down #{name}' first"
+  end
+
+  # Generate route file
+  ensure_dirs
+  content = "#{name}.localhost {\n"
+  content += "    tls internal\n" if tls
+  content += "    reverse_proxy localhost:#{port}\n"
+  content += "}\n"
+  File.write(route_file(name), content)
+
+  # Update state
+  state['routes'][name] = {
+    'port' => port,
+    'tls' => tls ? true : false,
+    'created_at' => Time.now.strftime('%Y-%m-%d %H:%M:%S')
+  }
+  save_state(state)
+
+  caddy_reload
+
+  scheme = tls ? 'https' : 'http'
+  puts "\e[32m#{name}.localhost\e[0m → localhost:#{port}"
+  puts "  #{scheme}://#{name}.localhost"
+end
+
+def derive_name
+  cwd = ENV['MISE_ORIGINAL_CWD'] || Dir.pwd
+  File.basename(cwd).downcase.gsub(/[^a-z0-9-]/, '-').sub(/^-/, '')
+end
+
+def down(name)
+  name ||= derive_name
+
+  state = load_state
+  unless state['routes'][name]
+    abort "\e[33m#{name}\e[0m not found"
+  end
+
+  # Remove route file
+  rf = route_file(name)
+  File.delete(rf) if File.exist?(rf)
+
+  # Update state
+  state['routes'].delete(name)
+  save_state(state)
+
+  caddy_reload
+
+  puts "\e[32m#{name}\e[0m removed"
+end
+
+def ls
+  state = load_state
+
+  if state['routes'].empty?
+    puts "No routes registered"
+    return
+  end
+
+  state['routes'].each do |name, info|
+    scheme = info['tls'] ? 'https' : 'http'
+    puts "  #{name}.localhost → localhost:#{info['port']}  \e[90m(#{scheme}, #{info['created_at']})\e[0m"
+  end
+end
+
+def help
+  puts <<~HELP
+    Usage: mise run proxy <command> [args]
+
+    Commands:
+      setup                          Install caddy & start service
+      up [name] <port> [--tls]       Register route (name defaults to folder name)
+      down [name]                    Remove route (defaults to folder name)
+      ls                             List registered routes
+
+    Examples:
+      mise run proxy setup
+      mise run proxy up 3000              # → $(basename $PWD).localhost
+      mise run proxy up myapp 3000        # → myapp.localhost
+      mise run proxy up api 8080 --tls    # → https://api.localhost
+      mise run proxy down               # → $(basename $PWD) 제거
+      mise run proxy down myapp
+      mise run proxy ls
+  HELP
+end
+
+# Main
+command = ARGV[0]
+
+case command
+when 'setup'
+  setup
+
+when 'up'
+  up(ARGV[1..])
+
+when 'down'
+  down(ARGV[1])
+
+when 'ls', 'list'
+  ls
+
+when 'help', '-h', '--help', nil
+  help
+
+else
+  puts "Unknown command: #{command}"
+  help
+  exit 1
+end
