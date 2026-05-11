@@ -100,3 +100,4 @@ tsconfig.tsbuildinfo
 
 # ===== AI tools =====
 .aider.*
+.claude/worktrees/

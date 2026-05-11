@@ -6,7 +6,7 @@
   autocrlf = no
 
   # 파일 변경 감지 속도 향상
-  fsmonitor = true
+  # fsmonitor = true
   untrackedCache = true
 [init]
   defaultBranch = main
@@ -109,7 +109,7 @@
 # signing
 [gpg]
   format = ssh
-[user]
-  signingkey = ~/.ssh/id_ed25519.pub
+; [user]
+;   signingkey = ~/.ssh/id_ed25519.pub
 [commit]
   gpgsign = true

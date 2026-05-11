@@ -21,11 +21,13 @@ tmp
 **/.claude/designs
 **/.claude/projects
 **/.claude/screenshots
+**/.claude/worktrees
 
 ## asdf, env
 .direnv/
 .envrc
-.db-irb_history
+.db-irb*
+.gandy*
 
 ## vim
 # tags
