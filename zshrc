@@ -112,7 +112,9 @@ ksw() {
 alias j="just"
 alias jl="JUST_JUSTFILE=justfile.local just"
 
-alias ghw="gh pr view --web"
+ghw() {
+  gh pr view --web "$@" 2>/dev/null || gh repo view --web
+}
 
 alias vdb="v +DBUI"
 function flog() {
@@ -138,6 +140,10 @@ alias ~r="$HOME/room"
 function cdr() {
   local git_root=$(git rev-parse --show-toplevel)
   cd "$git_root/$1"
+}
+function cdm() {
+  local main_root=$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
+  cd "$main_root/$1"
 }
 _fzf_complete_cdr() {
   local git_root=$(git rev-parse --show-toplevel)
@@ -275,6 +281,10 @@ if [[ -x "$HOME/.local/share/mise/shims/zoxide" ]]; then
   alias zz=__zoxide_zi
 fi
 
+if [[ -x "$HOME/.local/share/mise/shims/fnox" ]]; then
+  _cache_eval "fnox-activate" "$HOME/.local/share/mise/shims/fnox" mise x -- fnox activate zsh
+fi
+
 ################################
 # Alias (with mise)
 ################################
@@ -325,7 +335,7 @@ then
   zinit snippet OMZ::lib/history.zsh
   zinit snippet OMZ::lib/key-bindings.zsh
 
-  zinit ice wait"0" silent; zinit light zsh-users/zsh-autosuggestions
+  zinit light zsh-users/zsh-autosuggestions
   zinit ice wait"0" silent; zinit light zsh-users/zsh-completions
   zinit ice wait"0" silent; zinit light zsh-users/zsh-syntax-highlighting
   zinit ice wait"2" silent atload'unfunction _fzf_complete_gh 2>/dev/null'; zinit light chitoku-k/fzf-zsh-completions
@@ -365,7 +375,7 @@ if [[ "$_ZSH_INIT_MINIMAL" != true ]]; then
   _mise() { eval "$(mise completion zsh)"; _mise "$@" }
   compdef _mise mise
 
-  _just() { eval "$(just --completions zsh)"; _just "$@" }
+  _just() { unfunction _just; source <(JUST_COMPLETE=zsh just); _clap_dynamic_completer_just "$@" }
   compdef _just just
 
   if [[ -x "$HOME/.local/share/mise/shims/fzf" ]]; then
@@ -589,10 +599,17 @@ _fzf_command_complete_di() {
 
 _fzf_command_complete_dc_post() { awk '{ print $1 }' }
 _fzf_command_complete_dc() {
-  _fzf_complete -m --preview 'echo {}' --preview-window down:3:wrap --min-height 15 -- "$@" < <(
-    docker container ls
+  _fzf_complete -m --preview 'docker inspect --format "{{.Config.Image}} {{.State.Status}}" {1}' --preview-window down:3:wrap --min-height 15 -- "$@" < <(
+    docker container ls --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
   )
 }
+
+_fzf_complete_docker() {
+  _fzf_complete --query "${@##* }" --min-height 15 -- "$@" < <(
+    docker container ls --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+  )
+}
+_fzf_complete_docker_post() { awk '{ print $1 }' }
 
 _fzf_command_complete_rise_dir() {
   _fzf_complete -m --preview 'ls {}' --preview-window down:3:wrap --min-height 15 -- "$@" < <(
