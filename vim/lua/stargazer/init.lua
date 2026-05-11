@@ -1,11 +1,6 @@
--- stargazer/init.lua — 진입점: open, setup, fzf-lua UI
--- OCP: 모든 모드/프리셋/키워드는 데이터 레지스트리. 새 모드 = register_mode() 한 번.
+-- stargazer/init.lua — thin wrapper: delegates to bin/stargazer (Ruby CLI)
 
-local engine = require('stargazer.engine')
-require('stargazer.presets')
-require('stargazer.modes')
-
-local M = engine
+local M = {}
 
 -------------------------------------------------------------------------------
 -- fzf-lua Integration
@@ -26,7 +21,6 @@ end
 --- 빈 쿼리 시 도움말 출력 명령
 ---@return string
 local function help_cmd()
-  -- \027[1m = bold, \027[36m = cyan, \027[33m = yellow, \027[90m = dim
   local lines = {
     '\027[1m── Stargazer ──\027[0m',
     '',
@@ -43,8 +37,8 @@ local function help_cmd()
     '',
     '\027[33mword\027[0m           infer: find all related code (grouped)',
     '',
-    '\027[90mpipe: query | filter  ─  folder: query @path/  ─  glob: *.ext  ─  exclude: @!path/ or | !filter\027[0m',
-    '\027[33mctrl-g\027[0m  cycle group filter (define/config/schema/domain/method/reference)',
+    '\027[90mpipe: query | filter  ─  folder: query @path/  ─  glob: *.ext\027[0m',
+    '\027[90mctrl-g\027[0m  cycle group filter  \027[90m-t\027[0m define/page/config/schema/domain/method',
   }
   return 'printf ' .. vim.fn.shellescape(table.concat(lines, '\n'))
 end
@@ -64,7 +58,7 @@ local function wrap_action(action_fn)
     local restored = {}
     for _, item in ipairs(selected) do
       local r = restore_entry(item)
-      -- 헤더/separator 라인 제외 (file:line 패턴이 아닌 줄)
+      -- 헤더/separator/status 라인 제외 (file:line 패턴이 아닌 줄)
       if r:match('^[^:]+:%d+:') then
         table.insert(restored, r)
       end
@@ -88,23 +82,46 @@ local function shared_actions()
   }
 end
 
+--- stargazer CLI 명령 빌드
+---@param query string
+---@param filter_bucket? number
+---@return string
+local function stargazer_cmd(query, filter_bucket)
+  local parts = { 'stargazer', vim.fn.shellescape(query), '--color' }
+
+  -- context: 현재 버퍼 경로 전달
+  local bufname = vim.api.nvim_buf_get_name(0)
+  if bufname ~= '' then
+    table.insert(parts, '--context')
+    table.insert(parts, vim.fn.shellescape(bufname))
+  end
+
+  -- 그룹 필터
+  if filter_bucket then
+    table.insert(parts, '-t')
+    -- group_names를 Ruby CLI에서 가져오는 대신, 정적 목록 사용
+    local group_names = { 'generated', 'page', 'define', 'config', 'schema', 'domain', 'method', 'reference' }
+    local name = group_names[filter_bucket]
+    if name then
+      table.insert(parts, name)
+    end
+  end
+
+  return table.concat(parts, ' ')
+end
+
 --- 메인 진입점
----@param opts? {initial_mode?: string, query?: string}
+---@param opts? {query?: string}
 function M.open(opts)
   opts = opts or {}
   local fzf_lua = require('fzf-lua')
-  local ctx = M.build_context()
 
-  -- g:stargazer_fzf_tmux — tmux popup 모드 (예: 'center,80%,70%')
+  -- g:stargazer_fzf_tmux — tmux popup 모드
   local tmux_val = vim.g.stargazer_fzf_tmux
 
-  -- 그룹 필터 상태 (nil=전체, 1-6=특정 버킷)
+  -- 그룹 필터 상태
   local filter_bucket = nil
-  local group_names = engine.get_group_names('infer') or {}
-
-
-  -- awk: 테스트 파일 라인을 버퍼에 저장, 일반 라인 먼저 출력, 끝에 버퍼 출력
-  local TEST_REORDER = [[ | awk '/\/tests?\/|Test[^a-z]|_test\.|\.test\.|\.spec\./{buf[++n]=$0;next}{print}END{for(i=1;i<=n;i++)print buf[i]}']]
+  local group_names = { 'generated', 'page', 'define', 'config', 'schema', 'domain', 'method', 'reference' }
 
   local fzf_opts = {
     ['--multi'] = true,
@@ -117,19 +134,9 @@ function M.open(opts)
   end
 
   fzf_lua.fzf_live(function(args)
-    -- fzf-lua는 query를 table로 전달: args = { "query_string" }
     local query = type(args) == 'table' and args[1] or args
     if not query or query == '' then return help_cmd() end
-    query = tostring(query)
-
-    local parsed = M.parse_query(query)
-    local cmd = M.dispatch(parsed, ctx, { filter_bucket = filter_bucket })
-    if not cmd then return cmd end
-    -- grouped 모드(infer)는 자체 정렬 + awk가 상태줄 출력, 그 외는 테스트 파일 후순위
-    if parsed and parsed.mode == 'infer' then
-      return cmd
-    end
-    return cmd .. TEST_REORDER
+    return stargazer_cmd(tostring(query), filter_bucket)
   end, {
     prompt = 'Stargazer> ',
     query = opts.query or '',
@@ -137,20 +144,17 @@ function M.open(opts)
     multiline = 2,
     actions = (function()
       local actions = shared_actions()
-      -- F-key 그룹 필터 토글: 모드의 rank 배열에서 동적 생성
-      if #group_names > 0 then
-        -- ctrl-g: 그룹 순환 (define → config → ... → reference → all → ...)
-        actions['ctrl-g'] = {
-          fn = function()
-            if filter_bucket and filter_bucket < #group_names then
-              filter_bucket = filter_bucket + 1
-            else
-              filter_bucket = filter_bucket and nil or 1
-            end
-          end,
-          reload = true,
-        }
-      end
+      -- ctrl-g: 그룹 순환
+      actions['ctrl-g'] = {
+        fn = function()
+          if filter_bucket and filter_bucket < #group_names then
+            filter_bucket = filter_bucket + 1
+          else
+            filter_bucket = filter_bucket and nil or 1
+          end
+        end,
+        reload = true,
+      }
       return actions
     end)(),
     previewer = 'builtin',
@@ -162,18 +166,17 @@ function M.open(opts)
       },
     },
     fzf_opts = fzf_opts,
-    -- 디렉토리 dim 처리: 경로는 유지하되 시각적으로 파일명 강조
     fn_transform = function(line)
-      -- 그룹 헤더/separator 라인 → 변환 없이 통과 (multiline=2 대응: 빈 줄 추가)
-      if line:match('^\027%[') and line:match('──') then
+      -- 그룹 헤더/separator/status 라인 → 통과
+      if line:match('^\027%[') and (line:match('──') or line:match('%(') or line:match('%. %. %. %+')) then
         return line .. '\n '
       end
-      -- "... +N more" 라인도 통과
-      if line:match('^\027%[90m') and line:match('%. %. %. %+') then
-        return line .. '\n '
+      -- file:line 컬러링은 Ruby CLI가 처리 (--color)
+      -- multiline 2줄 표시: dir dim + 파일명 강조
+      local dir, file, loc, text = line:match('^(\027%[[^m]*m[^:]+/)([^/]+)(:%d[%d:]*:)(.*)')
+      if not dir then
+        dir, file, loc, text = line:match('^(.*/)([^/]+)(:%d[%d:]*:)(.*)')
       end
-      -- 1-step 4-group 매치: 내용에 / 포함되어도 backtrack으로 올바른 분리
-      local dir, file, loc, text = line:match('^(.*/)([^/]+)(:%d[%d:]*:)(.*)')
       if dir then
         if is_test_path(dir, file) then
           return '\027[90m' .. dir .. '\n  ' .. file .. loc .. text .. '\027[0m'
@@ -181,7 +184,7 @@ function M.open(opts)
         return '\027[90m' .. dir .. '\027[0m\n  '
           .. file .. '\027[33m' .. loc .. '\027[0m' .. text
       end
-      -- dir 없지만 file:line: 패턴 (루트 파일) → 2줄 통일
+      -- 루트 파일
       local file2, loc2, text2 = line:match('^([^/]+)(:%d[%d:]*:)(.*)')
       if file2 then
         return '\027[90m./\027[0m\n  '
@@ -190,32 +193,6 @@ function M.open(opts)
       return line
     end,
   })
-end
-
--------------------------------------------------------------------------------
--- Setup
--------------------------------------------------------------------------------
-
----@class StargazerSetupOpts
----@field presets? table<string, StargazerPreset>  추가 프리셋
----@field modes? StargazerMode[]                   추가 모드
-
---- 초기 설정
----@param opts? StargazerSetupOpts
-function M.setup(opts)
-  opts = opts or {}
-
-  if opts.presets then
-    for name, preset in pairs(opts.presets) do
-      M.register_preset(name, preset)
-    end
-  end
-
-  if opts.modes then
-    for _, mode in ipairs(opts.modes) do
-      M.register_mode(mode)
-    end
-  end
 end
 
 return M

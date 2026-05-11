@@ -1,0 +1,701 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Stargazer — code search with role-based grouping
+# Usage: stargazer "Oracle"           → grouped search results to stdout
+#        stargazer "Oracle" --cmd     → print shell command only
+#        stargazer "! handler"        → search within git changes
+#        stargazer "GET /api/users"   → router search
+
+require "shellwords"
+require "optparse"
+
+module Stargazer
+  # ---------------------------------------------------------------------------
+  # Constants
+  # ---------------------------------------------------------------------------
+
+  RG_EXCLUDE = %w[
+    --glob !*.xml --glob !*.md --glob !*.json --glob !*.jsonl
+    --glob !*.yaml --glob !*.yml --glob !*.lock --glob !*.log --glob !*.min.*
+  ].join(" ")
+
+  # 항상 제외할 디렉토리 (모든 rg 호출에 적용)
+  RG_DIR_EXCLUDE = "--glob !.claude/worktrees/"
+
+  RG_BASE   = "rg --line-number --no-heading --color=never #{RG_DIR_EXCLUDE} #{RG_EXCLUDE}"
+  RG_SEARCH = "rg --line-number --column --no-heading --color=never --smart-case #{RG_DIR_EXCLUDE} #{RG_EXCLUDE}"
+  RG_PLAIN  = "rg --line-number --column --no-heading --color=never --smart-case #{RG_DIR_EXCLUDE}"
+
+
+  HTTP_METHODS = %w[GET POST PUT DELETE PATCH].to_set
+
+  # ---------------------------------------------------------------------------
+  # Result — parsed query data
+  # ---------------------------------------------------------------------------
+
+  Result = Data.define(
+    :mode, :query,
+    :method, :is_path,
+    :pipe_filter, :pipe_exclude,
+    :glob_filter,
+    :folder_filter, :folder_exclude
+  )
+
+  EMPTY_RESULT = Result.new(
+    mode: "grep", query: "", method: nil, is_path: nil,
+    pipe_filter: nil, pipe_exclude: nil,
+    glob_filter: nil, folder_filter: nil, folder_exclude: nil
+  )
+
+  # ---------------------------------------------------------------------------
+  # Registry — mode registration (OCP: new mode = register_mode one call)
+  # ---------------------------------------------------------------------------
+
+  module Registry
+    @modes = []
+
+    module_function
+
+    def register_mode(mode)
+      @modes << mode
+      @modes.sort_by! { |m| m[:priority] }
+    end
+
+    def modes = @modes
+
+    def find_mode(name)
+      @modes.find { |m| m[:name] == name }
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Command Builders — shared utilities for modes
+  # ---------------------------------------------------------------------------
+
+  module Cmd
+    module_function
+
+    def build_rg(entries, filter = nil, path_match: false)
+      parts = entries.map { |entry|
+        globs = Array(entry.glob).map { |g| "--glob #{g.shellescape}" }.join(" ")
+        "#{RG_BASE} #{globs} #{entry.pattern.shellescape}"
+      }
+      cmd = parts.join("; ")
+
+      if filter && !filter.empty?
+        if path_match
+          cmd = "{ #{cmd}; } | grep -iF -- #{filter.shellescape}"
+        else
+          cmd = "{ #{cmd}; } | awk -v q=#{filter.downcase.shellescape} " \
+                "'match($0,/:[0-9]+:/){if(index(tolower(substr($0,RSTART+RLENGTH)),q)>0)print}'"
+        end
+      end
+      cmd
+    end
+
+    def extract_domain(filepath)
+      return nil unless filepath && !filepath.empty?
+      filepath[%r{/src/([^/]+)/}, 1] ||
+        filepath[%r{/modules/([^/]+)/}, 1] ||
+        filepath[%r{/app/[^/]+/([^_]+)}, 1]
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Parser — query parsing (delegates mode matching to Registry)
+  # ---------------------------------------------------------------------------
+
+  module Parser
+    module_function
+
+    def parse(raw)
+      raw = raw.to_s
+      return EMPTY_RESULT if raw.empty?
+
+      # 1. pipe filter
+      pipe_filter, pipe_exclude = nil, nil
+      if (m = raw.match(/^(.*?)\s*\|\s*(.*)$/)) && !m[1].empty?
+        raw = m[1]
+        pf = m[2]
+        unless pf.empty?
+          if pf.start_with?("!")
+            pipe_exclude = true
+            pf = pf[1..].lstrip
+            if pf.empty?
+              pipe_filter = nil
+              pipe_exclude = nil
+            else
+              pipe_filter = pf
+            end
+          else
+            pipe_filter = pf
+          end
+        end
+      end
+
+      # 2. glob filter
+      glob_filter = nil
+      if (m = raw.match(/^(.*?)(\*\.\S+)(.*)$/))
+        glob_filter = m[2]
+        raw = "#{m[1]}#{m[3]}".strip
+      end
+
+      # 3. folder filter
+      folder_filter, folder_exclude = nil, nil
+      if (m = raw.match(/^(.*?)@(!?)(\S+\/\S*)(.*)$/))
+        raw = "#{m[1]}#{m[4]}".strip
+        folder_filter = m[3]
+        folder_exclude = true if m[2] == "!"
+      end
+
+      # 4. mode matching via Registry (priority order)
+      parsed = nil
+      Registry.modes.each do |mode|
+        result = mode[:match].call(raw)
+        if result
+          parsed = result.merge(mode_name: mode[:name])
+          break
+        end
+      end
+
+      # glob-only fallback
+      if parsed.nil? && glob_filter
+        parsed = { mode_name: "default", query: "" }
+      end
+
+      return EMPTY_RESULT if parsed.nil?
+
+      Result.new(
+        mode: parsed[:mode_name],
+        query: parsed[:query],
+        method: parsed[:method],
+        is_path: parsed[:is_path],
+        pipe_filter:, pipe_exclude:,
+        glob_filter:, folder_filter:, folder_exclude:
+      )
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Presets — framework detection + search patterns
+  # ---------------------------------------------------------------------------
+
+  module Presets
+    PresetEntry = Data.define(:glob, :pattern)
+
+    PRESETS = {
+      "rails" => {
+        detect: "Gemfile",
+        router: [
+          PresetEntry.new(glob: "**/config/routes.rb", pattern: '(get|post|put|patch|delete|resources|resource|match)\s'),
+          PresetEntry.new(glob: "**/app/controllers/**/*.rb", pattern: 'def\s+(index|show|create|update|destroy|new|edit)'),
+        ],
+        model: [
+          PresetEntry.new(glob: "**/app/models/**/*.rb", pattern: 'class\s+\w+'),
+          PresetEntry.new(glob: "**/db/migrate/**/*.rb", pattern: 'create_table|add_column|change_column'),
+        ],
+        domain: [
+          PresetEntry.new(glob: "**/app/services/**/*.rb", pattern: 'class\s+\w+'),
+          PresetEntry.new(glob: "**/app/jobs/**/*.rb", pattern: 'class\s+\w+'),
+        ],
+      },
+      "spring" => {
+        detect: "pom.xml",
+        router: [PresetEntry.new(glob: "**/*.java", pattern: '@(Get|Post|Put|Delete|Patch|Request)Mapping')],
+        model: [PresetEntry.new(glob: "**/*.java", pattern: '@(Entity|Table|Document)')],
+        domain: [PresetEntry.new(glob: "**/*.java", pattern: '@(Service|Repository|Component)')],
+      },
+      "express" => {
+        detect: "package.json",
+        detect_content: { file: "package.json", pattern: '"express"' },
+        router: [PresetEntry.new(glob: "**/*.{js,ts}", pattern: '(app|router)\.(get|post|put|delete|patch|all)\(')],
+        model: [PresetEntry.new(glob: "**/*.{js,ts}", pattern: '(mongoose\.model|sequelize\.define|Schema\()')],
+        domain: [PresetEntry.new(glob: ["**/services/**/*.{js,ts}", "**/middleware/**/*.{js,ts}"], pattern: '(class|export|module\.exports)')],
+      },
+      "fastapi" => {
+        detect: "pyproject.toml",
+        detect_content: { file: "pyproject.toml", pattern: "fastapi" },
+        router: [PresetEntry.new(glob: "**/*.py", pattern: '@(app|router)\.(get|post|put|delete|patch)')],
+        model: [PresetEntry.new(glob: "**/*.py", pattern: 'class\s+\w+.*Base\)|class\s+\w+.*Model\)')],
+        domain: [PresetEntry.new(glob: ["**/services/**/*.py", "**/repositories/**/*.py"], pattern: '(class|def)\s+\w+')],
+      },
+      "django" => {
+        detect: "manage.py",
+        router: [
+          PresetEntry.new(glob: "**/urls.py", pattern: 'path\(|re_path\(|url\('),
+          PresetEntry.new(glob: "**/views.py", pattern: 'def\s+\w+.*request'),
+        ],
+        model: [
+          PresetEntry.new(glob: "**/models.py", pattern: 'class\s+\w+.*models\.Model'),
+          PresetEntry.new(glob: "**/models/**/*.py", pattern: 'class\s+\w+.*models\.Model'),
+        ],
+        domain: [PresetEntry.new(glob: ["**/services/**/*.py", "**/serializers.py"], pattern: '(class|def)\s+\w+')],
+      },
+      "nextjs" => {
+        detect: "next.config.*",
+        router: [
+          PresetEntry.new(glob: "**/app/**/route.{js,ts}", pattern: 'export.*(GET|POST|PUT|DELETE|PATCH)'),
+          PresetEntry.new(glob: "**/app/**/page.{js,jsx,ts,tsx}", pattern: "export default"),
+          PresetEntry.new(glob: "**/pages/api/**/*.{js,ts}", pattern: 'export\s+default'),
+        ],
+        model: [PresetEntry.new(glob: "**/*.{js,ts}", pattern: '(prisma|mongoose|sequelize)')],
+        domain: [PresetEntry.new(glob: ["**/lib/**/*.{js,ts}", "**/services/**/*.{js,ts}"], pattern: '(export|class)\s+\w+')],
+      },
+      "nestjs" => {
+        detect: "nest-cli.json",
+        router: [
+          PresetEntry.new(glob: "**/*.ts", pattern: '@(Get|Post|Put|Delete|Patch|All|Head|Options)\('),
+          PresetEntry.new(glob: "**/*.ts", pattern: '@Controller\('),
+        ],
+        model: [PresetEntry.new(glob: "**/*.ts", pattern: '@(Entity|Schema)\(')],
+        domain: [PresetEntry.new(glob: "**/*.ts", pattern: '@(Injectable|Controller)\(')],
+      },
+    }.freeze
+
+    module_function
+
+    def detect_framework(root)
+      PRESETS.each do |name, preset|
+        detect = preset[:detect] or next
+        found = !Dir.glob(File.join(root, detect)).empty? ||
+                !Dir.glob(File.join(root, "*", detect)).empty?
+        if found && preset[:detect_content]
+          dc = preset[:detect_content]
+          filepath = [File.join(root, dc[:file]),
+                      *Dir.glob(File.join(root, "*", dc[:file]))].find { |f| File.exist?(f) }
+          found = filepath && File.read(filepath).include?(dc[:pattern])
+        end
+        return [name, preset] if found
+      end
+      [nil, nil]
+    end
+
+    def build_merged_preset
+      merged = { router: [], model: [], domain: [] }
+      PRESETS.each_value do |preset|
+        %i[router model domain].each { |key| merged[key].concat(preset[key]) if preset[key] }
+      end
+      merged
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Rank — line classification, dedup, grouping (pure Ruby)
+  # ---------------------------------------------------------------------------
+
+  module Rank
+    REFERENCE_CAP = 20
+
+    module_function
+
+    # Compile patterns with {q} interpolation → array of [Regexp, header]
+    def compile_patterns(patterns, query: nil)
+      q = (query || "").downcase
+      patterns.map { |p|
+        re = Regexp.new(p[:pattern].gsub("{q}", Regexp.escape(q)), Regexp::IGNORECASE)
+        [re, p[:header] || "group"]
+      }
+    end
+
+    # Classify lines into buckets, dedup by file:line
+    # @return [Array<Array<String>>] buckets (last = reference)
+    def classify(lines, compiled)
+      seen = {}
+      buckets = Array.new(compiled.size + 1) { [] }
+
+      lines.each do |line|
+        # dedup by file:line
+        key = line[/^[^:]+:\d+/]
+        next if key && seen[key]
+        seen[key] = true if key
+
+        matched = false
+        compiled.each_with_index do |(re, _), i|
+          if re.match?(line)
+            buckets[i] << line
+            matched = true
+            break
+          end
+        end
+        buckets[-1] << line unless matched
+      end
+
+      buckets
+    end
+
+    # Format grouped output with headers, status line, color
+    def format(buckets, compiled, filter_bucket: nil, color: false)
+      headers = compiled.map { |_, h| h } + ["reference"]
+      out = []
+
+      # status line
+      status_parts = headers.each_with_index.map { |hdr, i|
+        count = buckets[i].size
+        if filter_bucket && filter_bucket == i + 1
+          "\033[1;7;36m #{hdr}(#{count}) \033[0m"
+        elsif filter_bucket
+          "\033[90m#{hdr}(#{count})\033[0m"
+        else
+          "\033[33m#{hdr}\033[0m(#{count})"
+        end
+      }
+      out << status_parts.join("  ")
+
+      if filter_bucket
+        idx = [filter_bucket - 1, buckets.size - 1].min
+        buckets[idx].each { |line| out << colorize_line(line, color) }
+      else
+        buckets.each_with_index do |bucket, i|
+          next if bucket.empty?
+          hdr = headers[i]
+          out << "\033[1;36m── #{hdr} ──\033[0m"
+          lines = (hdr == "reference" && bucket.size > REFERENCE_CAP) ? bucket.first(REFERENCE_CAP) : bucket
+          lines.each { |line| out << colorize_line(line, color) }
+          if hdr == "reference" && bucket.size > REFERENCE_CAP
+            out << "\033[90m  ... +#{bucket.size - REFERENCE_CAP} more\033[0m"
+          end
+        end
+      end
+
+      out
+    end
+
+    def colorize_line(line, color)
+      return line unless color
+      if (m = line.match(/^([^:]+):(\d+(?::\d+)?:)(.*)$/))
+        "\033[36m#{m[1]}\033[0m:\033[33m#{m[2]}\033[0m#{m[3]}"
+      else
+        line
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Mode Definitions (OCP: each register_mode is self-contained)
+  # ---------------------------------------------------------------------------
+
+  GIT_KEYWORDS = %w[diff staged changed]
+
+  GENERIC_ROUTER_PATTERN = [
+    '@(Get|Post|Put|Delete|Patch|Request)Mapping',
+    '@(Get|Post|Put|Delete|Patch|All)\(',
+    '(app|router)\.(get|post|put|delete|patch|all)\(',
+    '@(app|router)\.(get|post|put|delete|patch)',
+    'path\(|re_path\(',
+    'export.*(GET|POST|PUT|DELETE|PATCH)',
+    '(get|post|put|patch|delete|resources)\s',
+  ].join("|")
+
+  INFER_RANK = [
+    { pattern: 'generated/', header: "generated" },
+    { pattern: 'page\.(tsx|jsx|ts|js|vue)|views?\.(py|rb)', header: "page" },
+    { pattern: '(class|interface|type|enum) [a-zA-Z]*{q}', header: "define" },
+    { pattern: '\.(yml|yaml|xml|json|properties|toml):', header: "config" },
+    { pattern: '@(entity|table|document|schema)|create.table|add.column', header: "schema" },
+    { pattern: '@(service|repository|component|injectable|controller)', header: "domain" },
+    { pattern: '(def |function |fn )', header: "method" },
+  ].freeze
+
+  # -- git (priority 3) --
+  Registry.register_mode(
+    name: "git",
+    priority: 3,
+    match: ->(raw) {
+      if raw.start_with?("!")
+        { query: raw[1..].lstrip }
+      elsif (m = GIT_KEYWORDS.lazy.filter_map { |kw| raw.match(/^#{kw}\s+(.+)/i) }.first)
+        { query: m[1] }
+      end
+    },
+    build_cmd: ->(parsed, _ctx, **_opts) {
+      q = parsed.query
+      git_files = '{ git diff --name-only; git diff --cached --name-only; } 2>/dev/null | sort -u'
+      if q.empty?
+        %(git status --porcelain -uno 2>/dev/null | awk '{s=substr($0,1,2); f=substr($0,4); n=index(f," -> "); if(n>0) f=substr(f,n+4); gsub(/"/,"",f); print f":1:"s}')
+      else
+        %(f=$(#{git_files}); [ -z "$f" ] && echo "[Stargazer] No git changes" || echo "$f" | tr '\\n' '\\0' | xargs -0 #{RG_SEARCH} #{q.shellescape} 2>/dev/null)
+      end
+    },
+  )
+
+  # -- context (priority 5) --
+  Registry.register_mode(
+    name: "context",
+    priority: 5,
+    match: ->(raw) {
+      if raw.start_with?("&")
+        { query: raw[1..].lstrip }
+      end
+    },
+    build_cmd: ->(parsed, _ctx, **opts) {
+      domain = Cmd.extract_domain(opts[:context_file])
+      next 'echo "[Stargazer] context: cannot extract domain"' unless domain
+      glob = "**/#{domain}/**".shellescape
+      q = parsed.query
+      if q && !q.empty?
+        "#{RG_SEARCH} --glob #{glob} #{q.shellescape}"
+      else
+        "#{RG_SEARCH} --glob #{glob} #{'(class|interface|def|function|type|export)\\s+\\w+'.shellescape}"
+      end
+    },
+  )
+
+  # -- router (priority 10) --
+  Registry.register_mode(
+    name: "router",
+    priority: 10,
+    match: ->(raw) {
+      if (space_idx = raw.index(" "))
+        method = raw[0...space_idx].upcase
+        if HTTP_METHODS.include?(method)
+          path = raw[space_idx..].lstrip
+          return { method:, query: path } if path.start_with?("/")
+        end
+      end
+      if raw.match?(/^\/\w/)
+        return { query: raw[1..], is_path: true }
+      end
+      nil
+    },
+    build_cmd: ->(parsed, ctx, **_opts) {
+      preset = ctx[:preset]
+      if preset && preset[:router]
+        if parsed.method
+          cmd = Cmd.build_rg(preset[:router])
+          cmd = "{ #{cmd}; } | grep -i #{parsed.method.shellescape}"
+          q = parsed.query
+          cmd = "#{cmd} | grep -i #{q.shellescape}" if q && !q.empty?
+          next cmd
+        end
+        if parsed.is_path
+          preset_cmd = Cmd.build_rg(preset[:router], parsed.query, path_match: true)
+          merged = ctx[:merged_router]
+          if merged && !merged.empty?
+            merged_cmd = Cmd.build_rg(merged, parsed.query, path_match: true)
+            next "{ #{preset_cmd}; #{merged_cmd}; } 2>/dev/null | awk -F: '!seen[$1]++'"
+          end
+          next preset_cmd
+        end
+        next Cmd.build_rg(preset[:router], parsed.query)
+      end
+      method = (parsed.method || "").downcase
+      filter = parsed.query
+      filter = "#{method}.*#{parsed.query}" unless method.empty?
+      "#{RG_BASE} #{GENERIC_ROUTER_PATTERN.shellescape} | grep -iE #{filter.shellescape}"
+    },
+  )
+
+  # -- ast (priority 40) --
+  Registry.register_mode(
+    name: "ast",
+    priority: 40,
+    match: ->(raw) {
+      { query: raw } if raw.include?("$") && raw.length > 1
+    },
+    build_cmd: ->(parsed, ctx, **_opts) {
+      unless ctx[:has_sg]
+        next 'echo "[Stargazer] ast-grep (sg) not found — install: npm i -g @ast-grep/cli"'
+      end
+      cmd = "sg run --pattern=#{parsed.query.shellescape} --json=stream"
+      cmd + %( 2>/dev/null | awk -F'"' '/"file":/{f=$4} /"line":/{gsub(/[^0-9]/,"",$0);l=$0} /"column":/{gsub(/[^0-9]/,"",$0);c=$0} /"text":/{t=$4; if(f!="" && l!="") print f":"l":"c":"t}')
+    },
+  )
+
+  # -- infer (priority 50) — single word, grouped results --
+  Registry.register_mode(
+    name: "infer",
+    priority: 50,
+    rank_grouped: true,
+    rank: INFER_RANK,
+    match: ->(raw) {
+      { query: raw } if raw.match?(/^\w+$/)
+    },
+    build_cmd: ->(parsed, ctx, **_opts) {
+      q = parsed.query
+      parts = []
+      parts << Cmd.build_rg(ctx[:preset][:model], q) if ctx[:preset]&.dig(:model)
+      parts << Cmd.build_rg(ctx[:preset][:domain], q) if ctx[:preset]&.dig(:domain)
+      parts << "#{RG_SEARCH} #{'(class|interface|type|enum)\\s+.*'.shellescape}#{q.shellescape}"
+      config_globs = %w[*.yml *.yaml *.xml *.json *.toml].map { |g| "--glob #{g.shellescape}" }.join(" ")
+      config_exclude = "--glob !*lock* --glob !generated/"
+      parts << "#{RG_PLAIN} #{config_globs} #{config_exclude} #{q.shellescape}"
+      "{ #{parts.join("; ")}; }"
+    },
+  )
+
+  # -- default (priority 100) — fallback symbol search --
+  Registry.register_mode(
+    name: "default",
+    priority: 100,
+    match: ->(raw) {
+      { query: raw } unless raw.empty?
+    },
+    build_cmd: ->(parsed, _ctx, **_opts) {
+      "#{RG_SEARCH} #{'(function|class|def|fn|type|interface|enum|struct|trait|impl)\\s+'.shellescape}#{parsed.query.shellescape}"
+    },
+  )
+
+  # ---------------------------------------------------------------------------
+  # Dispatcher — assembles mode cmd + filters + rank
+  # ---------------------------------------------------------------------------
+
+  module Dispatcher
+    module_function
+
+    # Returns shell command string (search + filters, no grouping/color)
+    def dispatch(parsed, ctx, **opts)
+      return nil unless parsed
+
+      mode = Registry.find_mode(parsed.mode)
+      return nil unless mode
+
+      cmd = mode[:build_cmd].call(parsed, ctx, **opts)
+      return nil unless cmd
+
+      # folder filter
+      if parsed.folder_filter
+        flag = parsed.folder_exclude ? "-v " : ""
+        cmd = "#{cmd} | grep #{flag}#{("^" + parsed.folder_filter).shellescape}"
+      end
+
+      # glob filter
+      if parsed.glob_filter
+        ext = parsed.glob_filter.sub(/^\*/, "")
+        if (brace = ext.match(/^\.{(.+)}$/))
+          ext = "\\.(#{brace[1].gsub(",", "|")}):"
+        else
+          ext = ext.gsub(".", "\\.") + ":"
+        end
+        cmd = "#{cmd} | grep -E #{ext.shellescape}"
+      end
+
+      # pipe filter
+      if parsed.pipe_filter && !parsed.pipe_filter.empty?
+        flag = parsed.pipe_exclude ? "-v " : ""
+        cmd = "#{cmd} | grep #{flag}-i #{parsed.pipe_filter.shellescape}"
+      end
+
+      cmd
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Context builder
+  # ---------------------------------------------------------------------------
+
+  module_function
+
+  def build_context(root: nil)
+    root ||= Dir.pwd
+    name, preset = Presets.detect_framework(root)
+
+    unless preset
+      name = "_merged"
+      merged = Presets.build_merged_preset
+      preset = { router: merged[:router], model: merged[:model], domain: merged[:domain] }
+    end
+
+    config_path = File.join(root, ".stargazer.rb")
+    if File.exist?(config_path)
+      user_config = eval(File.read(config_path)) # rubocop:disable Security/Eval
+      if user_config.is_a?(Hash)
+        %i[router model domain].each { |key| preset[key] = user_config[key] if user_config[key] }
+      end
+    end
+
+    {
+      root:,
+      preset_name: name,
+      preset:,
+      merged_router: Presets.build_merged_preset[:router],
+      has_sg: system("which sg > /dev/null 2>&1"),
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Public API
+  # ---------------------------------------------------------------------------
+
+  def self.group_names
+    mode = Registry.find_mode("infer")
+    return [] unless mode&.dig(:rank)
+    mode[:rank].map { |p| p[:header] || "group" } + ["reference"]
+  end
+
+  # ---------------------------------------------------------------------------
+  # CLI
+  # ---------------------------------------------------------------------------
+
+  module CLI
+    module_function
+
+    def run(argv)
+      opts = { cmd_only: false, root: nil, context_file: nil, filter_bucket: nil,
+               color: $stdout.tty?, vim_grep: false }
+      group_names = Stargazer.group_names
+
+      parser = OptionParser.new do |o|
+        o.banner = "Usage: stargazer QUERY [options]"
+        o.on("--cmd", "Print shell command only") { opts[:cmd_only] = true }
+        o.on("--color", "Force color output") { opts[:color] = true }
+        o.on("--no-color", "Disable color output") { opts[:color] = false }
+        o.on("--vim-grep", "Output in vim-grep format (no color, no grouping)") { opts[:vim_grep] = true; opts[:color] = false }
+        o.on("--root DIR", "Project root (default: pwd)") { |v| opts[:root] = v }
+        o.on("--context FILE", "Current file path (for & mode)") { |v| opts[:context_file] = v }
+        o.on("-t", "--type GROUP", "Filter by group (#{group_names.join(", ")})") { |v|
+          idx = group_names.index(v)
+          if idx
+            opts[:filter_bucket] = idx + 1
+          else
+            $stderr.puts "[Stargazer] Unknown group: #{v}. Available: #{group_names.join(", ")}"
+            exit 1
+          end
+        }
+      end
+      parser.parse!(argv)
+
+      query = argv.join(" ")
+      if query.empty?
+        $stderr.puts parser.help
+        exit 1
+      end
+
+      parsed = Parser.parse(query)
+      ctx = Stargazer.build_context(root: opts[:root])
+      cmd = Dispatcher.dispatch(parsed, ctx,
+                                context_file: opts[:context_file])
+
+      unless cmd
+        $stderr.puts "[Stargazer] No command generated for: #{query}"
+        exit 1
+      end
+
+      if opts[:cmd_only]
+        puts cmd
+        return
+      end
+
+      # Execute and process output
+      mode = Registry.find_mode(parsed.mode)
+      lines = `#{cmd} 2>/dev/null`.lines.map(&:chomp)
+
+      if mode&.dig(:rank_grouped) && !opts[:vim_grep]
+        # Grouped mode: classify + format in Ruby
+        compiled = Rank.compile_patterns(mode[:rank], query: parsed.query)
+        buckets = Rank.classify(lines, compiled)
+        Rank.format(buckets, compiled,
+                    filter_bucket: opts[:filter_bucket],
+                    color: opts[:color]).each { |l| puts l }
+      elsif opts[:color]
+        # Non-grouped with color
+        lines.each { |l| puts Rank.colorize_line(l, true) }
+      else
+        # Raw output (--vim-grep or plain)
+        lines.each { |l| puts l }
+      end
+    end
+  end
+end
+
+Stargazer::CLI.run(ARGV) if __FILE__ == $0
