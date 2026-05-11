@@ -1,0 +1,1799 @@
+#!/usr/bin/env ruby
+# dataview - run Obsidian Dataview queries on a markdown vault
+#
+# Modules in this file:
+#   Lexer    - tokenize DQL
+#   Parser   - build AST
+#   Indexer  - scan vault, extract file metadata
+#   Evaluator- resolve source, apply WHERE/SORT/LIMIT
+#   Renderer - markdown output by query type (LIST/TABLE/TASK)
+#
+# Self-tests run with: dataview --test
+
+require 'optparse'
+require 'yaml'
+require 'json'
+require 'time'
+require 'find'
+
+VERSION = '0.1.0'
+
+module Dataview
+  class Error < StandardError
+    attr_reader :code, :hint
+    def initialize(code, message, hint: nil)
+      super(message)
+      @code = code
+      @hint = hint
+    end
+  end
+
+  # ------------------------------------------------------------------ Lexer
+  class Lexer
+    KEYWORDS = %w[
+      LIST TABLE TASK FROM WHERE SORT LIMIT AND OR NOT AS ASC DESC
+      WITHOUT ID TRUE FALSE NULL
+    ].freeze
+
+    Token = Struct.new(:type, :value, :line, :col)
+
+    def initialize(src)
+      @src = src
+      @pos = 0
+      @line = 1
+      @col = 1
+    end
+
+    def tokens
+      out = []
+      while (t = next_token)
+        out << t
+      end
+      out << Token.new(:eof, nil, @line, @col)
+      out
+    end
+
+    private
+
+    def peek(offset = 0); @src[@pos + offset]; end
+    def eof?; @pos >= @src.length; end
+
+    def advance
+      ch = @src[@pos]
+      @pos += 1
+      if ch == "\n"
+        @line += 1; @col = 1
+      else
+        @col += 1
+      end
+      ch
+    end
+
+    def next_token
+      skip_ws_and_comments
+      return nil if eof?
+      line, col = @line, @col
+      ch = peek
+
+      case ch
+      when '"', "'" then string_token(line, col)
+      when '#'      then tag_token(line, col)
+      when '['      then bracket_token(line, col)
+      when '('      then advance; Token.new(:lparen, '(', line, col)
+      when ')'      then advance; Token.new(:rparen, ')', line, col)
+      when ','      then advance; Token.new(:comma, ',', line, col)
+      when '.'      then advance; Token.new(:dot, '.', line, col)
+      when '!'
+        advance
+        if peek == '='
+          advance
+          Token.new(:op, '!=', line, col)
+        else
+          Token.new(:op, '!', line, col)
+        end
+      when '='
+        advance
+        Token.new(:op, '=', line, col)
+      when '<', '>'
+        advance
+        if peek == '='
+          advance
+          Token.new(:op, "#{ch}=", line, col)
+        else
+          Token.new(:op, ch, line, col)
+        end
+      when /[0-9]/ then number_token(line, col)
+      when /[A-Za-z_]/ then ident_token(line, col)
+      else
+        raise Error.new('ELEX', "Unexpected character #{ch.inspect} at line #{line} col #{col}")
+      end
+    end
+
+    def skip_ws_and_comments
+      loop do
+        if peek =~ /\s/ then advance
+        elsif peek == '/' && @src[@pos + 1] == '/'
+          advance until eof? || peek == "\n"
+        else
+          break
+        end
+      end
+    end
+
+    def string_token(line, col)
+      quote = advance
+      buf = +''
+      until eof? || peek == quote
+        if peek == '\\' && !@src[@pos + 1].nil?
+          advance
+          buf << advance
+        else
+          buf << advance
+        end
+      end
+      raise Error.new('ELEX', "Unterminated string at line #{line} col #{col}") if eof?
+      advance # closing quote
+      Token.new(:string, buf, line, col)
+    end
+
+    def tag_token(line, col)
+      advance # #
+      buf = +''
+      buf << advance while peek =~ /[\w\-\/]/
+      raise Error.new('ELEX', "Empty tag at line #{line} col #{col}") if buf.empty?
+      Token.new(:tag, buf, line, col)
+    end
+
+    def bracket_token(line, col)
+      if @src[@pos + 1] == '['
+        advance; advance
+        buf = +''
+        until eof? || (peek == ']' && @src[@pos + 1] == ']')
+          buf << advance
+        end
+        raise Error.new('ELEX', "Unterminated link at line #{line} col #{col}") if eof?
+        advance; advance
+        Token.new(:link, buf, line, col)
+      else
+        advance
+        Token.new(:lbracket, '[', line, col)
+      end
+    end
+
+    def number_token(line, col)
+      buf = +''
+      buf << advance while peek =~ /[0-9.]/
+      val = buf.include?('.') ? buf.to_f : buf.to_i
+      Token.new(:number, val, line, col)
+    end
+
+    def ident_token(line, col)
+      buf = +''
+      buf << advance while peek =~ /[\w\-]/
+      up = buf.upcase
+      if KEYWORDS.include?(up)
+        case up
+        when 'TRUE'  then Token.new(:bool, true, line, col)
+        when 'FALSE' then Token.new(:bool, false, line, col)
+        when 'NULL'  then Token.new(:null, nil, line, col)
+        else Token.new(:kw, up, line, col)
+        end
+      else
+        Token.new(:ident, buf, line, col)
+      end
+    end
+  end
+
+  # ------------------------------------------------------------------ Parser
+  # AST nodes
+  Query  = Struct.new(:type, :without_id, :fields, :source, :where, :sorts, :limit)
+  Field  = Struct.new(:expr, :alias_)
+  SrcLit = Struct.new(:kind, :value)        # kind: :folder | :tag | :link
+  SrcOp  = Struct.new(:op, :left, :right)   # op: :and | :or | :not (right nil)
+  Lit    = Struct.new(:value)               # number/string/bool/nil
+  Ident  = Struct.new(:name)
+  Member = Struct.new(:base, :name)
+  Call   = Struct.new(:name, :args)
+  Bin    = Struct.new(:op, :left, :right)   # symbol op
+  Unary  = Struct.new(:op, :expr)
+  TagRef = Struct.new(:name)
+  LinkRef = Struct.new(:name)
+  Sort   = Struct.new(:expr, :dir)          # dir: :asc | :desc
+
+  class Parser
+    def initialize(tokens)
+      @t = tokens
+      @i = 0
+    end
+
+    def parse
+      type = expect_kw_in(%w[LIST TABLE TASK]).downcase.to_sym
+      without_id = false
+      if peek_kw?('WITHOUT')
+        consume; expect_kw('ID')
+        without_id = true
+      end
+      fields = parse_fields
+      source = where = limit = nil; sorts = []
+      while !eof?
+        case peek.value
+        when 'FROM'  then consume; source = parse_source
+        when 'WHERE' then consume; where  = parse_expression
+        when 'SORT'  then consume; sorts  = parse_sorts
+        when 'LIMIT' then consume; limit  = parse_limit
+        else
+          fail_parse("Unexpected #{peek.value.inspect}", peek)
+        end
+      end
+      Query.new(type, without_id, fields, source, where, sorts, limit)
+    end
+
+    private
+
+    # ---------- token helpers
+    def peek(o = 0); @t[@i + o]; end
+    def consume; t = @t[@i]; @i += 1; t; end
+    def eof?; peek.type == :eof; end
+    def peek_kw?(name); peek.type == :kw && peek.value == name; end
+
+    def expect_kw(name)
+      t = peek
+      fail_parse("Expected #{name}, got #{t.value.inspect}", t) unless peek_kw?(name)
+      consume.value
+    end
+
+    def expect_kw_in(names)
+      t = peek
+      unless t.type == :kw && names.include?(t.value)
+        fail_parse("Expected one of #{names.join('/')}", t)
+      end
+      consume.value
+    end
+
+    def fail_parse(msg, tok)
+      raise Error.new('EPARSE', "#{msg} at line #{tok.line} col #{tok.col}")
+    end
+
+    # ---------- fields
+    def parse_fields
+      return [] if eof? || (peek.type == :kw && %w[FROM WHERE SORT LIMIT].include?(peek.value))
+      out = [parse_field]
+      while peek.type == :comma
+        consume; out << parse_field
+      end
+      out
+    end
+
+    def parse_field
+      e = parse_expression
+      a = nil
+      if peek_kw?('AS')
+        consume
+        t = peek
+        if t.type == :string || t.type == :ident
+          a = consume.value
+        else
+          fail_parse("Expected alias after AS", t)
+        end
+      end
+      Field.new(e, a)
+    end
+
+    # ---------- source
+    def parse_source
+      parse_source_or
+    end
+
+    def parse_source_or
+      left = parse_source_and
+      while peek_kw?('OR')
+        consume
+        right = parse_source_and
+        left = SrcOp.new(:or, left, right)
+      end
+      left
+    end
+
+    def parse_source_and
+      left = parse_source_not
+      while peek_kw?('AND')
+        consume
+        right = parse_source_not
+        left = SrcOp.new(:and, left, right)
+      end
+      left
+    end
+
+    def parse_source_not
+      if peek_kw?('NOT') || (peek.type == :op && peek.value == '!')
+        consume
+        SrcOp.new(:not, parse_source_atom, nil)
+      else
+        parse_source_atom
+      end
+    end
+
+    def parse_source_atom
+      t = peek
+      case t.type
+      when :string then consume; SrcLit.new(:folder, t.value)
+      when :tag    then consume; SrcLit.new(:tag, t.value)
+      when :link   then consume; SrcLit.new(:link, t.value)
+      when :lparen
+        consume
+        s = parse_source
+        unless peek.type == :rparen
+          fail_parse("Expected )", peek)
+        end
+        consume
+        s
+      else
+        fail_parse("Expected source (folder/tag/link)", t)
+      end
+    end
+
+    # ---------- sorts
+    def parse_sorts
+      out = [parse_sort_item]
+      while peek.type == :comma
+        consume; out << parse_sort_item
+      end
+      out
+    end
+
+    def parse_sort_item
+      e = parse_expression
+      dir = :asc
+      if peek_kw?('ASC')  then consume; dir = :asc
+      elsif peek_kw?('DESC') then consume; dir = :desc
+      end
+      Sort.new(e, dir)
+    end
+
+    # ---------- limit
+    def parse_limit
+      t = peek
+      fail_parse("LIMIT expects a number", t) unless t.type == :number
+      consume.value.to_i
+    end
+
+    # ---------- expression
+    def parse_expression
+      parse_or
+    end
+
+    def parse_or
+      left = parse_and
+      while peek_kw?('OR')
+        consume
+        right = parse_and
+        left = Bin.new(:or, left, right)
+      end
+      left
+    end
+
+    def parse_and
+      left = parse_not
+      while peek_kw?('AND')
+        consume
+        right = parse_not
+        left = Bin.new(:and, left, right)
+      end
+      left
+    end
+
+    def parse_not
+      if peek_kw?('NOT') || (peek.type == :op && peek.value == '!')
+        consume
+        Unary.new(:not, parse_cmp)
+      else
+        parse_cmp
+      end
+    end
+
+    def parse_cmp
+      left = parse_primary
+      if peek.type == :op && %w[= != < > <= >=].include?(peek.value)
+        op = consume.value
+        right = parse_primary
+        Bin.new(op.to_sym, left, right)
+      else
+        left
+      end
+    end
+
+    def parse_primary
+      t = peek
+      case t.type
+      when :number, :string, :bool, :null
+        consume; Lit.new(t.value)
+      when :tag
+        consume; TagRef.new(t.value)
+      when :link
+        consume; LinkRef.new(t.value)
+      when :lparen
+        consume
+        e = parse_expression
+        fail_parse("Expected )", peek) unless peek.type == :rparen
+        consume; e
+      when :ident
+        parse_member_or_call
+      when :op
+        if t.value == '!'
+          consume
+          Unary.new(:not, parse_primary)
+        else
+          fail_parse("Unexpected operator #{t.value.inspect}", t)
+        end
+      else
+        fail_parse("Unexpected token #{t.value.inspect}", t)
+      end
+    end
+
+    def parse_member_or_call
+      name = consume.value
+      if peek.type == :lparen
+        consume
+        args = []
+        unless peek.type == :rparen
+          args << parse_expression
+          while peek.type == :comma
+            consume; args << parse_expression
+          end
+        end
+        fail_parse("Expected )", peek) unless peek.type == :rparen
+        consume
+        return Call.new(name, args)
+      end
+      node = Ident.new(name)
+      while peek.type == :dot
+        consume
+        nt = peek
+        fail_parse("Expected identifier after .", nt) unless nt.type == :ident
+        node = Member.new(node, consume.value)
+      end
+      node
+    end
+  end
+
+  # ------------------------------------------------------------------ Indexer
+  TaskItem = Struct.new(:text, :status, :completed)
+
+  class Page
+    attr_reader :path, :rel, :name, :folder, :size, :cday, :mday,
+                :tags, :tasks, :outlinks, :fields
+    attr_accessor :inlinks
+
+    def initialize(attrs)
+      @path     = attrs[:path]
+      @rel      = attrs[:rel]
+      @name     = attrs[:name]
+      @folder   = attrs[:folder]
+      @size     = attrs[:size]
+      @cday     = attrs[:cday]
+      @mday     = attrs[:mday]
+      @tags     = attrs[:tags]     || []
+      @tasks    = attrs[:tasks]    || []
+      @outlinks = attrs[:outlinks] || []
+      @fields   = attrs[:fields]   || {}
+      @inlinks  = []
+    end
+
+    # Expose file.* attributes uniformly
+    def file_field(name)
+      case name
+      when 'name'     then @name
+      when 'path'     then @rel
+      when 'folder'   then @folder
+      when 'size'     then @size
+      when 'cday'     then @cday
+      when 'mday'     then @mday
+      when 'tags'     then @tags
+      when 'tasks'    then @tasks
+      when 'outlinks' then @outlinks
+      when 'inlinks'  then @inlinks
+      when 'link'     then "[[#{@name}]]"
+      else :__undef__
+      end
+    end
+
+    # Bare identifier lookup (frontmatter + inline)
+    def value(name)
+      return @fields[name] if @fields.key?(name)
+      :__undef__
+    end
+  end
+
+  class Indexer
+    TASK_RE              = /^\s*-\s*\[(.)\]\s*(.*)$/
+    WIKILINK_RE          = /\[\[([^\]\|#]+)(?:[#\|][^\]]*)?\]\]/
+    TAG_RE               = /(?:^|[^\w&])\#([A-Za-z][\w\-\/]*)/
+    INLINE_BRACKET_RE    = /\[([\w\-]+)::\s*([^\]]+)\]/
+    INLINE_LINE_RE       = /^\s*-?\s*([\w\-]+)::\s*(.+?)\s*$/
+    FRONTMATTER_RE       = /\A---\s*\n(.*?)\n---\s*\n?/m
+    HIDDEN_DIRS          = %w[. ..].freeze
+
+    def initialize(vault)
+      @vault = File.expand_path(vault)
+    end
+
+    def pages
+      @pages ||= scan_and_link
+    end
+
+    private
+
+    def scan_and_link
+      pages = []
+      Find.find(@vault) do |path|
+        if File.directory?(path)
+          base = File.basename(path)
+          Find.prune if base.start_with?('.') && !HIDDEN_DIRS.include?(base) || base == '.git' || base == '.obsidian' || base == '.trash'
+          next
+        end
+        next unless path.end_with?('.md')
+        pg = parse_file(path)
+        pages << pg if pg
+      end
+      # compute inlinks
+      by_name = {}
+      pages.each { |p| (by_name[p.name] ||= []) << p }
+      pages.each do |src|
+        src.outlinks.each do |target_name|
+          target_name = target_name.split('/').last  # support folder-paths in [[a/b/c]]
+          (by_name[target_name] || []).each do |dst|
+            dst.inlinks << src.name unless dst.inlinks.include?(src.name)
+          end
+        end
+      end
+      pages
+    end
+
+    def parse_file(path)
+      content = File.read(path)
+      fm_text, body = split_frontmatter(content)
+      fields = parse_frontmatter(fm_text)
+      inline_fields = parse_inline_fields(body)
+      # frontmatter wins on conflict
+      merged = inline_fields.merge(fields)
+      tags = collect_tags(fields, body)
+      tasks = body.scan(TASK_RE).map { |status, text| TaskItem.new(text.strip, status, status == 'x') }
+      outlinks = body.scan(WIKILINK_RE).flatten.uniq
+      rel = path.sub(/\A#{Regexp.escape(@vault)}\/?/, '')
+      name = File.basename(path, '.md')
+      folder = File.dirname(rel)
+      folder = '' if folder == '.'
+      stat = File.stat(path)
+      Page.new(
+        path:     path,
+        rel:      rel,
+        name:     name,
+        folder:   folder,
+        size:     stat.size,
+        cday:     stat.respond_to?(:birthtime) ? (stat.birthtime rescue stat.mtime) : stat.mtime,
+        mday:     stat.mtime,
+        tags:     tags,
+        tasks:    tasks,
+        outlinks: outlinks,
+        fields:   merged,
+      )
+    rescue StandardError => e
+      warn "warn: failed to parse #{path}: #{e.class}: #{e.message}"
+      nil
+    end
+
+    def split_frontmatter(content)
+      if content =~ FRONTMATTER_RE
+        [$1, $']
+      else
+        [nil, content]
+      end
+    end
+
+    def parse_frontmatter(yaml_str)
+      return {} unless yaml_str && !yaml_str.strip.empty?
+      data = YAML.safe_load(yaml_str, permitted_classes: [Date, Time, Symbol], aliases: true) || {}
+      data.is_a?(Hash) ? stringify_keys(data) : {}
+    rescue Psych::SyntaxError
+      {}
+    end
+
+    def stringify_keys(h)
+      h.each_with_object({}) { |(k, v), o| o[k.to_s] = v }
+    end
+
+    def parse_inline_fields(body)
+      out = {}
+      body.scan(INLINE_BRACKET_RE) do |k, v|
+        out[k] ||= coerce(v.strip)
+      end
+      body.each_line do |line|
+        next if line.start_with?('#')          # markdown headers
+        if line =~ INLINE_LINE_RE
+          k, v = $1, $2
+          out[k] ||= coerce(v.strip)
+        end
+      end
+      out
+    end
+
+    def collect_tags(fields, body)
+      base = fields['tags']
+      list = case base
+             when Array  then base.map(&:to_s)
+             when String then base.split(/[,\s]+/).reject(&:empty?)
+             else []
+             end
+      body_tags = body.scan(TAG_RE).flatten
+      (list + body_tags).map { |t| t.sub(/\A#/, '') }.uniq
+    end
+
+    def coerce(v)
+      return true  if v == 'true'
+      return false if v == 'false'
+      return nil   if v == 'null' || v.empty?
+      return v.to_i if v =~ /\A-?\d+\z/
+      return v.to_f if v =~ /\A-?\d+\.\d+\z/
+      v
+    end
+  end
+
+  # ------------------------------------------------------------------ Evaluator
+  UNDEF = :__undef__
+
+  class Evaluator
+    def initialize(pages)
+      @pages = pages
+    end
+
+    # Returns array of rows. For LIST/TABLE: array of Page. For TASK: array of {page:, task:}.
+    def run(query)
+      pool = query.source ? resolve_source(query.source) : @pages.dup
+
+      if query.type == :task
+        rows = []
+        pool.each do |p|
+          p.tasks.each { |t| rows << { page: p, task: t } }
+        end
+        rows = rows.select { |r| truthy?(eval_expr(query.where, r)) } if query.where
+        rows = apply_sorts(rows, query.sorts) if query.sorts && !query.sorts.empty?
+        rows = rows.first(query.limit) if query.limit
+        return rows
+      end
+
+      rows = pool
+      if query.where
+        rows = rows.select { |p| truthy?(eval_expr(query.where, { page: p })) }
+      end
+      rows = apply_sorts(rows.map { |p| { page: p } }, query.sorts).map { |r| r[:page] } if query.sorts && !query.sorts.empty?
+      rows = rows.first(query.limit) if query.limit
+      rows
+    end
+
+    # Public: evaluate a column expression for a given row (used by Renderer).
+    def eval_field(expr, row)
+      v = eval_expr(expr, row)
+      v == UNDEF ? nil : v
+    end
+
+    private
+
+    # ----------- source
+    def resolve_source(src)
+      case src
+      when SrcLit
+        case src.kind
+        when :folder
+          prefix = src.value
+          @pages.select do |p|
+            p.folder == prefix || p.folder.start_with?("#{prefix}/") || p.rel == "#{prefix}.md"
+          end
+        when :tag
+          name = src.value
+          @pages.select { |p| p.tags.include?(name) }
+        when :link
+          target = src.value.split('/').last
+          @pages.select { |p| p.outlinks.include?(target) }
+        end
+      when SrcOp
+        case src.op
+        when :and then resolve_source(src.left) & resolve_source(src.right)
+        when :or  then (resolve_source(src.left) + resolve_source(src.right)).uniq
+        when :not then @pages - resolve_source(src.left)
+        end
+      end
+    end
+
+    # ----------- expression
+    def eval_expr(node, row)
+      case node
+      when nil      then true
+      when Lit      then node.value
+      when TagRef   then node.name
+      when LinkRef  then node.name
+      when Ident    then lookup_ident(node.name, row)
+      when Member   then lookup_member(node, row)
+      when Unary    then node.op == :not ? !truthy?(eval_expr(node.expr, row)) : eval_expr(node.expr, row)
+      when Bin      then eval_bin(node, row)
+      when Call     then eval_call(node, row)
+      else
+        raise Error.new('EEVAL', "Unknown node #{node.class}")
+      end
+    end
+
+    def lookup_ident(name, row)
+      task = row[:task]
+      if task
+        case name
+        when 'completed' then return task.completed
+        when 'text'      then return task.text
+        when 'status'    then return task.status
+        end
+      end
+      page = row[:page]
+      return UNDEF unless page
+      v = page.value(name)
+      return v unless v == UNDEF
+      ff = page.file_field(name) # allow bare 'name','tags' to resolve to file.* if frontmatter absent
+      ff
+    end
+
+    def lookup_member(node, row)
+      base = node.base
+      if base.is_a?(Ident) && base.name == 'file'
+        page = row[:page]
+        return UNDEF unless page
+        page.file_field(node.name)
+      else
+        b = eval_expr(base, row)
+        return UNDEF if b == UNDEF || b.nil?
+        if b.is_a?(Hash)
+          b[node.name]
+        else
+          UNDEF
+        end
+      end
+    end
+
+    def eval_bin(node, row)
+      if node.op == :and || node.op == :or
+        l = truthy?(eval_expr(node.left, row))
+        return l ? truthy?(eval_expr(node.right, row)) : false if node.op == :and
+        return l ? true : truthy?(eval_expr(node.right, row))
+      end
+      l = eval_expr(node.left, row)
+      r = eval_expr(node.right, row)
+      case node.op
+      when :"="  then values_equal?(l, r)
+      when :"!=" then !values_equal?(l, r)
+      when :"<", :">", :"<=", :">="
+        compare(l, r, node.op)
+      else
+        raise Error.new('EEVAL', "Unknown op #{node.op}")
+      end
+    end
+
+    def eval_call(node, row)
+      args = node.args.map { |a| eval_expr(a, row) }
+      case node.name.downcase
+      when 'length'
+        v = args[0]
+        v.respond_to?(:length) ? v.length : 0
+      when 'contains'
+        haystack, needle = args
+        return false if haystack == UNDEF || haystack.nil?
+        case haystack
+        when Array  then haystack.include?(needle)
+        when String then haystack.include?(needle.to_s)
+        else false
+        end
+      when 'startswith'
+        a, b = args
+        a.is_a?(String) && b.is_a?(String) && a.start_with?(b)
+      when 'lower'
+        v = args[0]
+        v.is_a?(String) ? v.downcase : v
+      when 'date'
+        v = args[0]
+        return v if v.is_a?(Time) || v.is_a?(Date)
+        Time.parse(v.to_s) rescue nil
+      else
+        raise Error.new('EEVAL', "Unknown function #{node.name}")
+      end
+    end
+
+    def values_equal?(l, r)
+      return false if l == UNDEF || r == UNDEF
+      l == r
+    end
+
+    def compare(l, r, op)
+      return false if l == UNDEF || r == UNDEF || l.nil? || r.nil?
+      lhs, rhs =
+        if l.is_a?(Numeric) && r.is_a?(Numeric)
+          [l, r]
+        elsif (l.is_a?(Time) || l.is_a?(Date)) && (r.is_a?(Time) || r.is_a?(Date))
+          [l, r]
+        else
+          [l.to_s, r.to_s]
+        end
+      case op
+      when :"<"  then lhs <  rhs
+      when :">"  then lhs >  rhs
+      when :"<=" then lhs <= rhs
+      when :">=" then lhs >= rhs
+      end
+    end
+
+    def truthy?(v)
+      return false if v.nil? || v == false || v == UNDEF
+      return false if v.respond_to?(:empty?) && v.empty?
+      true
+    end
+
+    def apply_sorts(rows, sorts)
+      rows.sort do |a, b|
+        cmp = 0
+        sorts.each do |s|
+          va = eval_expr(s.expr, a)
+          vb = eval_expr(s.expr, b)
+          va = nil if va == UNDEF
+          vb = nil if vb == UNDEF
+          c =
+            if va.nil? && vb.nil? then 0
+            elsif va.nil? then 1   # nil always last, regardless of direction
+            elsif vb.nil? then -1
+            else
+              base = compare_values(va, vb)
+              s.dir == :desc ? -base : base
+            end
+          if c != 0
+            cmp = c
+            break
+          end
+        end
+        cmp
+      end
+    end
+
+    def compare_values(a, b)
+      if a.class != b.class
+        a.to_s <=> b.to_s
+      else
+        (a <=> b) || 0
+      end
+    end
+  end
+
+  # ------------------------------------------------------------------ Renderer
+  class Renderer
+    def initialize(query, evaluator)
+      @q = query
+      @ev = evaluator
+    end
+
+    def render(rows)
+      case @q.type
+      when :list  then render_list(rows)
+      when :table then render_table(rows)
+      when :task  then render_tasks(rows)
+      end
+    end
+
+    private
+
+    def render_list(rows)
+      return '' if rows.empty?
+      lines = rows.map do |p|
+        link = "[[#{p.name}]]"
+        if @q.fields.empty?
+          "- #{link}"
+        else
+          extras = @q.fields.map { |f| format_value(@ev.eval_field(f.expr, { page: p })) }.join(', ')
+          extras.empty? ? "- #{link}" : "- #{link}: #{extras}"
+        end
+      end
+      lines.join("\n")
+    end
+
+    def render_table(rows)
+      headers = []
+      headers << 'File' unless @q.without_id
+      @q.fields.each { |f| headers << (f.alias_ || field_label(f.expr)) }
+      headers = ['File'] if headers.empty? && !@q.without_id
+
+      data_rows = rows.map do |p|
+        row = []
+        row << "[[#{p.name}]]" unless @q.without_id
+        @q.fields.each do |f|
+          row << format_value(@ev.eval_field(f.expr, { page: p }))
+        end
+        row.map { |c| escape_cell(c) }
+      end
+
+      out = []
+      out << '| ' + headers.join(' | ') + ' |'
+      out << '| ' + headers.map { '---' }.join(' | ') + ' |'
+      data_rows.each { |r| out << '| ' + r.join(' | ') + ' |' }
+      out.join("\n")
+    end
+
+    def render_tasks(rows)
+      return '' if rows.empty?
+      grouped = rows.group_by { |r| r[:page].name }
+      out = []
+      grouped.each do |page_name, items|
+        out << "**[[#{page_name}]]**"
+        items.each do |r|
+          t = r[:task]
+          out << "- [#{t.status}] #{t.text}"
+        end
+        out << ''
+      end
+      out.pop while out.last == ''
+      out.join("\n")
+    end
+
+    def field_label(expr)
+      case expr
+      when Ident  then expr.name
+      when Member then "#{label_of(expr.base)}.#{expr.name}"
+      when Call   then "#{expr.name}(...)"
+      else expr.class.name.split('::').last
+      end
+    end
+
+    def label_of(node)
+      node.is_a?(Ident) ? node.name : field_label(node)
+    end
+
+    def format_value(v)
+      case v
+      when nil      then ''
+      when true     then 'true'
+      when false    then 'false'
+      when Array    then v.map { |x| format_value(x) }.join(', ')
+      when Time     then v.strftime('%Y-%m-%d')
+      when Date     then v.strftime('%Y-%m-%d')
+      else v.to_s
+      end
+    end
+
+    def escape_cell(s)
+      s.to_s.gsub('|', '\\|').gsub("\n", ' ')
+    end
+  end
+
+  # ------------------------------------------------------------------ CLI
+  module CLI
+    HELP = <<~TXT
+      dataview - run Obsidian Dataview queries on a markdown vault
+
+      USAGE:
+        dataview [QUERY]
+        dataview -f FILE
+        echo "QUERY" | dataview
+
+      OPTIONS:
+        --vault PATH       Vault root (default: $DATAVIEW_VAULT, else nearest .obsidian/)
+        -f, --file FILE    Read query from file
+        -h, --help         Show this help
+        -V, --version      Show version
+            --test         Run self-tests
+
+      QUERY TYPES:
+        LIST  [field, ...] [FROM source] [WHERE expr] [SORT field] [LIMIT n]
+        TABLE [WITHOUT ID] field [AS alias], ... [FROM source] [WHERE expr] ...
+        TASK  [FROM source] [WHERE expr] ...
+
+      SOURCES:
+        "folder"  #tag  [[link]]   combine with AND/OR/NOT
+
+      EXAMPLES:
+        dataview 'LIST FROM "books"'
+        dataview 'TABLE rating, year FROM #review WHERE rating >= 4'
+        dataview 'TASK FROM "inbox" WHERE !completed'
+        dataview --vault ~/notes 'LIST file.name FROM [[index]] SORT file.mday DESC LIMIT 10'
+
+      EXIT CODES:
+        0 success    1 runtime error    2 usage/parse error
+    TXT
+
+    def self.run(argv)
+      opts = { query: nil, file: nil, vault: nil, test: false }
+      parser = OptionParser.new do |o|
+        o.on('--vault PATH') { |v| opts[:vault] = v }
+        o.on('-f', '--file FILE') { |v| opts[:file] = v }
+        o.on('-h', '--help') { puts HELP; exit 0 }
+        o.on('-V', '--version') { puts "dataview #{VERSION}"; exit 0 }
+        o.on('--test') { opts[:test] = true }
+      end
+      rest = parser.parse(argv)
+      return run_tests if opts[:test]
+
+      opts[:query] = rest.first || (opts[:file] && File.read(opts[:file])) || ($stdin.tty? ? nil : $stdin.read)
+      if opts[:query].nil? || opts[:query].strip.empty?
+        warn "Error: EUSAGE No query given"
+        warn ""
+        warn "Pass a query as argument, with -f FILE, or pipe via stdin."
+        warn "More: dataview --help"
+        exit 2
+      end
+
+      vault = resolve_vault(opts[:vault])
+      ast = Parser.new(Lexer.new(opts[:query]).tokens).parse
+      pages = Indexer.new(vault).pages
+      ev = Evaluator.new(pages)
+      rows = ev.run(ast)
+      out = Renderer.new(ast, ev).render(rows)
+      puts out unless out.empty?
+      exit 0
+    rescue Error => e
+      warn "Error: #{e.code} #{e.message}"
+      warn ""
+      warn e.hint if e.hint
+      warn "More: dataview --help"
+      exit %w[EPARSE ELEX EUSAGE].include?(e.code) ? 2 : 1
+    end
+
+    def self.resolve_vault(flag)
+      path = flag || ENV['DATAVIEW_VAULT']
+      return File.expand_path(path) if path && !path.empty?
+      # walk upward looking for .obsidian/
+      dir = File.expand_path(Dir.pwd)
+      loop do
+        return dir if File.directory?(File.join(dir, '.obsidian'))
+        parent = File.dirname(dir)
+        break if parent == dir
+        dir = parent
+      end
+      raise Error.new('EVAULT', "No vault found",
+        hint: "Pass --vault PATH, set $DATAVIEW_VAULT, or run from a directory inside a vault (containing .obsidian/).")
+    end
+
+    def self.run_tests
+      require 'minitest/autorun'
+      require 'tmpdir'
+      require 'fileutils'
+      load __FILE__ + '.tests' if File.exist?(__FILE__ + '.tests')
+      # Tests are defined further below in this same file (see TESTS section).
+      Object.const_get(:DataviewTests) if Object.const_defined?(:DataviewTests)
+      # Minitest autorun handles the rest at_exit.
+    end
+  end
+end
+
+# ====================================================================== TESTS
+# Self-tests (run only under --test). Defined here so the whole tool stays in
+# a single file. We wrap them in a guard to avoid loading minitest in normal use.
+if ARGV.include?('--test')
+  require 'minitest/autorun'
+  require 'tmpdir'
+  require 'fileutils'
+
+  module DataviewTests
+    class LexerTest < Minitest::Test
+      include Dataview
+
+      def lex(s); Lexer.new(s).tokens; end
+
+      def test_keywords_and_identifiers
+        toks = lex('TABLE foo FROM "x"')
+        assert_equal :kw,    toks[0].type
+        assert_equal 'TABLE', toks[0].value
+        assert_equal :ident, toks[1].type
+        assert_equal 'foo',  toks[1].value
+        assert_equal :kw,    toks[2].type
+        assert_equal 'FROM', toks[2].value
+        assert_equal :string, toks[3].type
+        assert_equal 'x',     toks[3].value
+        assert_equal :eof,    toks[4].type
+      end
+
+      def test_tag_and_link
+        toks = lex('FROM #pj-foo AND [[index]]')
+        assert_equal :tag,  toks[1].type
+        assert_equal 'pj-foo', toks[1].value
+        assert_equal :kw,   toks[2].type
+        assert_equal 'AND', toks[2].value
+        assert_equal :link, toks[3].type
+        assert_equal 'index', toks[3].value
+      end
+
+      def test_operators_and_numbers
+        toks = lex('rating >= 4.5 AND count != 0')
+        op = toks.find { |t| t.value == '>=' }
+        refute_nil op
+        assert_equal :op, op.type
+        nums = toks.select { |t| t.type == :number }
+        assert_equal [4.5, 0], nums.map(&:value)
+      end
+
+      def test_string_with_escape
+        toks = lex(%q{WHERE name = "a\\"b"})
+        s = toks.find { |t| t.type == :string }
+        assert_equal 'a"b', s.value
+      end
+
+      def test_comment_skipped
+        toks = lex("LIST // comment\nFROM \"x\"")
+        types = toks.map(&:type)
+        assert_includes types, :string
+        # Ensure no junk token from comment body
+        assert_equal 4, toks.size  # LIST, FROM, "x", EOF
+      end
+
+      def test_unterminated_string_raises
+        err = assert_raises(Error) { lex('WHERE x = "abc') }
+        assert_equal 'ELEX', err.code
+      end
+    end
+
+    class ParserTest < Minitest::Test
+      include Dataview
+
+      def parse(s); Parser.new(Lexer.new(s).tokens).parse; end
+
+      def test_list_minimal
+        q = parse('LIST')
+        assert_equal :list, q.type
+        assert_empty q.fields
+        assert_nil q.source
+      end
+
+      def test_table_with_fields_and_alias
+        q = parse('TABLE rating, year AS Y FROM "books"')
+        assert_equal :table, q.type
+        assert_equal 2, q.fields.size
+        assert_equal 'rating', q.fields[0].expr.name
+        assert_equal 'Y',      q.fields[1].alias_
+        assert_equal :folder,  q.source.kind
+        assert_equal 'books',  q.source.value
+      end
+
+      def test_without_id
+        q = parse('TABLE WITHOUT ID file.name FROM "x"')
+        assert q.without_id
+        assert_equal 1, q.fields.size
+        m = q.fields[0].expr
+        assert_kind_of Member, m
+        assert_equal 'file', m.base.name
+        assert_equal 'name', m.name
+      end
+
+      def test_source_combinators
+        q = parse('LIST FROM #foo AND "bar" OR [[baz]]')
+        # OR is top-level: (#foo AND "bar") OR [[baz]]
+        assert_equal :or, q.source.op
+        left = q.source.left
+        assert_equal :and, left.op
+        assert_equal :tag,    left.left.kind
+        assert_equal :folder, left.right.kind
+        assert_equal :link,   q.source.right.kind
+      end
+
+      def test_source_not
+        q = parse('LIST FROM NOT "drafts"')
+        assert_equal :not, q.source.op
+        assert_equal :folder, q.source.left.kind
+      end
+
+      def test_where_comparisons_and_logic
+        q = parse('LIST WHERE rating >= 4 AND status = "open" OR NOT archived')
+        # Top: OR
+        assert_equal :or, q.where.op
+        left = q.where.left
+        assert_equal :and, left.op
+        assert_equal :>=, left.left.op
+        assert_equal :"=", left.right.op
+        right = q.where.right
+        assert_kind_of Unary, right
+        assert_equal :not, right.op
+      end
+
+      def test_where_contains_and_call
+        q = parse('LIST WHERE contains(tags, "foo")')
+        c = q.where
+        assert_kind_of Call, c
+        assert_equal 'contains', c.name
+        assert_equal 2, c.args.size
+      end
+
+      def test_sort_multi_directions
+        q = parse('LIST SORT file.mday DESC, file.name ASC')
+        assert_equal 2, q.sorts.size
+        assert_equal :desc, q.sorts[0].dir
+        assert_equal :asc,  q.sorts[1].dir
+      end
+
+      def test_limit
+        q = parse('LIST LIMIT 5')
+        assert_equal 5, q.limit
+      end
+
+      def test_unexpected_token_raises_eparse
+        err = assert_raises(Error) { parse('LIST WHERR x') }
+        assert_equal 'EPARSE', err.code
+      end
+
+      def test_missing_alias_after_as_raises
+        err = assert_raises(Error) { parse('TABLE x AS') }
+        assert_equal 'EPARSE', err.code
+      end
+    end
+
+    class IndexerTest < Minitest::Test
+      include Dataview
+
+      def with_vault
+        Dir.mktmpdir do |d|
+          FileUtils.mkdir_p(File.join(d, '.obsidian'))
+          yield d
+        end
+      end
+
+      def write(d, rel, body)
+        full = File.join(d, rel)
+        FileUtils.mkdir_p(File.dirname(full))
+        File.write(full, body)
+        full
+      end
+
+      def test_frontmatter_and_inline_fields
+        with_vault do |d|
+          write(d, 'notes/a.md', <<~MD)
+            ---
+            rating: 5
+            status: open
+            ---
+            # Heading
+
+            author:: Alice
+            year:: 2024
+            Body text.
+          MD
+          pages = Indexer.new(d).pages
+          assert_equal 1, pages.size
+          p = pages[0]
+          assert_equal 5,      p.fields['rating']
+          assert_equal 'open', p.fields['status']
+          assert_equal 'Alice', p.fields['author']
+          assert_equal 2024,   p.fields['year']
+        end
+      end
+
+      def test_file_attributes
+        with_vault do |d|
+          write(d, 'books/b.md', "x")
+          p = Indexer.new(d).pages.first
+          assert_equal 'b',     p.file_field('name')
+          assert_equal 'books', p.file_field('folder')
+          assert_equal '[[b]]', p.file_field('link')
+          assert_kind_of Time,  p.file_field('mday')
+          assert_operator p.file_field('size'), :>, 0
+        end
+      end
+
+      def test_tags_from_frontmatter_and_body
+        with_vault do |d|
+          write(d, 'a.md', <<~MD)
+            ---
+            tags: [alpha, beta]
+            ---
+            More #gamma here and #delta-2.
+          MD
+          tags = Indexer.new(d).pages.first.tags
+          assert_includes tags, 'alpha'
+          assert_includes tags, 'beta'
+          assert_includes tags, 'gamma'
+          assert_includes tags, 'delta-2'
+        end
+      end
+
+      def test_tasks_extracted
+        with_vault do |d|
+          write(d, 'inbox/x.md', <<~MD)
+            - [ ] todo one
+            - [/] in progress
+            - [x] done item
+            - [-] cancelled
+          MD
+          tasks = Indexer.new(d).pages.first.tasks
+          assert_equal 4, tasks.size
+          assert_equal 'todo one', tasks[0].text
+          refute tasks[0].completed
+          assert tasks[2].completed
+        end
+      end
+
+      def test_outlinks_and_inlinks
+        with_vault do |d|
+          write(d, 'a.md', "Links: [[b]] and [[c|alias]] plus [[d#section]].")
+          write(d, 'b.md', "B page")
+          write(d, 'c.md', "C page")
+          pages = Indexer.new(d).pages
+          a = pages.find { |p| p.name == 'a' }
+          b = pages.find { |p| p.name == 'b' }
+          c = pages.find { |p| p.name == 'c' }
+          assert_equal %w[b c d], a.outlinks
+          assert_includes b.inlinks, 'a'
+          assert_includes c.inlinks, 'a'
+        end
+      end
+
+      def test_skips_dot_dirs
+        with_vault do |d|
+          FileUtils.mkdir_p(File.join(d, '.trash'))
+          write(d, '.trash/old.md', "old")
+          write(d, 'visible.md', "ok")
+          names = Indexer.new(d).pages.map(&:name)
+          assert_equal ['visible'], names
+        end
+      end
+
+      def test_invalid_yaml_does_not_break
+        with_vault do |d|
+          write(d, 'bad.md', "---\nkey: : :\n---\ncontent")
+          pages = Indexer.new(d).pages
+          assert_equal 1, pages.size
+          assert_equal({}, pages.first.fields)
+        end
+      end
+
+      def test_empty_vault_returns_no_pages
+        with_vault do |d|
+          assert_equal [], Indexer.new(d).pages
+        end
+      end
+
+      def test_frontmatter_wins_over_inline_on_key_conflict
+        with_vault do |d|
+          write(d, 'a.md', "---\nstatus: open\n---\nstatus:: closed\n")
+          page = Indexer.new(d).pages.first
+          assert_equal 'open', page.fields['status']
+        end
+      end
+
+      # Markdown headers like "## title" must not be parsed as an inline field
+      # (regex requires `key:: value`, not `## key: value`, but defensive test).
+      def test_markdown_header_line_is_not_parsed_as_inline_field
+        with_vault do |d|
+          write(d, 'a.md', "## section:: should-not-match\n")
+          page = Indexer.new(d).pages.first
+          refute page.fields.key?('section')
+        end
+      end
+    end
+
+    # Shared helpers for tests that need a tmp vault + parser pipeline.
+    module VaultHelper
+      def with_vault
+        Dir.mktmpdir do |d|
+          FileUtils.mkdir_p(File.join(d, '.obsidian'))
+          yield d
+        end
+      end
+
+      def write(d, rel, body)
+        full = File.join(d, rel)
+        FileUtils.mkdir_p(File.dirname(full))
+        File.write(full, body)
+      end
+
+      def index(d); Dataview::Indexer.new(d).pages; end
+      def parse(s); Dataview::Parser.new(Dataview::Lexer.new(s).tokens).parse; end
+      def query(d, src); Dataview::Evaluator.new(index(d)).run(parse(src)); end
+      def names(rows); rows.map(&:name).sort; end
+    end
+
+    class EvaluatorTest < Minitest::Test
+      include Dataview
+      include VaultHelper
+
+      def test_from_folder_matches_pages_in_subtree
+        with_vault do |d|
+          write(d, 'books/b.md', "")
+          write(d, 'index.md', "")
+          assert_equal ['b'], names(query(d, 'LIST FROM "books"'))
+        end
+      end
+
+      def test_from_tag_matches_tagged_pages
+        with_vault do |d|
+          write(d, 'a.md',     "---\ntags: [blue]\n---\n")
+          write(d, 'index.md', "Page with #blue inline")
+          write(d, 'b.md',     "no tag here")
+          assert_equal ['a', 'index'], names(query(d, 'LIST FROM #blue'))
+        end
+      end
+
+      def test_from_link_matches_linkers
+        with_vault do |d|
+          write(d, 'a.md',     "Link to [[hub]]")
+          write(d, 'b.md',     "Also [[hub]]")
+          write(d, 'other.md', "no link")
+          assert_equal ['a', 'b'], names(query(d, 'LIST FROM [[hub]]'))
+        end
+      end
+
+      def test_source_and_intersects
+        with_vault do |d|
+          write(d, 'a.md',       "---\ntags: [blue]\n---\n")
+          write(d, 'books/b.md', "---\ntags: [red]\n---\n")
+          assert_equal [], names(query(d, 'LIST FROM #blue AND "books"'))
+        end
+      end
+
+      def test_source_or_unions
+        with_vault do |d|
+          write(d, 'a.md',       "---\ntags: [blue]\n---\n")
+          write(d, 'books/b.md', "---\ntags: [red]\n---\n")
+          assert_equal ['a', 'b'], names(query(d, 'LIST FROM #blue OR "books"'))
+        end
+      end
+
+      def test_source_not_excludes
+        with_vault do |d|
+          write(d, 'a.md',       "")
+          write(d, 'books/b.md', "")
+          assert_equal ['a'], names(query(d, 'LIST FROM NOT "books"'))
+        end
+      end
+
+      def test_where_numeric_gte
+        with_vault do |d|
+          write(d, 'high.md', "---\nrating: 5\n---\n")
+          write(d, 'low.md',  "---\nrating: 2\n---\n")
+          assert_equal ['high'], names(query(d, 'LIST WHERE rating >= 4'))
+        end
+      end
+
+      # Boundary: distinguishes >= from >. With a page exactly at the threshold,
+      # >= must include it (mutation >= -> > would drop 'edge' and fail this test).
+      def test_where_gte_includes_boundary_value
+        with_vault do |d|
+          write(d, 'edge.md',  "---\nrating: 4\n---\n")
+          write(d, 'below.md', "---\nrating: 3\n---\n")
+          assert_equal ['edge'], names(query(d, 'LIST WHERE rating >= 4'))
+        end
+      end
+
+      # Symmetric boundary for strict >. Mutation > -> >= would wrongly include 'edge'.
+      def test_where_gt_excludes_boundary_value
+        with_vault do |d|
+          write(d, 'edge.md',  "---\nrating: 4\n---\n")
+          write(d, 'above.md', "---\nrating: 5\n---\n")
+          assert_equal ['above'], names(query(d, 'LIST WHERE rating > 4'))
+        end
+      end
+
+      def test_where_string_equals
+        with_vault do |d|
+          write(d, 'open.md',   "---\nstatus: open\n---\n")
+          write(d, 'closed.md', "---\nstatus: closed\n---\n")
+          assert_equal ['open'], names(query(d, 'LIST WHERE status = "open"'))
+        end
+      end
+
+      def test_where_combines_and
+        with_vault do |d|
+          write(d, 'a.md', "---\nrating: 5\nstatus: open\n---\n")
+          write(d, 'b.md', "---\nrating: 3\nstatus: open\n---\n")
+          write(d, 'c.md', "---\nrating: 5\nstatus: closed\n---\n")
+          assert_equal ['a'], names(query(d, 'LIST WHERE rating != 3 AND status = "open"'))
+        end
+      end
+
+      def test_where_contains_filters_by_array_membership
+        with_vault do |d|
+          write(d, 'blue.md',   "---\ntags: [blue]\n---\n")
+          write(d, 'red.md',    "---\ntags: [red]\n---\n")
+          assert_equal ['red'], names(query(d, 'LIST WHERE !contains(tags, "blue")'))
+        end
+      end
+
+      def test_inline_field_visible_to_where
+        with_vault do |d|
+          write(d, 'alice.md', "author:: Alice\n")
+          write(d, 'bob.md',   "author:: Bob\n")
+          assert_equal ['alice'], names(query(d, 'LIST WHERE author = "Alice"'))
+        end
+      end
+
+      def test_sort_desc_with_limit
+        with_vault do |d|
+          write(d, 'high.md', "---\nrating: 5\n---\n")
+          write(d, 'mid.md',  "---\nrating: 3\n---\n")
+          write(d, 'low.md',  "---\nrating: 1\n---\n")
+          rows = query(d, 'LIST SORT rating DESC LIMIT 1')
+          assert_equal ['high'], rows.map(&:name)
+        end
+      end
+
+      def test_sort_asc_orders_low_first
+        with_vault do |d|
+          write(d, 'high.md', "---\nrating: 5\n---\n")
+          write(d, 'low.md',  "---\nrating: 1\n---\n")
+          rows = query(d, 'LIST SORT rating ASC LIMIT 2')
+          assert_equal ['low', 'high'], rows.map(&:name)
+        end
+      end
+
+      def test_sort_places_pages_without_field_last
+        with_vault do |d|
+          write(d, 'rated.md',   "---\nrating: 5\n---\n")
+          write(d, 'unrated.md', "no rating field")
+          rows = query(d, 'LIST SORT rating DESC')
+          assert_equal ['rated', 'unrated'], rows.map(&:name)
+        end
+      end
+
+      def test_task_query_filters_completed
+        with_vault do |d|
+          write(d, 'a.md', "- [ ] open one\n- [x] done\n- [ ] open two\n")
+          rows = query(d, 'TASK WHERE !completed')
+          assert_equal [false, false], rows.map { |r| r[:task].completed }
+          assert_equal ['open one', 'open two'], rows.map { |r| r[:task].text }
+        end
+      end
+
+      def test_task_query_with_from_scopes_to_folder
+        with_vault do |d|
+          write(d, 'inbox/x.md', "- [ ] in inbox\n")
+          write(d, 'other.md',   "- [ ] not in inbox\n")
+          rows = query(d, 'TASK FROM "inbox"')
+          assert_equal ['in inbox'], rows.map { |r| r[:task].text }
+        end
+      end
+
+      def test_function_lower_and_startswith
+        with_vault do |d|
+          write(d, 'open.md',  "---\nstatus: OPEN\n---\n")
+          write(d, 'other.md', "---\nstatus: pending\n---\n")
+          assert_equal ['open'], names(query(d, 'LIST WHERE startswith(lower(status), "op")'))
+        end
+      end
+
+      # ----- coverage gaps (P2.3)
+
+      def test_function_length_returns_array_size
+        with_vault do |d|
+          write(d, 'three.md', "---\ntags: [a, b, c]\n---\n")
+          write(d, 'one.md',   "---\ntags: [x]\n---\n")
+          assert_equal ['three'], names(query(d, 'LIST WHERE length(tags) >= 3'))
+        end
+      end
+
+      def test_function_date_parses_string
+        with_vault do |d|
+          write(d, 'a.md', "---\nwhen: \"2024-12-25\"\n---\n")
+          rows = query(d, 'LIST WHERE date(when) >= date("2024-01-01")')
+          assert_equal ['a'], names(rows)
+        end
+      end
+
+      # date() returns nil for unparseable input; comparison against nil is false.
+      # Mutation that swallowed the rescue (returning the raw string) would make
+      # the comparison succeed and this test fail.
+      def test_function_date_returns_nil_for_invalid_input
+        with_vault do |d|
+          write(d, 'a.md', "---\nwhen: \"not-a-date\"\n---\n")
+          rows = query(d, 'LIST WHERE date(when) >= date("2024-01-01")')
+          assert_equal [], names(rows)
+        end
+      end
+
+      def test_compare_dates_via_file_mday
+        with_vault do |d|
+          write(d, 'a.md', "")
+          rows = query(d, 'LIST WHERE file.mday >= date("2000-01-01")')
+          assert_equal ['a'], names(rows)
+        end
+      end
+    end
+
+    class RendererTest < Minitest::Test
+      include Dataview
+      include VaultHelper
+
+      def render_in(d, src)
+        q = parse(src)
+        ev = Dataview::Evaluator.new(index(d))
+        Dataview::Renderer.new(q, ev).render(ev.run(q))
+      end
+
+      def test_list_renders_one_bullet_per_page
+        with_vault do |d|
+          write(d, 'a.md', "")
+          write(d, 'b.md', "")
+          out = render_in(d, 'LIST SORT file.name ASC')
+          assert_equal "- [[a]]\n- [[b]]", out
+        end
+      end
+
+      def test_list_with_expression_appends_value_after_link
+        with_vault do |d|
+          write(d, 'a.md', "---\nrating: 5\n---\n")
+          out = render_in(d, 'LIST rating')
+          assert_equal '- [[a]]: 5', out
+        end
+      end
+
+      def test_table_includes_default_file_column
+        with_vault do |d|
+          write(d, 'a.md', "---\nrating: 5\n---\n")
+          out = render_in(d, 'TABLE rating')
+          assert_includes out, '| File | rating |'
+          assert_includes out, '| [[a]] | 5 |'
+        end
+      end
+
+      def test_table_without_id_omits_file_column
+        with_vault do |d|
+          write(d, 'a.md', "---\nrating: 5\n---\n")
+          out = render_in(d, 'TABLE WITHOUT ID rating AS R')
+          assert_includes out, '| R |'
+          refute_includes out, 'File'
+        end
+      end
+
+      def test_task_groups_under_file_header
+        with_vault do |d|
+          write(d, 'a.md', "- [ ] one\n- [x] two\n")
+          out = render_in(d, 'TASK')
+          expected = "**[[a]]**\n- [ ] one\n- [x] two"
+          assert_equal expected, out
+        end
+      end
+
+      def test_table_escapes_pipe_in_cell_value
+        with_vault do |d|
+          write(d, 'a.md', "---\ntitle: \"a|b\"\n---\n")
+          out = render_in(d, 'TABLE title')
+          assert_includes out, 'a\\|b'
+        end
+      end
+
+      def test_table_joins_array_value_with_comma
+        with_vault do |d|
+          write(d, 'a.md', "---\ntags: [red, blue, green]\n---\n")
+          out = render_in(d, 'TABLE WITHOUT ID tags')
+          assert_includes out, '| red, blue, green |'
+        end
+      end
+
+      def test_empty_result_renders_empty_string
+        with_vault do |d|
+          write(d, 'a.md', "")
+          out = render_in(d, 'LIST FROM "nonexistent"')
+          assert_equal '', out
+        end
+      end
+    end
+
+    # E2E covers CLI-specific contracts only (help/version/exit codes/error 5요소)
+    # plus a single full-pipeline integration golden. Per-module behavior is
+    # already covered by Lexer/Parser/Indexer/Evaluator/Renderer unit tests.
+    class CLIContractTest < Minitest::Test
+      include Dataview
+      include VaultHelper
+      BIN = File.expand_path(__FILE__)
+
+      def run_bin(args, env: {})
+        require 'open3'
+        out, err, status = Open3.capture3({ 'NO_COLOR' => '1' }.merge(env),
+                                          'ruby', BIN, *Array(args))
+        [out, err, status.exitstatus]
+      end
+
+      def test_help_prints_usage_and_exits_zero
+        out, _err, code = run_bin('--help')
+        assert_equal 0, code
+        assert_includes out, 'USAGE'
+        assert_includes out, 'EXAMPLES'
+      end
+
+      def test_version_prints_semver_and_exits_zero
+        out, _err, code = run_bin('--version')
+        assert_equal 0, code
+        assert_match(/dataview \d+\.\d+\.\d+/, out)
+      end
+
+      def test_no_query_exits_two_with_eusage
+        with_vault do |d|
+          _out, err, code = run_bin([], env: { 'DATAVIEW_VAULT' => d })
+          assert_equal 2, code
+          assert_includes err, 'EUSAGE'
+        end
+      end
+
+      def test_parse_error_exits_two_with_eparse
+        with_vault do |d|
+          _out, err, code = run_bin(['LIST WHERR x'], env: { 'DATAVIEW_VAULT' => d })
+          assert_equal 2, code
+          assert_includes err, 'EPARSE'
+        end
+      end
+
+      def test_missing_vault_exits_one_with_evault
+        Dir.mktmpdir do |empty|       # no .obsidian inside, no env, no flag
+          orig = Dir.pwd
+          Dir.chdir(empty)
+          ENV.delete('DATAVIEW_VAULT')
+          _out, err, code = run_bin(['LIST'], env: { 'DATAVIEW_VAULT' => '' })
+          assert_equal 1, code
+          assert_includes err, 'EVAULT'
+        ensure
+          Dir.chdir(orig) if orig
+        end
+      end
+
+      # Single full-pipeline integration: lex → parse → index → evaluate → render
+      # via subprocess. If any wiring breaks between modules, this catches it.
+      def test_full_pipeline_integration
+        with_vault do |d|
+          write(d, 'books/alpha.md', "---\nrating: 5\n---\n")
+          write(d, 'books/beta.md',  "---\nrating: 3\n---\n")
+          out, _err, code = run_bin(
+            ['TABLE rating FROM "books" WHERE rating >= 4 SORT rating DESC'],
+            env: { 'DATAVIEW_VAULT' => d }
+          )
+          assert_equal 0, code
+          assert_includes out, '| File | rating |'
+          assert_includes out, '| [[alpha]] | 5 |'
+          refute_includes out, '[[beta]]'
+        end
+      end
+    end
+
+    class CLIVaultResolutionTest < Minitest::Test
+      include Dataview
+
+      def test_explicit_flag_wins
+        Dir.mktmpdir do |d|
+          assert_equal File.expand_path(d), CLI.resolve_vault(d)
+        end
+      end
+
+      def test_env_used_when_no_flag
+        Dir.mktmpdir do |d|
+          ENV['DATAVIEW_VAULT'] = d
+          assert_equal File.expand_path(d), CLI.resolve_vault(nil)
+        ensure
+          ENV.delete('DATAVIEW_VAULT')
+        end
+      end
+
+      def test_walks_up_to_dot_obsidian
+        Dir.mktmpdir do |d|
+          FileUtils.mkdir_p(File.join(d, '.obsidian'))
+          sub = File.join(d, 'a', 'b'); FileUtils.mkdir_p(sub)
+          orig = Dir.pwd
+          Dir.chdir(sub)
+          ENV.delete('DATAVIEW_VAULT')
+          assert_equal File.realpath(d), CLI.resolve_vault(nil)
+        ensure
+          Dir.chdir(orig) if orig
+        end
+      end
+
+      def test_no_vault_raises
+        Dir.mktmpdir do |d|
+          orig = Dir.pwd
+          Dir.chdir(d)
+          ENV.delete('DATAVIEW_VAULT')
+          err = assert_raises(Error) { CLI.resolve_vault(nil) }
+          assert_equal 'EVAULT', err.code
+        ensure
+          Dir.chdir(orig) if orig
+        end
+      end
+    end
+  end
+
+  # Strip --test so optparse doesn't choke
+  ARGV.delete('--test')
+  # Let minitest autorun execute at_exit.
+else
+  Dataview::CLI.run(ARGV)
+end
