@@ -1,0 +1,71 @@
+// pipeline.mjs — 오케스트레이터
+// 변경 이유: 파이프라인 단계 추가/제거 시만
+// 비즈니스 로직 없음, 흐름 제어만
+
+import PptxGenJS from "pptxgenjs";
+import { execSync } from "child_process";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "fs";
+import { resolve, dirname } from "path";
+
+import { validateSpec } from "./spec.mjs";
+import { layout } from "./elk-layout.mjs";
+import { THEMES } from "./theme.mjs";
+import { renderTitle, renderZones, renderNodes, buildEdgeXml, injectEdgeXml, getNextShapeId } from "./renderer.mjs";
+
+/**
+ * Arch Spec → .pptx 파일 생성
+ * @param {Object} spec - Arch Spec
+ * @param {string} outputPath - 출력 파일 경로
+ * @param {Object} [options] - 옵션 (slideW, slideH 등)
+ */
+export async function generate(spec, outputPath, options = {}) {
+  // 1. Validate
+  validateSpec(spec);
+  const theme = THEMES[spec.theme || "aws-default"];
+  if (!theme) throw new Error(`Unknown theme: ${spec.theme}`);
+
+  // 2. Layout (DIP: layout 함수만 알면 됨, ELK인지 dagre인지 모름)
+  console.log("Layout...");
+  const { zones, nodes, edges } = await layout(spec, options);
+  console.log(`  zones: ${zones.size}, nodes: ${nodes.size}, edges: ${edges.length}`);
+
+  // 3. Render shapes → base PPTX
+  console.log("Render shapes...");
+  const pres = new PptxGenJS();
+  pres.defineLayout({ name: "WIDE", width: options.slideW || 13.33, height: options.slideH || 7.5 });
+  pres.layout = "WIDE";
+  const slide = pres.addSlide({ bkgd: theme.background });
+
+  renderTitle(slide, spec, theme);
+  renderZones(slide, zones, spec, theme);
+  renderNodes(slide, nodes, spec, theme);
+
+  const outDir = dirname(outputPath);
+  const basePath = resolve(outDir, "_base.pptx");
+  await pres.writeFile({ fileName: basePath });
+
+  // 4. Inject edges (XML post-processing)
+  console.log("Inject edges...");
+  const extractDir = resolve(outDir, "_work");
+  if (existsSync(extractDir)) rmSync(extractDir, { recursive: true });
+  mkdirSync(extractDir, { recursive: true });
+  execSync(`unzip -o "${basePath}" -d "${extractDir}"`, { stdio: "pipe" });
+
+  const slideXmlPath = resolve(extractDir, "ppt/slides/slide1.xml");
+  let slideXml = readFileSync(slideXmlPath, "utf-8");
+
+  const startId = getNextShapeId(slideXml);
+  const edgeXml = buildEdgeXml(edges, spec.connections, startId);
+  slideXml = injectEdgeXml(slideXml, edgeXml);
+  writeFileSync(slideXmlPath, slideXml);
+
+  // 5. Repackage
+  if (existsSync(outputPath)) rmSync(outputPath);
+  execSync(`cd "${extractDir}" && zip -r "${outputPath}" . -x "*.DS_Store"`, { stdio: "pipe" });
+
+  // 6. Cleanup
+  rmSync(extractDir, { recursive: true });
+  rmSync(basePath);
+
+  console.log(`Generated: ${outputPath}`);
+}

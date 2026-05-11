@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: claude-agent-sdk
 description: Builds Claude Agent SDK agents in Python. Use when creating custom tools, hooks, sub-agents, or MCP integrations with the Agent SDK. Python 에이전트 구축 시 사용.
 ---

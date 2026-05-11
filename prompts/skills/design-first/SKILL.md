@@ -1,6 +1,7 @@
 ---
+disable-model-invocation: true
 name: design-first
-description: 구현 전 점진적 설계 합의 (범위→구조→상호작용→계약→구현). Use when scope is unclear for multi-component work, new feature domain with undefined boundaries, or system integration requiring architectural decisions. 설계 먼저, 구조 설계, 범위 정의. Do NOT use for single-component changes, scope-clear tasks, or when a plan already exists (use plan-review instead). Skip for simple utilities — just code directly.
+description: 견적 산정 + 점진적 설계 합의 (견적→범위→구조→상호작용→계약→구현). Use when 견적내자, 견적 내줘, estimate effort, scope is unclear for multi-component work, new feature domain with undefined boundaries, or system integration requiring architectural decisions. 견적, 설계 먼저, 구조 설계, 범위 정의. Do NOT use for single-component changes where scope is already clear, or when a plan already exists (use plan-review instead).
 argument-hint: "[design topic]"
 user-invocable: true
 ---
@@ -15,7 +16,7 @@ user-invocable: true
 - **Whiteboard before Keyboard**: 코드 생성 전 설계 합의
 - **한 번에 한 차원만**: 범위·아키텍처·통신·계약을 동시에 평가하지 않음
 - **게이트 리뷰**: 각 Phase 사용자 승인 후 다음 진행
-- **복잡도 캘리브레이션**: 모든 작업이 5단계를 다 거칠 필요 없음
+- **견적 기반 캘리브레이션**: Phase 0 견적 결과에 따라 시작점과 깊이가 달라진다
 
 ## Instructions
 
@@ -28,27 +29,96 @@ user-invocable: true
 
 ---
 
-### Phase 0: 복잡도 판단 (시작점 결정)
+### Phase 0: 견적 (Estimate)
 
-요청을 분석하여 시작 Phase를 결정하고 제안한다.
+현행 파악 → Gap 분석 → 규모 산정 → 라우팅. "견적내자"의 실체.
 
-| 복잡도 | 시작 Phase | 예시 |
-|--------|------------|------|
-| 단순 (유틸 함수, 단일 파일) | **스킵** — 그냥 코드 작성 | `formatDate()` 추가 |
-| 단일 컴포넌트 변경 | **Phase 2** (Components) 또는 **Phase 3** (Interactions) | 내부 구조 변경→P2, 외부 연결 추가→P3 |
-| 다중 컴포넌트 | **Phase 1** (Capabilities) | 새 기능 도메인 |
-| 시스템 통합 / 외부 연동 | **Phase 1**부터 (Phase 3에서 통신 프로토콜·에러 전파 심화) | API 게이트웨이, 메시지 큐 |
+#### 0-A. 메타-견적 (Triage)
 
-요청을 분석한 뒤 AskUserQuestion으로 시작 Phase를 제안한다:
+견적 자체의 비용을 먼저 판단한다:
+
+| 항목 | 질문 |
+|------|------|
+| 조사 범위 | 코드베이스 전체? 특정 디렉토리/모듈? |
+| 조사 깊이 | 파일 목록만? 라인별 영향도까지? |
+| 예상 소요 | Agent 1개 5분? 3개 병렬 15분? |
+
+간단한 요청(단일 파일, 유틸 함수)은 메타-견적 자체를 스킵하고 0-D 라우팅으로 직행.
+
+#### 0-B. 현행 탐색 (As-Is)
+
+Explore subagent로 현재 상태를 수치화한다:
+
+- 대상 파일/모듈 목록 (Glob)
+- 현재 수치 (커버리지, 라인 수, 버전, 의존성 수 등)
+- 관련 기존 패턴/컨벤션 (Grep)
+
+출력 형식:
+```
+### 현행 상태
+- 대상: {디렉토리/모듈} ({파일 N개}, {라인 N줄})
+- 현재 수치: {측정 가능한 값}
+- 관련 패턴: {기존 컨벤션/구현 참조}
+```
+
+#### 0-C. Gap 분석 + 규모 산정
+
+As-Is와 목표를 대조하여 변경 항목을 열거한다:
+
+- 변경 필요 항목 나열
+- 각 항목에 규모 태그: **S** (< 30줄), **M** (30-150줄), **L** (150줄+)
+- 리스크 식별: 까다로운 부분, 외부 의존성, 블로커
+- 순서 제안: 의존 관계 기반
+
+`.claude/designs/{feature}/phase-0-estimate.md`에 저장한다.
+
+출력 형식:
+```markdown
+## 견적
+
+### 목표
+{목표 상태 한 줄}
+
+### 작업 항목
+| # | 항목 | 규모 | 리스크 | 비고 |
+|---|------|------|--------|------|
+| 1 | ... | S | - | |
+| 2 | ... | M | 외부 API 의존 | 블로커 가능 |
+| 3 | ... | L | 기존 테스트 깨질 수 있음 | |
+
+### 전체 규모
+- 항목 수: N개 (S: x, M: y, L: z)
+- 예상 PR: N개
+- 주요 리스크: ...
+```
+
+#### 0-D. 라우팅 (게이트 리뷰)
+
+견적 결과에 따라 다음 단계를 제안한다:
+
+| 견적 결과 | 라우팅 | 예시 |
+|-----------|--------|------|
+| S 항목만, 리스크 없음 | **스킵** — 바로 실행 | `formatDate()` 추가 |
+| M 이하, 범위 명확 | **Phase 2** 또는 **Phase 3**부터 | 단일 컴포넌트 변경 |
+| L 포함 또는 다중 컴포넌트 | **Phase 1** (Capabilities)부터 | 새 기능 도메인 |
+| 리스크 높음 / 외부 의존 | **Phase 1**부터 (Phase 3에서 심화) | 시스템 통합 |
+
+AskUserQuestion으로 라우팅을 제안한다:
 
 ```
-요청을 분석한 결과, [복잡도 수준]으로 판단됩니다.
-Phase N ([이름])부터 시작하겠습니다. 동의하시나요?
+## 견적 결과
+{작업 항목 테이블 요약}
+
+전체 규모: S x개, M y개, L z개
+→ [라우팅 판단 근거]에 따라 Phase N ([이름])부터 시작을 제안합니다.
 
 1. 동의 (Recommended)
 2. Phase N부터 시작 (더 상세히/간단히)
-3. 설계 스킵, 바로 구현
+3. 설계 스킵, 바로 실행
+4. 견적만 저장, 여기서 종료
 ```
+
+**견적만 저장 시**: `phase-0-estimate.md`를 저장하고 skill을 종료한다. 나중에 `/design-first`를 다시 호출하면 복원 로직이 Phase 0 완료를 인식하고 Phase 1부터 재개한다.
 
 단일 컴포넌트인 경우, 내부 구조 변경(Phase 2)인지 외부 연결 추가(Phase 3)인지를 추가로 확인한다.
 
@@ -60,13 +130,13 @@ Phase N ([이름])부터 시작하겠습니다. 동의하시나요?
 
 #### 1-A. 탐색 (Explore subagent)
 
-Explore subagent를 스폰하여 아래를 탐색한다:
+Phase 0-B 탐색 결과가 있으면 재활용한다. 추가로 필요한 부분만 Explore subagent로 탐색:
 
 - 관련 기존 기능 탐색 (Grep: 관련 키워드)
 - 유사 기능 구현 패턴 (Glob: 디렉토리 구조)
 - 비기능 요구사항 단서 (설정 파일, 인프라 코드)
 
-프롬프트 입력: 설계 주제 + 프로젝트 경로
+프롬프트 입력: 설계 주제 + 프로젝트 경로 + Phase 0 견적 요약
 출력 형식:
 ```
 ### 기존 관련 기능
@@ -300,7 +370,7 @@ Red Flags:
 **목적**: Phase 1-4 합의를 요약하고 구현으로 전환한다.
 
 수행 항목:
-1. **설계 합의 요약**: Phase 1-4에서 확정된 내용을 한 곳에 정리
+1. **설계 합의 요약**: Phase 0-4에서 확정된 내용을 한 곳에 정리 (견적 포함)
 2. **구현 전환 선택**: AskUserQuestion으로 다음 단계를 결정
 
 ```
@@ -338,83 +408,47 @@ Red Flags:
 User: /design-first 알림 시스템 설계
 ```
 
-**Phase 0**: 복잡도 판단 → 다중 컴포넌트 → Phase 1부터 시작
+**Phase 0 (견적)**:
+- 0-A: 조사 범위 = notification 관련 모듈 전체, 깊이 = 라인별 영향도, Agent 2개 병렬
+- 0-B: 현행 — 알림 관련 코드 없음, UserPreference 모듈 존재 (재사용 가능)
+- 0-C: Gap 5건 (S:1, M:2, L:2), 리스크: 이메일 외부 서비스 의존
+- 0-D: L 포함 + 다중 컴포넌트 → Phase 1부터
 
-**Phase 1 (Capabilities)**:
-- 포함: 이메일 알림, 인앱 알림, 알림 설정 관리
-- 제외: SMS (v2), 푸시 알림 (v2)
-- 성공 기준: 알림 발송 후 3초 이내 도달
+**Phase 1 (Capabilities)**: 포함/제외/성공기준 합의 → **Phase 2 → 3 → 4 → 5**
 
-→ 사용자 승인 → Phase 2로
-
-**Phase 2 (Components)**:
-- NotificationService (신규) — 발송 오케스트레이션
-- EmailAdapter (신규) — 이메일 전송
-- NotificationStore (기존 DB 모듈 확장) — 알림 저장/조회
-- UserPreference (기존) — 사용자 설정 재사용
-
-→ 사용자 승인 → Phase 3으로
-
-**Phase 3 (Interactions)**:
-- 트리거 → NotificationService → UserPreference 확인 → EmailAdapter 발송 + NotificationStore 저장
-
-→ 사용자 승인 → Phase 4로
-
-**Phase 4 (Contracts)**: 시그니처, 타입, 테스트 케이스 정의
-
-→ 사용자 승인 → Phase 5로
-
-**Phase 5**: 설계 요약 → `/plan-review`로 검증 후 구현
-
-### Example 2: 단일 컴포넌트 — 캐시 레이어 추가 (외부 연결 → Phase 3)
+### Example 2: 단일 컴포넌트 — 캐시 레이어 추가
 
 ```
 User: /design-first API 응답 캐시 추가
 ```
 
-**Phase 0**: 복잡도 판단 → 단일 컴포넌트, 외부 연결 추가 → Phase 3부터 시작
+**Phase 0 (견적)**:
+- 0-A: 조사 범위 = API controller + middleware, 깊이 = 파일 목록, Agent 1개
+- 0-B: 현행 — 캐시 레이어 없음, Redis 의존성 이미 존재
+- 0-C: Gap 3건 (S:1, M:2), 리스크 없음
+- 0-D: M 이하 + 외부 연결 → Phase 3부터
 
-**Phase 3 (Interactions)**:
-- 요청 → CacheMiddleware → 캐시 히트? → 반환 : API 호출 → 캐시 저장 → 반환
-- TTL 만료 → 캐시 무효화
+**Phase 3 (Interactions)** → **Phase 4 (Contracts)** → **Phase 5**
 
-→ 사용자 승인 → Phase 4로
-
-**Phase 4 (Contracts)**: 캐시 키 전략, TTL 설정, 타입 정의
-
-→ 사용자 승인 → Phase 5로
-
-**Phase 5**: 설계 요약 → 바로 구현 (단순하므로)
-
-### Example 2b: 단일 컴포넌트 — 모듈 내부 리팩터링 (내부 구조 → Phase 2)
+### Example 3: 견적만 산출
 
 ```
-User: /design-first UserService 책임 분리
+User: 커버리지 5% 올리고 싶은데 견적내자
 ```
 
-**Phase 0**: 복잡도 판단 → 단일 컴포넌트, 내부 구조 변경 → Phase 2부터 시작
+**Phase 0 (견적)**:
+- 0-A: 조사 범위 = 전체 모듈 커버리지, 깊이 = 파일별 커버리지 수치, Agent 1개
+- 0-B: 현행 — 87.7%, 미커버 모듈: customer(72%), payment(68%), external(45%)
+- 0-C: Gap 8건 (S:3, M:4, L:1), 리스크: external 모듈은 mock 필수
+- 0-D: 사용자 선택 → "견적만 저장, 여기서 종료" → `phase-0-estimate.md` 저장
 
-**Phase 2 (Components)**:
-- UserService → UserAuthService (인증) + UserProfileService (프로필)
-- 기존 UserRepository 재사용
-
-→ 사용자 승인 → Phase 3으로
-
-**Phase 3 (Interactions)**: 분리된 서비스 간 호출 흐름 정의
-
-→ 사용자 승인 → Phase 4로
-
-**Phase 4 (Contracts)**: 시그니처, 타입 정의 → Phase 5로
-
-### Example 3: 복잡도 스킵
+### Example 4: 단순 유틸 — 스킵
 
 ```
 User: /design-first formatDate 유틸 함수
 ```
 
-**Phase 0**: 복잡도 판단 → 단순 유틸 → 설계 불필요
-
-"단일 유틸 함수는 설계 없이 바로 구현하는 것이 효율적입니다. 바로 코드를 작성할까요?"
+**Phase 0 (견적)**: 0-A에서 단일 파일/유틸로 판단 → 0-D 직행 → 스킵, 바로 실행
 
 ---
 

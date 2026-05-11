@@ -1,9 +1,9 @@
 # Logseq Mode — Knowledge Graph
 
-Logseq 페이지 간 `[[wikilink]]`와 `#tag` 연결을 분석하여 vis-network 기반 인터랙티브 지식 그래프를 생성합니다.
+Obsidian 페이지 간 `[[wikilink]]`와 `#tag` 연결을 분석하여 vis-network 기반 인터랙티브 지식 그래프를 생성합니다.
 
 **핵심 원칙**:
-- 노드 단위: Logseq 페이지
+- 노드 단위: Obsidian 페이지
 - 엣지: `[[wikilink]]` 및 `#tag` 참조
 - 색상: 네임스페이스 기반 (decision=green, troubleshoot=red 등)
 - 기본 필터: session/, 날짜 페이지 제외
@@ -11,11 +11,11 @@ Logseq 페이지 간 `[[wikilink]]`와 `#tag` 연결을 분석하여 vis-network
 ## Quick Reference
 
 ```bash
-/vis-graph logseq                                    # 기본: ~/Documents/logseq/pages
+/vis-graph logseq                                    # 기본: ~/Documents/obsidian/pages
 /vis-graph logseq --include-session                  # session 포함
 /vis-graph logseq --namespace=decision               # 특정 namespace 포커스
 /vis-graph logseq --no-orphans --min-links=2         # 최소 연결 2개
-/vis-graph logseq install ~/Documents/logseq/        # 독립 실행 스크립트 설치
+/vis-graph logseq install ~/Documents/obsidian/        # 독립 실행 스크립트 설치
 ```
 
 ## Instructions
@@ -30,7 +30,7 @@ mise run vis:graph logseq \
   [--namespace <name>] [--min-links <N>]
 ```
 
-- `{PAGES_DIR}`: Logseq pages 디렉토리 (기본: `~/Documents/logseq/pages`)
+- `{PAGES_DIR}`: Logseq pages 디렉토리 (기본: `~/Documents/obsidian/pages`)
 - 인자는 사용자 입력이 있으면 전달
 - 템플릿은 mise task 내부에서 자동 해석됨
 

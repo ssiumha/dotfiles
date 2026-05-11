@@ -1,6 +1,6 @@
 # vis-graph
 
-파일 의존성 그래프(dep), DB 스키마 ERD(schema), Logseq 지식 그래프(logseq)를 vis-network 기반 인터랙티브 HTML로 시각화합니다.
+파일 의존성 그래프(dep), DB 스키마 ERD(schema), vault 지식 그래프(logseq)를 vis-network 기반 인터랙티브 HTML로 시각화합니다.
 
 **실행 방식**: mise task (`mise run vis:graph <command>`)로 동작. 이 skill은 래퍼.
 

@@ -1,0 +1,36 @@
+feeds:
+  - url: https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss.xml
+    categories: [security]
+    label: NVD Recent CVEs
+
+  - url: https://snyk.io/blog/feed/
+    categories: [security]
+    label: Snyk Blog
+
+  - url: https://github.blog/tag/security/feed/
+    categories: [security]
+    label: GitHub Security Blog
+
+  - url: https://unit42.paloaltonetworks.com/feed/
+    categories: [security]
+    label: Unit42 (Palo Alto)
+
+  - url: https://blog.aquasec.com/rss.xml
+    categories: [security]
+    label: Aqua Security Blog
+
+  - url: https://spring.io/blog.atom
+    categories: [security, backend]
+    label: Spring Blog
+
+  - url: https://nodejs.org/en/feed/blog.xml
+    categories: [security, frontend]
+    label: Node.js Blog
+
+  - url: https://news.hada.io/rss
+    categories: [general, blockchain, devops]
+    label: GeekNews (news.hada.io)
+
+  - url: https://techblog.lycorp.co.jp/ko/feed/index.xml
+    categories: [backend, frontend, devops]
+    label: LY Corp Tech Blog (LINE/Yahoo Japan)

@@ -9,6 +9,8 @@ GitHub Actions 워크플로우 작성, 커스텀 액션, 보안 강화를 위한
 - 재사용 (composite action / reusable workflow)
 - OIDC (secretless cloud auth)
 - 빠른 피드백 (concurrency + path filter + cache)
+- 스크립트 추출 (workflow `run:` 블록은 얇게, 로직은 Justfile/스크립트로 빼서 로컬·CI 공통 실행)
+- 가시성 (로그 그룹화, Step Summary, annotation, 실패 시 artifact — 로그 끝까지 안 읽어도 원인 파악)
 
 ## 리소스 선택
 
@@ -22,6 +24,8 @@ GitHub Actions 워크플로우 작성, 커스텀 액션, 보안 강화를 위한
 | release, changelog, semantic-release, release-please | 05-release-deploy.md |
 | deploy, environment, OIDC, deployment | 05-release-deploy.md |
 | security, SHA 고정, Dependabot, harden-runner | 06-security.md |
+| run block, script extraction, Justfile, 로컬 재현, act, shell injection, bridging | 07-script-extraction.md |
+| 가시성, observability, 로그, step summary, annotation, artifact, debug, 실패 컨텍스트 | 08-observability.md |
 
 ## Workflow
 

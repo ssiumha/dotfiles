@@ -1,0 +1,159 @@
+// renderer.mjs — PPTXGenJS 렌더링 + XML 후처리
+// 변경 이유: PPT 렌더링 방식 변경 시만
+// PPTXGenJS API와 OOXML 조작은 이 모듈에만 존재
+
+import { getCategory } from './spec.mjs';
+
+const EMU = 914400;
+
+/**
+ * Zone 도형 렌더링 (재귀)
+ */
+export function renderZones(slide, zones, spec, theme) {
+  // zone 트리 구성
+  const zoneTree = new Map();
+  for (const z of spec.zones) {
+    const layoutData = zones.get(z.id);
+    if (!layoutData) continue;
+    zoneTree.set(z.id, { ...z, bounds: layoutData.bounds, children: [] });
+  }
+  for (const z of spec.zones) {
+    if (z.parentId && zoneTree.has(z.parentId) && zoneTree.has(z.id)) {
+      zoneTree.get(z.parentId).children.push(zoneTree.get(z.id));
+    }
+  }
+
+  function render(zone) {
+    const b = zone.bounds;
+    const t = theme.zone[zone.type] || theme.zone.group || theme.zone.custom;
+    slide.addShape("rect", {
+      x: b.x, y: b.y, w: b.w, h: b.h,
+      fill: { color: t.fill },
+      line: { color: t.border, width: 1, dashType: zone.type === "region" ? "dash" : "solid" },
+      rectRadius: 0.05,
+    });
+    slide.addText(zone.label, {
+      x: b.x + 0.1, y: b.y + 0.05, w: b.w - 0.2, h: 0.25,
+      fontSize: 8, bold: true, color: t.labelColor,
+    });
+    for (const child of zone.children) render(child);
+  }
+
+  for (const z of [...zoneTree.values()].filter(z => !z.parentId)) render(z);
+}
+
+/**
+ * Node 도형 렌더링
+ */
+export function renderNodes(slide, nodes, spec, theme) {
+  for (const n of spec.nodes) {
+    const layoutData = nodes.get(n.id);
+    if (!layoutData) continue;
+    const b = layoutData.bounds;
+    const cat = getCategory(n.service);
+    const colors = theme.node[cat] || theme.node.default;
+
+    slide.addShape("roundRect", {
+      x: b.x, y: b.y, w: b.w, h: b.h,
+      fill: { color: colors.fill },
+      line: { color: "333333", width: 0.5 },
+      rectRadius: 0.06,
+    });
+    slide.addText([
+      { text: n.service.toUpperCase(), options: { fontSize: 7, color: colors.text, bold: true } },
+      { text: "\n" + n.label, options: { fontSize: 7, color: colors.text } },
+    ], {
+      x: b.x, y: b.y + 0.08, w: b.w, h: b.h - 0.16,
+      align: "center", valign: "middle",
+    });
+  }
+}
+
+/**
+ * 타이틀 렌더링
+ */
+export function renderTitle(slide, spec, theme) {
+  slide.addText(spec.title, {
+    x: 0.3, y: 0.1, w: 10, h: 0.35,
+    fontSize: theme.title.fontSize, color: theme.title.color, bold: true,
+  });
+  if (spec.subtitle) {
+    slide.addText(spec.subtitle, {
+      x: 0.3, y: 0.42, w: 10, h: 0.25,
+      fontSize: theme.subtitle.fontSize, color: theme.subtitle.color,
+    });
+  }
+}
+
+/**
+ * Edge points → OOXML freeform polyline
+ */
+function edgeToXml(id, name, pts, style = {}) {
+  if (pts.length < 2) return "";
+
+  const color = style.color || "555555";
+  const width = style.width || 15875;
+  const dash = style.dash ? `<a:prstDash val="${style.dash}"/>` : "";
+  const arrow = style.arrow !== false
+    ? '<a:tailEnd type="triangle" w="med" len="med"/>' : "";
+
+  const pad = 0.02;
+  const allX = pts.map(p => p.x), allY = pts.map(p => p.y);
+  const bx = Math.min(...allX) - pad, by = Math.min(...allY) - pad;
+  const bw = Math.max(...allX) - bx + pad * 2 || 0.05;
+  const bh = Math.max(...allY) - by + pad * 2 || 0.05;
+  const W = Math.round(bw * EMU), H = Math.round(bh * EMU);
+
+  const localPts = pts.map(p => ({
+    x: Math.round(((p.x - bx) / bw) * W),
+    y: Math.round(((p.y - by) / bh) * H),
+  }));
+
+  let pathCmds = `<a:moveTo><a:pt x="${localPts[0].x}" y="${localPts[0].y}"/></a:moveTo>`;
+  for (let i = 1; i < localPts.length; i++) {
+    pathCmds += `<a:lnTo><a:pt x="${localPts[i].x}" y="${localPts[i].y}"/></a:lnTo>`;
+  }
+
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${Math.round(bx * EMU)}" y="${Math.round(by * EMU)}"/><a:ext cx="${W}" cy="${H}"/></a:xfrm><a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="${W}" b="${H}"/><a:pathLst><a:path w="${W}" h="${H}">${pathCmds}</a:path></a:pathLst></a:custGeom><a:noFill/><a:ln w="${width}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${dash}${arrow}</a:ln></p:spPr></p:sp>`;
+}
+
+/**
+ * Edge XML 생성 (모든 edges → XML string)
+ * @param {Array<{id, points}>} edges - layout 결과의 edges
+ * @param {Array} connections - spec.connections (스타일 매핑용)
+ * @param {number} startId - XML shape id 시작값
+ * @returns {string} 모든 edge의 XML
+ */
+export function buildEdgeXml(edges, connections, startId) {
+  const styleMap = new Map();
+  for (const conn of connections) {
+    styleMap.set(`e-${conn.from}-${conn.to}`, conn.style || {});
+  }
+
+  let xml = "";
+  let nextId = startId;
+  for (const edge of edges) {
+    if (edge.points.length < 2) continue;
+    const style = styleMap.get(edge.id) || {};
+    xml += edgeToXml(nextId++, edge.id, edge.points, style);
+  }
+  return xml;
+}
+
+/**
+ * Slide XML에 edge XML 주입
+ * @param {string} slideXml - 원본 slide XML
+ * @param {string} edgeXml - 주입할 edge XML
+ * @returns {string} 수정된 slide XML
+ */
+export function injectEdgeXml(slideXml, edgeXml) {
+  return slideXml.replace("</p:spTree>", edgeXml + "\n</p:spTree>");
+}
+
+/**
+ * Slide XML에서 다음 사용 가능한 shape id 추출
+ */
+export function getNextShapeId(slideXml) {
+  const ids = [...slideXml.matchAll(/cNvPr id="(\d+)"/g)].map(m => parseInt(m[1]));
+  return Math.max(...ids) + 1;
+}

@@ -17,6 +17,22 @@
 4. **code-review 참조**: 품질 기준은 code-review의 체크리스트를 기반으로 하되, 여기서 중복 기술하지 않는다
 5. **비례적 리뷰**: 파일 수에 비례하여 깊이를 조절한다 (1-3파일: 상세, 4-10: 주요 이슈, 10+: 패턴 기반)
 
+## 테스트 원칙
+
+**원칙 기준은 `/principles`에 위임한다.** 본 스킬은 감지/리포트 수행 로직에 집중.
+
+Phase 3 분석 시 아래 원칙을 소환하여 판정에 활용:
+
+| 영역 | 소환 원칙 |
+|------|----------|
+| 3.1 Overfitting | `/principles check TEST-BEHAVIOR` |
+| 3.2 Test Smell | `/principles check TEST-SMELLS` (canonical 카탈로그) |
+| 3.3 테스트 품질 | `/principles check FIRST` + `/principles check DAMP` |
+| 3.4 통합/E2E | `/principles check TEST-PYRAMID` (추상화 레벨), 본 스킬은 격리/Teardown 수행 체크 담당 |
+| 3.5 커버리지 | `/principles check BEYONCE-RULE` (의미 있는 assert·Happy/Edge/Error 균형·Mutation 사고실험) |
+
+> 설계·SOLID 원칙의 테스트 적용은 `/principles check <name>` 참조.
+
 ## 심각도 기준
 
 | 심각도 | 기준 | 예시 |
@@ -101,6 +117,7 @@
 ### 3.1 Overfitting 분석
 
 > 상세: `resources/04-overfitting-patterns.md`
+> 관련 원칙: **행위 검증 우선** — 구현 세부사항 결합이 overfitting의 근본 원인
 
 테스트가 구현 세부사항에 과도하게 결합되어 있는지 분석한다.
 
@@ -127,6 +144,7 @@ Grep: assert_called|toHaveBeenCalled|calledWith|called_once
 ### 3.2 Test Smell 감지
 
 > 상세: `resources/01-test-smell-catalog.md`
+> 관련 원칙: **결정적 실행**, **빠른 피드백** — flaky/slow test는 원칙 위반
 
 10가지 test smell 패턴을 체크한다:
 
@@ -144,6 +162,7 @@ Grep: assert_called|toHaveBeenCalled|calledWith|called_once
 ### 3.3 테스트 품질
 
 > 기준: code-review의 품질 체크리스트 참조
+> 관련 원칙: **테스트 독립성**, **테스트는 명세다**, **DAMP over DRY**
 
 아래 항목을 확인한다:
 
@@ -160,6 +179,7 @@ Grep: assert_called|toHaveBeenCalled|calledWith|called_once
 ### 3.4 통합/E2E 리뷰
 
 > 상세: `resources/02-integration-e2e-criteria.md`
+> 관련 원칙: **테스트 피라미드** — 통합/E2E 비율이 과도하면 피라미드 역전
 
 통합 또는 E2E 테스트가 있을 경우에만 수행한다. 없으면 "해당 없음"으로 표기.
 
@@ -178,6 +198,7 @@ Grep: assert_called|toHaveBeenCalled|calledWith|called_once
 ### 3.5 커버리지 품질
 
 > 상세: `resources/03-coverage-quality.md`
+> 관련 원칙: **테스트 피라미드**, **행위 검증 우선** — 커버리지 수치보다 행위 검증 여부가 중요
 
 코드 커버리지의 **질적** 측면을 분석한다 (수치가 아닌 의미).
 
@@ -271,6 +292,19 @@ Grep: assert_called|toHaveBeenCalled|calledWith|called_once
 | Error case | ✅ | 주요 예외 시나리오 커버 |
 | Branch 커버리지 | ⚠️ | else 분기 미커버 2건 |
 
+## 원칙 점검
+
+> 각 원칙의 스코어링 근거는 `/principles check {원칙}`의 출력을 사용한다.
+
+| 원칙 | 상태 | 근거 |
+|------|:---:|------|
+| FIRST | ✅/⚠️/❌ | (Fast·Independent·Repeatable·Self-validating·Timely) |
+| TEST-BEHAVIOR | ✅/⚠️/❌ | (행위 vs 구현) |
+| TEST-PYRAMID | ✅/⚠️/❌ | (레벨 분포 + 추상화) |
+| DAMP | ✅/⚠️/❌ | (독해성) |
+| TEST-SMELLS | ✅/⚠️/❌ | (10종 스멜 점검 결과) |
+| BEYONCE-RULE | ✅/⚠️/❌ | (중요도 + 커버리지 질) |
+
 ## 요구사항 커버리지
 
 (요구사항 있을 시에만 표시)
@@ -297,9 +331,9 @@ Grep: assert_called|toHaveBeenCalled|calledWith|called_once
 
 | 조건 | 총평 |
 |------|------|
-| High 0개 + Medium 0-2개 | **PASS** — 테스트 품질 양호 |
-| High 0개 + Medium 3개 이상 | **WARN** — 개선 권장 |
-| High 1개 이상 | **FAIL** — 수정 필수 |
+| High 0개 + Medium 0-2개 + 원칙 위반(❌) 0개 | **PASS** — 테스트 품질 양호 |
+| High 0개 + Medium 3개 이상 OR 원칙 위반(❌) 1개 | **WARN** — 개선 권장 |
+| High 1개 이상 OR 원칙 위반(❌) 2개 이상 | **FAIL** — 수정 필수 |
 
 ---
 

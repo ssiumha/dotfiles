@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: tree-sitter
 description: AST parsing, S-expression queries, tag extraction via tree-sitter CLI. Use when parsing code into AST, extracting tags, visualizing syntax trees, or performing structural analysis beyond ast-grep.
 ---

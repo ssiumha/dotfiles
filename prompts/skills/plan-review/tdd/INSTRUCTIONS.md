@@ -1,5 +1,9 @@
 # TDD Practices
 
+> **테스트 원칙 위임**: 각 phase의 테스트 품질 기준은 `/principles`에 canonical로 있다.
+> - 설계/작성 전: `/principles check FIRST`, `/principles check TEST-BEHAVIOR`, `/principles check TEST-PYRAMID`
+> - 리뷰/리팩토링 후: `/principles check DAMP`, `/principles check TEST-SMELLS`, `/principles check BEYONCE-RULE`
+
 ## Phase 1: TDD 세션 시작
 
 새 기능이나 수정 작업 시작 시:

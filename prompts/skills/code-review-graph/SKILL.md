@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: code-review-graph
 description: >-
   Graph-based code review with Tree-sitter knowledge graph.

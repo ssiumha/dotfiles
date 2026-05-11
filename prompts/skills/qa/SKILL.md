@@ -14,6 +14,8 @@ argument-hint: "[create|run|list] [feature-name]"
 - **Project-local**: `.claude/qa/{feature}.md`에 저장, 프로젝트와 함께 관리
 - **재실행 가능**: 체크박스 초기화 후 언제든 재검증 가능
 
+> 자동화 테스트의 품질 기준은 본 스킬이 아닌 `/principles` (FIRST, TEST-BEHAVIOR, TEST-PYRAMID, DAMP, TEST-SMELLS, BEYONCE-RULE)에서 관리한다.
+
 ## Instructions
 
 ### 워크플로우 1: QA 체크리스트 생성
@@ -99,7 +101,7 @@ argument-hint: "[create|run|list] [feature-name]"
 2. **선택적 작업**
    - **초기화**: 체크박스 전부 `[ ]`로 리셋 (재검증용)
    - **아카이브**: 완료된 QA를 `.claude/qa/archive/`로 이동
-   - **Logseq 기록**: QA 완료 시 `pages/pj-{name}___qa___{feature}.md`로 결과 기록 제안
+   - **Logseq 기록**: QA 완료 시 `know/pj-{name}___qa___{feature}.md`로 결과 기록 제안
 
 ## 중요 원칙
 

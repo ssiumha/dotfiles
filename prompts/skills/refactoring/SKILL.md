@@ -63,6 +63,8 @@ triggers:
 
 네이밍: `test_characterize_{component}_{scenario}`
 
+> Characterization Test의 품질은 `/principles check TEST-BEHAVIOR` (외부 행위 기반 검증) 및 `/principles check TEST-SMELLS` (Sensitive Equality — 부동소수점·직렬화 포맷 주의) 참조.
+
 **Behavior Snapshot** (복잡한 출력일 때):
 - API 응답, 직렬화 출력, 상태 변환, 에러 메시지
 

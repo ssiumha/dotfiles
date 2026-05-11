@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: pdf
 description: >-
   Extracts text, tables, and structure from PDF files using opendataloader-pdf.

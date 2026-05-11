@@ -1,0 +1,358 @@
+// elk-layout.mjs — ELKjs 레이아웃 엔진
+// 변경 이유: ELK 설정/알고리즘 변경 시만
+// 인터페이스: layout(spec, options) → LayoutResult
+
+import ELK from 'elkjs/lib/elk.bundled.js';
+
+/**
+ * @typedef {Object} Bounds
+ * @property {number} x - inches
+ * @property {number} y - inches
+ * @property {number} w - inches
+ * @property {number} h - inches
+ */
+
+/**
+ * @typedef {Object} LayoutResult
+ * @property {Map<string, {id, bounds: Bounds}>} zones
+ * @property {Map<string, {id, bounds: Bounds}>} nodes
+ * @property {Array<{id, points: Array<{x,y}>}>} edges
+ */
+
+const PX_PER_INCH = 100; // ELK px → PPT inch 변환
+
+const DEFAULT_OPTIONS = {
+  slideW: 13.33,
+  slideH: 7.5,
+  titleH: 0.8,
+  margin: 0.3,
+  nodeW: 1.1,
+  nodeH: 0.7,
+};
+
+/**
+ * Arch Spec → ELK graph
+ */
+function buildElkGraph(spec, opts) {
+  // 빠른 조회용 Map
+  const nodeById = new Map(spec.nodes.map(n => [n.id, n]));
+  const zoneIds = new Set(spec.zones.map(z => z.id));
+
+  // 공통 레이아웃 옵션
+  // INCLUDE_CHILDREN 미사용 — 각 zone 독립 레이아웃 (노드 zone 안 보장)
+  const compoundOpts = {
+    'elk.algorithm': 'layered',
+    'elk.edgeRouting': 'ORTHOGONAL',
+    'elk.spacing.nodeNode': '20',
+    'elk.spacing.edgeNode': '15',
+    'elk.spacing.edgeEdge': '10',
+    'elk.layered.spacing.nodeNodeBetweenLayers': '35',
+    'elk.padding': '[top=40,left=12,bottom=12,right=12]',
+    'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+  };
+
+  // zone 유형별 방향 + 패딩 결정
+  function zoneLayoutOpts(zone) {
+    switch (zone.type) {
+      case 'region':
+        return { 'elk.direction': 'DOWN', 'elk.padding': '[top=35,left=10,bottom=10,right=10]' };
+      case 'vpc':
+        return { 'elk.direction': 'DOWN', 'elk.padding': '[top=35,left=10,bottom=10,right=10]' };
+      default:
+        return { 'elk.direction': 'DOWN', 'elk.padding': '[top=35,left=10,bottom=10,right=10]' };
+    }
+  }
+
+  function buildZone(zone) {
+    const childZones = spec.zones.filter(z => z.parentId === zone.id);
+    const childNodes = spec.nodes.filter(n => n.zoneId === zone.id);
+
+    const elkNode = {
+      id: zone.id,
+      layoutOptions: {
+        ...compoundOpts,
+        ...zoneLayoutOpts(zone),
+      },
+      children: [],
+      edges: [],
+    };
+
+    for (const cz of childZones) {
+      elkNode.children.push(buildZone(cz));
+    }
+
+    for (const n of childNodes) {
+      elkNode.children.push({
+        id: n.id,
+        width: opts.nodeW * PX_PER_INCH,
+        height: opts.nodeH * PX_PER_INCH,
+      });
+    }
+
+    // same-zone 내부 edges만 (cross-zone은 ELK에 넣지 않음)
+    for (const conn of spec.connections) {
+      const src = nodeById.get(conn.from);
+      const dst = nodeById.get(conn.to);
+      if (src && dst && src.zoneId === zone.id && dst.zoneId === zone.id) {
+        elkNode.edges.push({ id: `e-${conn.from}-${conn.to}`, sources: [conn.from], targets: [conn.to] });
+      }
+    }
+
+    return elkNode;
+  }
+
+  const rootZones = spec.zones.filter(z => !z.parentId);
+  const root = {
+    id: 'root',
+    layoutOptions: {
+      ...compoundOpts,
+      'elk.direction': 'DOWN',
+      'elk.padding': `[top=${Math.round(opts.titleH * PX_PER_INCH + opts.margin * PX_PER_INCH)},left=${Math.round(opts.margin * PX_PER_INCH)},bottom=${Math.round(opts.margin * PX_PER_INCH)},right=${Math.round(opts.margin * PX_PER_INCH)}]`,
+    },
+    children: rootZones.map(z => buildZone(z)),
+    edges: [],
+  };
+
+  // cross-zone edges는 buildZone에서 LCA에 배치됨 (root에는 불필요)
+
+  return root;
+}
+
+/**
+ * ELK 결과 → 절대 좌표 추출
+ */
+function extractPositions(node, zoneIds, parentX = 0, parentY = 0) {
+  const absX = parentX + (node.x ?? 0);
+  const absY = parentY + (node.y ?? 0);
+
+  const zones = new Map();
+  const nodes = new Map();
+  const edges = [];
+
+  if (node.id !== 'root') {
+    const bounds = {
+      x: absX / PX_PER_INCH,
+      y: absY / PX_PER_INCH,
+      w: (node.width ?? 0) / PX_PER_INCH,
+      h: (node.height ?? 0) / PX_PER_INCH,
+    };
+
+    // zone vs node 판별: spec의 zone id 목록으로 (children 유무가 아닌)
+    if (zoneIds.has(node.id)) {
+      zones.set(node.id, { id: node.id, bounds });
+    } else {
+      nodes.set(node.id, { id: node.id, bounds });
+    }
+  }
+
+  // edges
+  for (const edge of node.edges ?? []) {
+    for (const section of edge.sections ?? []) {
+      const points = [
+        section.startPoint,
+        ...(section.bendPoints ?? []),
+        section.endPoint,
+      ].map(p => ({
+        x: (p.x + absX) / PX_PER_INCH,
+        y: (p.y + absY) / PX_PER_INCH,
+      }));
+      edges.push({ id: edge.id, points });
+    }
+  }
+
+  for (const child of node.children ?? []) {
+    const cr = extractPositions(child, zoneIds, absX, absY);
+    for (const [k, v] of cr.zones) zones.set(k, v);
+    for (const [k, v] of cr.nodes) nodes.set(k, v);
+    edges.push(...cr.edges);
+  }
+
+  return { zones, nodes, edges };
+}
+
+/**
+ * 슬라이드 크기에 맞게 스케일링
+ */
+function scaleToSlide(result, elkWidth, elkHeight, opts) {
+  const targetW = opts.slideW;
+  const targetH = opts.slideH;
+  const rawW = elkWidth / PX_PER_INCH;
+  const rawH = elkHeight / PX_PER_INCH;
+
+  const scaleX = targetW / rawW;
+  const scaleY = targetH / rawH;
+  // 슬라이드를 채우되 aspect ratio 유지
+  const scale = Math.min(scaleX, scaleY);
+
+  // 중앙 정렬 오프셋
+  const offsetX = (targetW - rawW * scale) / 2;
+  const offsetY = (targetH - rawH * scale) / 2;
+
+  function sb(b) {
+    return { x: b.x * scale + offsetX, y: b.y * scale + offsetY, w: b.w * scale, h: b.h * scale };
+  }
+
+  const zones = new Map();
+  for (const [id, z] of result.zones) zones.set(id, { ...z, bounds: sb(z.bounds) });
+
+  const nodes = new Map();
+  for (const [id, n] of result.nodes) nodes.set(id, { ...n, bounds: sb(n.bounds) });
+
+  const edges = result.edges.map(e => ({
+    id: e.id,
+    points: e.points.map(p => ({ x: p.x * scale + offsetX, y: p.y * scale + offsetY })),
+  }));
+
+  return { zones, nodes, edges };
+}
+
+/**
+ * 메인 인터페이스: Arch Spec → LayoutResult
+ * @param {Object} spec - Arch Spec
+ * @param {Object} [options] - 슬라이드/노드 크기 오버라이드
+ * @returns {Promise<LayoutResult>}
+ */
+export async function layout(spec, options = {}) {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const elk = new ELK();
+  const graph = buildElkGraph(spec, opts);
+  const laid = await elk.layout(graph);
+
+  const zoneIds = new Set(spec.zones.map(z => z.id));
+  const raw = extractPositions(laid, zoneIds);
+  const scaled = scaleToSlide(raw, laid.width ?? 1, laid.height ?? 1, opts);
+
+  // cross-zone edges: obstacle-aware 직각 경로 생성
+  const nodeById = new Map(spec.nodes.map(n => [n.id, n]));
+  const MARGIN = 0.08; // 노드 주변 여백
+  const CHANNEL_STEP = 0.06; // 평행 커넥터 간격
+
+  // 장애물 목록: 노드만 (zone 경계는 제외 — 우회 경로가 복잡해짐)
+  const obstacles = [];
+  for (const n of scaled.nodes.values()) {
+    obstacles.push({
+      id: n.id,
+      x: n.bounds.x - MARGIN, y: n.bounds.y - MARGIN,
+      r: n.bounds.x + n.bounds.w + MARGIN,
+      b: n.bounds.y + n.bounds.h + MARGIN,
+    });
+  }
+
+  // 수평 세그먼트 충돌 체크
+  function hitsH(x1, x2, y, excludeIds) {
+    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+    return obstacles.filter(o =>
+      !excludeIds.includes(o.id) && y >= o.y && y <= o.b && hi > o.x && lo < o.r
+    );
+  }
+
+  // 수직 세그먼트 충돌 체크
+  function hitsV(x, y1, y2, excludeIds) {
+    const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
+    return obstacles.filter(o =>
+      !excludeIds.includes(o.id) && x >= o.x && x <= o.r && hi > o.y && lo < o.b
+    );
+  }
+
+  let channelIdx = 0;
+
+  for (const conn of spec.connections) {
+    const src = nodeById.get(conn.from);
+    const dst = nodeById.get(conn.to);
+    if (!src || !dst || src.zoneId === dst.zoneId) continue;
+
+    const sb = scaled.nodes.get(conn.from)?.bounds;
+    const db = scaled.nodes.get(conn.to)?.bounds;
+    if (!sb || !db) continue;
+
+    const excludeIds = [conn.from, conn.to];
+    const srcCx = sb.x + sb.w / 2, srcCy = sb.y + sb.h / 2;
+    const dstCx = db.x + db.w / 2, dstCy = db.y + db.h / 2;
+    const dx = dstCx - srcCx, dy = dstCy - srcCy;
+
+    // 포트 선택
+    let startX, startY, endX, endY;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      startX = dx > 0 ? sb.x + sb.w : sb.x;
+      startY = srcCy;
+      endX = dx > 0 ? db.x : db.x + db.w;
+      endY = dstCy;
+    } else {
+      startX = srcCx;
+      startY = dy > 0 ? sb.y + sb.h : sb.y;
+      endX = dstCx;
+      endY = dy > 0 ? db.y : db.y + db.h;
+    }
+
+    let pts;
+
+    if (Math.abs(startY - endY) < 0.1 || Math.abs(startX - endX) < 0.1) {
+      // 직선
+      pts = [{ x: startX, y: startY }, { x: endX, y: endY }];
+    } else {
+      // Z자 경로: zone gap 통과
+      const srcZB = scaled.zones.get(src.zoneId)?.bounds;
+      const dstZB = scaled.zones.get(dst.zoneId)?.bounds;
+
+      let midY;
+      if (srcZB && dstZB) {
+        const srcBottom = srcZB.y + srcZB.h;
+        const dstBottom = dstZB.y + dstZB.h;
+        if (dy > 0) {
+          midY = (srcBottom + dstZB.y) / 2;
+        } else {
+          midY = (dstBottom + srcZB.y) / 2;
+        }
+      } else {
+        midY = (startY + endY) / 2;
+      }
+
+      // channel offset (gap 범위 내에서만)
+      const gapSize = srcZB && dstZB
+        ? Math.abs(dy > 0 ? (dstZB.y - (srcZB.y + srcZB.h)) : (srcZB.y - (dstZB.y + dstZB.h)))
+        : 0.3;
+      const maxOff = gapSize * 0.35;
+      const off = Math.min(CHANNEL_STEP, maxOff) * channelIdx;
+      midY += off;
+      channelIdx++;
+
+      pts = [
+        { x: startX, y: startY },
+        { x: startX, y: midY },
+        { x: endX, y: midY },
+        { x: endX, y: endY },
+      ];
+    }
+
+    // 후처리: 각 세그먼트 obstacle avoidance
+    const safePts = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const isH = Math.abs(a.y - b.y) < 0.01;
+      const isV = Math.abs(a.x - b.x) < 0.01;
+
+      if (isH) {
+        const hits = hitsH(a.x, b.x, a.y, excludeIds);
+        if (hits.length > 0) {
+          // 장애물 위로 우회
+          const detourY = Math.min(...hits.map(o => o.y)) - 0.05;
+          safePts.push({ x: a.x, y: detourY });
+          safePts.push({ x: b.x, y: detourY });
+        }
+      } else if (isV) {
+        const hits = hitsV(a.x, a.y, b.y, excludeIds);
+        if (hits.length > 0) {
+          // 장애물 왼쪽으로 우회
+          const detourX = Math.min(...hits.map(o => o.x)) - 0.05;
+          safePts.push({ x: detourX, y: a.y });
+          safePts.push({ x: detourX, y: b.y });
+        }
+      }
+      safePts.push(b);
+    }
+
+    scaled.edges.push({ id: `e-${conn.from}-${conn.to}`, points: safePts });
+  }
+
+  return scaled;
+}

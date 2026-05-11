@@ -235,7 +235,7 @@ grep "^### 워크플로우" ~/dots/prompts/skills/{skill-name}/SKILL.md
 - 리소스 로딩 기반: `deployment`, `ci-cd`
 - Phase 기반: `tdd`
 - 가이드/리뷰 기반: `claude-guide`, `review-security`
-- 도구 실행 기반: `qmd`
+- 도구 실행 기반: `ir`
 
 **글로벌 규칙**:
 - `~/dots/prompts/rules/commit.md`: Git 커밋 규칙

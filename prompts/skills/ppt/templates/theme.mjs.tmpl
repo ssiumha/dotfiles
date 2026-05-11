@@ -1,0 +1,83 @@
+// theme.mjs — 테마 프리셋
+
+export const THEMES = {
+  "aws-default": {
+    zone: {
+      region:           { fill: "F8F9FA", border: "DEE2E6", labelColor: "868E96" },
+      vpc:              { fill: "E8F4FD", border: "1A73E8", labelColor: "1A73E8" },
+      "subnet-public":  { fill: "E8F5E9", border: "4CAF50", labelColor: "2E7D32" },
+      "subnet-private": { fill: "FFF8E1", border: "FFA000", labelColor: "E65100" },
+      az:               { fill: "F3E5F5", border: "9C27B0", labelColor: "6A1B9A" },
+      group:            { fill: "ECEFF1", border: "90A4AE", labelColor: "546E7F" },
+      custom:           { fill: "F5F5F5", border: "BDBDBD", labelColor: "616161" },
+    },
+    node: {
+      compute:     { fill: "FF9900", text: "FFFFFF" },
+      database:    { fill: "2E73B8", text: "FFFFFF" },
+      network:     { fill: "8C4FFF", text: "FFFFFF" },
+      storage:     { fill: "3F8624", text: "FFFFFF" },
+      security:    { fill: "DD3522", text: "FFFFFF" },
+      integration: { fill: "E7157B", text: "FFFFFF" },
+      management:  { fill: "00A4A6", text: "FFFFFF" },
+      default:     { fill: "666666", text: "FFFFFF" },
+    },
+    connector: { color: "555555", width: 15875 },
+    title: { color: "222222", fontSize: 16 },
+    subtitle: { color: "888888", fontSize: 9 },
+    background: "FFFFFF",
+  },
+
+  "corporate-blue": {
+    zone: {
+      region:           { fill: "F0F4F8", border: "B0BEC5", labelColor: "607D8B" },
+      vpc:              { fill: "E3F2FD", border: "1565C0", labelColor: "1565C0" },
+      "subnet-public":  { fill: "E8EAF6", border: "3F51B5", labelColor: "283593" },
+      "subnet-private": { fill: "FFF3E0", border: "E65100", labelColor: "BF360C" },
+      az:               { fill: "F3E5F5", border: "7B1FA2", labelColor: "4A148C" },
+      group:            { fill: "ECEFF1", border: "78909C", labelColor: "455A64" },
+      custom:           { fill: "F5F5F5", border: "9E9E9E", labelColor: "616161" },
+    },
+    node: {
+      compute:     { fill: "1565C0", text: "FFFFFF" },
+      database:    { fill: "00695C", text: "FFFFFF" },
+      network:     { fill: "4527A0", text: "FFFFFF" },
+      storage:     { fill: "2E7D32", text: "FFFFFF" },
+      security:    { fill: "C62828", text: "FFFFFF" },
+      integration: { fill: "AD1457", text: "FFFFFF" },
+      management:  { fill: "00838F", text: "FFFFFF" },
+      default:     { fill: "455A64", text: "FFFFFF" },
+    },
+    connector: { color: "546E7F", width: 15875 },
+    title: { color: "1A237E", fontSize: 16 },
+    subtitle: { color: "78909C", fontSize: 9 },
+    background: "FFFFFF",
+  },
+
+  "minimal-gray": {
+    zone: {
+      region:           { fill: "FAFAFA", border: "E0E0E0", labelColor: "9E9E9E" },
+      vpc:              { fill: "F5F5F5", border: "BDBDBD", labelColor: "757575" },
+      "subnet-public":  { fill: "F5F5F5", border: "9E9E9E", labelColor: "616161" },
+      "subnet-private": { fill: "EEEEEE", border: "9E9E9E", labelColor: "616161" },
+      az:               { fill: "F5F5F5", border: "BDBDBD", labelColor: "757575" },
+      group:            { fill: "FAFAFA", border: "E0E0E0", labelColor: "9E9E9E" },
+      custom:           { fill: "FAFAFA", border: "E0E0E0", labelColor: "9E9E9E" },
+    },
+    node: {
+      compute:     { fill: "424242", text: "FFFFFF" },
+      database:    { fill: "616161", text: "FFFFFF" },
+      network:     { fill: "757575", text: "FFFFFF" },
+      storage:     { fill: "546E7F", text: "FFFFFF" },
+      security:    { fill: "37474F", text: "FFFFFF" },
+      integration: { fill: "455A64", text: "FFFFFF" },
+      management:  { fill: "78909C", text: "FFFFFF" },
+      default:     { fill: "9E9E9E", text: "FFFFFF" },
+    },
+    connector: { color: "9E9E9E", width: 12700 },
+    title: { color: "212121", fontSize: 16 },
+    subtitle: { color: "9E9E9E", fontSize: 9 },
+    background: "FFFFFF",
+  },
+};
+
+// SERVICE_CATEGORY는 spec.mjs로 이동 (SRP: 도메인 모델은 spec에서 관리)

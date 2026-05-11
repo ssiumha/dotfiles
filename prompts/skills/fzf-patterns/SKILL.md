@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: fzf-patterns
 description: Provides fzf command patterns and configurations. Use when writing fzf commands, interactive filters, or pipeline compositions.
 ---

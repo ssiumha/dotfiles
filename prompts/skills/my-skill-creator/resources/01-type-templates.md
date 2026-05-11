@@ -362,7 +362,7 @@ User: "{요청}" → 도구 실행 → 검증 → 정리
 도구 사용법은 `REFERENCE.md` 참조.
 ```
 
-**대표 예시**: qmd, ast-grep
+**대표 예시**: ir, ast-grep
 
 ---
 

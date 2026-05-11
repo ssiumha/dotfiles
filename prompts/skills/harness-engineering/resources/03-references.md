@@ -50,6 +50,16 @@
 | [NxCode — Harness Engineering Complete Guide](https://www.nxcode.io/resources/news/harness-engineering-complete-guide-ai-agent-codex-2026) | Kitchen Sink 세션, 사전 최적화, 기능적 서브에이전트 분리는 작동하지 않음 |
 | [revfactory/harness — Claude Code Agent Team Plugin](https://github.com/revfactory/harness) | 6개 에이전트 팀 아키텍처 패턴(Pipeline, Fan-out, Expert Pool, Producer-Reviewer, Supervisor, Hierarchical). Skill = "How to do" vs Agent = "Who does" 구분. 트리거 검증 + 드라이런 방법론 |
 
+## 메타 하네스 / 에이전트 진화
+
+| 출처 | 핵심 인사이트 |
+|------|---------------|
+| [Meta — HyperAgents (arXiv 2603.19461)](https://arxiv.org/abs/2603.19461) | 자기참조적 에이전트(DGM-H): Task Agent + Meta Agent가 단일 편집 가능 프로그램. 자기 개선 반복 시 영속 메모리, 성능 추적, 검증 파이프라인 등 하네스 구성요소를 **자동 재발명**. "하네스는 수렴적 아키텍처" |
+| [Addy Osmani — The Code Agent Orchestra](https://addyosmani.com/blog/code-agent-orchestra/) | 동기식 단일→비동기 다중 에이전트 전환. 병목이 코드 생성→**검증(Verification)**으로 이동. 3 focused agents > 1 generalist 3x longer |
+| [Addy Osmani — agent-skills](https://github.com/addyosmani/agent-skills) | 20개 구조화 스킬. `/spec→/plan→/build→/test→/review→/ship` 생명주기. "AI 에이전트는 최단 경로를 택한다 — 스펙·테스트·보안 리뷰를 건너뛰지 못하게 구조화" |
+| [Sebastian Raschka — Components of A Coding Agent](https://magazine.sebastianraschka.com/p/components-of-a-coding-agent) | 코딩 에이전트 6대 구성요소: 리포 컨텍스트, 프롬프트 캐시, 도구 접근, 세션 메모리, 서브에이전트 위임, 장기 세션 연속성 |
+| [Anthropic — Advisor Strategy](https://docs.anthropic.com/en/docs/build-with-claude/advisor-strategy) | Opus=조언자, Sonnet=실행자. 비용 85%↓ 성능 2x+. 공식 도입 패턴 |
+
 ## 아키텍처 테스트 / 의존 방향
 
 | 출처 | 핵심 인사이트 |
@@ -66,3 +76,17 @@
 | 출처 | 핵심 인사이트 |
 |------|---------------|
 | [matklad — ARCHITECTURE.md](https://matklad.github.io/2021/02/06/ARCHITECTURE.md.html) | "어디를 수정할지 = 10배 비용". Codemap = 나라 지도, 아틀라스가 아님. 불변식은 absences로 표현. 검색 가능한 심볼 이름으로 참조. rust-analyzer architecture.md가 모범 사례 |
+
+## 에이전트 / 서브에이전트 (2026-04-09 추가)
+
+| 출처 | 핵심 인사이트 |
+|------|---------------|
+| [Anthropic — Harness Design for Long-Running Apps](https://www.anthropic.com/engineering/harness-design-long-running-apps) | GAN 영감 3에이전트(Planner/Generator/Evaluator). 자기 평가 편향 → 생성자/평가자 분리 필수. Context anxiety(컨텍스트 한계 근접 시 조기 종료). "모델이 좋아져도 하네스 복잡성은 줄지 않고 이동한다" |
+| [Anthropic — Effective Context Engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) | "Right altitude" 원칙 — 시스템 프롬프트는 너무 구체적이지도 모호하지도 않게. Context rot(토큰↑ → recall↓). Sub-agent → condensed summary 반환 |
+| [Claude Code Subagents Docs](https://code.claude.com/docs/en/sub-agents) | 14개 frontmatter 필드. Scope 5단계(Managed > CLI > Project > User > Plugin). Memory 3단계. Agent(child) 스폰 제한 |
+| [Claude Code Agent Teams Docs](https://code.claude.com/docs/en/agent-teams) | 실험적. Mailbox(peer-to-peer + broadcast). TeammateIdle/TaskCreated/TaskCompleted Hook. 서브에이전트 정의를 teammate로 재사용 가능(단, skills/mcpServers 무시) |
+| [Anthropic Blog — Subagents in Claude Code](https://claude.com/blog/subagents-in-claude-code) | "10+ 파일 또는 3+ 독립 조각" → 서브에이전트 위임 기준선. 서브에이전트 부적합: 순차 의존, 같은 파일 수정, 에이전트 간 협업 필요 |
+| [Citadel — Agent Orchestration Harness](https://github.com/SethGammon/Citadel) | 4-tier 라우팅(Pattern match → Session → Keyword → LLM). Campaign persistence. Circuit breaker. "CLAUDE.md는 문서, 하네스는 인프라" |
+| [AGENTS.md spec](https://agents.md/) | 크로스 도구 에이전트 지시 포맷. 6만+ 리포 채택. Linux Foundation |
+| [ETH Zurich — Agentfiles study (via HumanLayer)](https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents) | LLM 자동생성 CLAUDE.md는 20%+ 토큰 추가 소비, 성능 향상 없음. 수작업 ~4% 향상 |
+| [revfactory/harness-100](https://github.com/revfactory/harness-100) | 10 도메인 100 하네스. A/B 테스트: 하네스 +60% 품질, 100% 승률. 복잡할수록 효과 큼(Basic +23.8, Advanced +29.6, Expert +36.2) |

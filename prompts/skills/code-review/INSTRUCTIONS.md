@@ -52,7 +52,7 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 2. Detection Patterns으로 파일 스캔 (Grep)
 3. 발견 항목을 심각도별 분류
 4. 타입 체크 도구 실행 (tsc / mypy)
-5. 결과 통합하여 Output Format으로 출력
+5. 결과 통합하여 Output Format으로 출력 (Verdict 포함)
 
 ## Workflow 2: Terraform Review
 
@@ -77,14 +77,14 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 3. data source → resource 매핑하여 lifecycle 누락 확인
 4. 발견 항목을 심각도별 분류
 5. `terraform validate` 실행 (가능한 경우)
-6. 결과 통합하여 Output Format으로 출력
+6. 결과 통합하여 Output Format으로 출력 (Verdict 포함)
 
 ## Workflow 3: Lint Audit
 
 `resources/03-lint-audit.md`의 4-phase 워크플로우를 따른다:
 1. 프로젝트 분석 (스택/CI/도구 감지)
 2. 현황 진단 (lint/타입/죽은코드/커밋 위생)
-3. 리포트 생성
+3. 리포트 생성 (Verdict 포함)
 4. 자동화 제안
 
 ## Workflow 4: Test Review
@@ -114,11 +114,29 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 - Medium: N개
 - 총 SLOC: N (오류 밀도: X.XX)
 
+### Verdict: {PASS | WARN | FAIL}
+
 ### 권장 조치
 1. [우선] ...
 2. [중간] ...
 3. [낮음] ...
 ```
+
+## Verdict 판정
+
+| 조건 | 판정 |
+|------|------|
+| Critical 0개 + High 0-2개 | **PASS** — 품질 양호 |
+| Critical 0개 + High 3개 이상 | **WARN** — 개선 권장 |
+| Critical 1개 이상 | **FAIL** — 수정 필수 |
+
+## 후속 안내
+
+| Verdict | 안내 |
+|---------|------|
+| **PASS** | "코드 품질에 큰 문제가 없습니다." |
+| **WARN** | 개선 항목 안내. 근본 원인 진단이 필요하면 `/principles check` 참조 |
+| **FAIL** | 수정 필수 항목 안내. `/principles check`로 원칙 위반 여부 확인 |
 
 ## Parallel Review Mode
 
@@ -174,3 +192,4 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 | `/security` | 보안 취약점 검토 | auth, 사용자 입력, API, 배포 전 |
 | `/code-metrics` | 구조 메트릭 | 복잡도, 결합도, 응집도 분석 |
 | `/plan-review tdd` | TDD 워크플로우 | RED-GREEN-REFACTOR 개발 진행 |
+| `/principles check <name>` | 설계 원칙 점검 | 이슈의 근본 원인이 원칙 위반일 때 (SRP, OCP, DRY, LoD 등). 스코어링 기준 + 기계적 검증 방법 제공 |

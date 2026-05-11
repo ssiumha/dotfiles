@@ -1,0 +1,72 @@
+// spec.mjs — 도메인 모델 + 검증 + 서비스 카테고리
+// 변경 이유: Arch Spec 모델이 바뀔 때만
+
+/**
+ * AWS 서비스 → 카테고리 매핑
+ */
+export const SERVICE_CATEGORY = {
+  // Network
+  alb: "network", nlb: "network", cloudfront: "network", route53: "network",
+  igw: "network", nat: "network", vpc_endpoint: "network", apigw: "network",
+  // Compute
+  ec2: "compute", ecs: "compute", eks: "compute", lambda: "compute",
+  fargate: "compute", batch: "compute",
+  // Database
+  rds: "database", dynamodb: "database", elasticache: "database",
+  aurora: "database", redshift: "database", documentdb: "database",
+  // Storage
+  s3: "storage", efs: "storage", ebs: "storage", ecr: "storage",
+  // Security
+  iam: "security", waf: "security", kms: "security", cognito: "security",
+  secrets_manager: "security", guardduty: "security",
+  // Integration
+  sqs: "integration", sns: "integration", eventbridge: "integration",
+  step_functions: "integration",
+  // Management
+  cloudwatch: "management", xray: "management", config: "management",
+  cloudtrail: "management",
+};
+
+/**
+ * Arch Spec 검증
+ * @throws {Error} 검증 실패 시
+ */
+export function validateSpec(spec) {
+  if (!spec.title) throw new Error("spec.title is required");
+  if (!Array.isArray(spec.zones) || spec.zones.length === 0)
+    throw new Error("spec.zones must be a non-empty array");
+  if (!Array.isArray(spec.nodes) || spec.nodes.length === 0)
+    throw new Error("spec.nodes must be a non-empty array");
+  if (!Array.isArray(spec.connections))
+    throw new Error("spec.connections must be an array");
+
+  const zoneIds = new Set(spec.zones.map(z => z.id));
+  const nodeIds = new Set(spec.nodes.map(n => n.id));
+
+  // zone parentId 참조 무결성
+  for (const z of spec.zones) {
+    if (z.parentId && !zoneIds.has(z.parentId))
+      throw new Error(`zone "${z.id}" references unknown parentId "${z.parentId}"`);
+  }
+
+  // node zoneId 참조 무결성
+  for (const n of spec.nodes) {
+    if (!zoneIds.has(n.zoneId))
+      throw new Error(`node "${n.id}" references unknown zoneId "${n.zoneId}"`);
+  }
+
+  // connection from/to 참조 무결성
+  for (const c of spec.connections) {
+    if (!nodeIds.has(c.from))
+      throw new Error(`connection from "${c.from}" references unknown node`);
+    if (!nodeIds.has(c.to))
+      throw new Error(`connection to "${c.to}" references unknown node`);
+  }
+}
+
+/**
+ * 서비스 키 → 카테고리 조회 (unknown이면 "default")
+ */
+export function getCategory(service) {
+  return SERVICE_CATEGORY[service] || "default";
+}

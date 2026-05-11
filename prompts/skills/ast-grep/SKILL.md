@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: ast-grep
 description: Creates ast-grep patterns for structural code search. Use when finding functions/classes by structure, refactoring code, or when grep returns too many false positives.
 ---

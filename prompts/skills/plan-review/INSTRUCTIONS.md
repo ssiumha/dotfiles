@@ -67,9 +67,35 @@
 
 ## Phase 2: 6-Point Review
 
-각 체크를 순서대로 수행한다. `--quick` 모드에서는 Check 1, 2, 3만 수행한다.
+6개 Check를 **2그룹 병렬**로 수행한다. Check 간 의존성이 없으므로 동시 실행 가능.
+`--quick` 모드에서는 그룹 A의 Check 1 + 그룹 B의 Check 2, 3만 수행한다.
 
 > 각 체크의 상세 PASS/WARN/FAIL 기준은 `resources/01-review-checklist.md`를 참조한다.
+
+### 병렬 실행 구조
+
+**단일 메시지에서 2그룹을 동시 실행**한다. 각 Agent에 Phase 1 파싱 결과(계획 전문 + 참조 파일 목록 + 사용자 원본 요청)를 전달한다.
+
+```
+그룹 A — 메인 컨텍스트에서 직접 수행 (계획 텍스트 분석):
+  Check 1: Scope Alignment
+  Check 4: Completeness
+  Check 6: Verification Plan
+
+그룹 B — Explore Agent로 병렬 수행 (코드베이스 검증):
+  Check 2: Codebase Validation  → Glob, Grep, Read
+  Check 3: Risk / Impact        → git status, Grep
+  Check 5: Chesterton's Fence   → Read, git log
+```
+
+그룹 B Agent 프롬프트에 포함할 내용:
+- 계획 전문
+- 참조 파일 목록
+- 사용자 원본 요청
+- 해당 Check의 체크리스트 항목
+- PASS/WARN/FAIL 출력 포맷
+
+`--quick` 모드: 그룹 A는 Check 1만, 그룹 B는 Check 2+3만 수행. Check 4, 5, 6 스킵.
 
 ### Check 1: Scope Alignment (범위 정합성)
 

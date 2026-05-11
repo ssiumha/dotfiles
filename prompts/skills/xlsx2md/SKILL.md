@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: xlsx2md
 description: >-
   Converts Excel (.xlsx) files to Markdown tables with merged cell handling.

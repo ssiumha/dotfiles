@@ -91,6 +91,7 @@ Enforcement Layer:
 | **Enforcement** | hooks/린터로 품질 강제, 린트 에러가 수정 지침을 포함하는가 |
 | **Memory** | MEMORY.md 200줄 이내, 중복/obsolete 없음 |
 | **Entropy Management** | 문서 신선도 검증, 품질 등급, 정기 정리 프로세스 |
+| **Resilience** | 실패 모드(F1-F6) 방어 — Hook/Rule/Skill 구조로 방어, Skill 회복력 등급 (`resources/11-resilience-catalog.md`) |
 | **Orchestration** (조건부) | agents/ 정의 품질, 팀 토폴로지, 검증 — `.claude/agents/` 존재 시만 |
 
 **3. 감사 보고서 출력**
@@ -98,7 +99,7 @@ Enforcement Layer:
 ```
 ## Harness Audit Report — {project}
 
-### Score: {총점}/21 (또는 /24 — Orchestration 포함 시)
+### Score: {총점}/24 (또는 /27 — Orchestration 포함 시)
 
 | 차원 | 점수 | 핵심 발견 |
 |------|------|-----------|
@@ -140,10 +141,15 @@ Enforcement Layer:
 9. 아키텍처 테스트 설정 제안 — 스택에 맞는 도구 안내 (`resources/06-arch-test-tools.md` 참조)
    - ARCHITECTURE.md에 불변식이 있으면 해당 불변식을 테스트로 전환
    - CI에 아키텍처 테스트 단계 추가 권장
+10. Resilience 방어 설치 — `resources/11-resilience-catalog.md` 참조
+    - 프로젝트 스택에 맞는 Hook 제안 (파일 크기 경고, 테스트 보호)
+    - anti-patterns rule 생성 (`.claude/rules/anti-patterns.md`)
+    - 기존 skills의 Resilient Template 준수 여부 점검
 
-**Phase 4 — Knowledge Base** (리포지터리를 기록 시스템으로)
-10. `docs/` 구조 설계 — 프로젝트 규모에 맞게
-11. 기존 외부 문서(Slack, Google Docs)를 리포지터리로 인코딩
+**Phase 4 — Knowledge Base** (리포지터리를 기록 시스템으로) — `resources/12-knowledge-base-taxonomy.md` 참조
+11. 프로젝트 규모 판단 → 해당 규모의 `docs/` 구조 + 문서 유형 선택
+12. 기존 외부 문서(Slack, Google Docs)를 해당 유형으로 인코딩
+13. CLAUDE.md에 `docs/` 참조 추가 (목차 역할)
 
 ### 워크플로우 3: Improve (하네스 개선)
 
@@ -155,11 +161,13 @@ Enforcement Layer:
 | Hook 추가 | 결정론적 강제 필요 | `update-config` skill로 위임 |
 | 아키텍처 테스트 도입 | Constraints Score 2 + ARCHITECTURE.md 불변식 존재 | 스택에 맞는 아키텍처 테스트 도구 제안 (`resources/06-arch-test-tools.md`) |
 | 불변식 커버리지 확장 | Audit에서 특정 유형 불변식 미비 | `resources/07-invariant-taxonomy.md`로 미커버 유형 식별 후 추가 |
-| 에이전트 정의 추가 | 반복되는 전문 역할 패턴 관찰 | `.claude/agents/{name}.md` 생성 (`resources/08-agent-team-patterns.md`) |
-| 팀 토폴로지 설계 | 2+ 에이전트 협업 필요 | 6개 팀 패턴에서 선택, 검증 후 적용 |
+| 에이전트 설계 | 반복되는 전문 역할 패턴 관찰 | 워크플로우 6 실행 (`resources/09-agent-template-schema.md`, `resources/08-agent-team-patterns.md`) |
+| 팀 토폴로지 설계 | 2+ 에이전트 협업 필요 | 7개 팀 패턴에서 선택, 검증 후 적용 (`resources/08-agent-team-patterns.md`) |
 | 문서 인코딩 | 외부에만 있는 지식 발견 | docs/에 마크다운으로 기록 |
 | CLAUDE.md 다이어트 | 100줄 초과 | rules로 분리, 목차만 남기기 |
 | Gardening 스킬 생성 | Audit 후 doc-gardening 스킬 부재 | 워크플로우 4 → 4단계 실행 |
+| 실패 모드 관찰 | Claude가 F1-F6 패턴 보임 (지시 무시, 미완료 등) | `resources/11-resilience-catalog.md`에서 해당 방어 패턴 적용 |
+| Skill 회복력 부족 | Skill이 단계 압축/스킵 가능 | Resilient Skill Template으로 리팩토링 (`resources/11-resilience-catalog.md`) |
 
 **개선 원칙**:
 - 한 번에 하나 적용하고 효과 관찰
@@ -209,6 +217,13 @@ Level 2+ 프로젝트(ARCHITECTURE.md + rules 존재)에서, `.claude/skills/doc
 | rules에 파일 경로 참조 | 참조 경로 실존 검증 |
 | docs/ 존재 | 링크 유효성 + 신선도(90일) |
 
+**5. 스킬 자체 Gardening (메타 하네스)**
+
+이 스킬도 하네스다 — 프로젝트 문서처럼 드리프트한다.
+
+트리거: 사용 중 정보 불일치 발견, Claude Code 기능 변경 감지, 또는 주기적 점검 요청.
+절차: `resources/10-meta-harness.md` 참조 — 소스 카탈로그 기반 신선도 검증 + 웹서치 갱신 + 실전 피드백 환류.
+
 ### 워크플로우 5: Diagnose (에이전트 오작동 진단)
 
 | 원인 | 진단 | 처방 |
@@ -221,8 +236,69 @@ Level 2+ 프로젝트(ARCHITECTURE.md + rules 존재)에서, `.claude/skills/doc
 | 컨텍스트 과부하 | CLAUDE.md가 백과사전화 | 목차로 전환, rules로 분리 |
 | 탐색 비용 | Codebase Map 없이 매 세션 Glob/Grep | ARCHITECTURE.md 생성/갱신 |
 | 피드백 미반영 | 교정이 다음 세션에서 반복 | memory에 feedback 저장 |
+| 지시 무시 (F1) | Rule에 Why 없음, 위반 Hook 없음 | Rule 보강(Why+예시) + Hook 추가 (`resources/11-resilience-catalog.md`) |
+| 미완료 (F2) | 전수 열거 없이 작업, 일부만 완료 보고 | Rule: 전수 TaskList + Skill 게이트 |
+| 증상 패치 (F3) | 원인 분석 Phase 없이 수정 | Rule: 이해→계획→해결 강화 |
+| 테스트 임의 수정 (F4) | test 파일 보호 없음 | Hook: test Edit nudge + Rule |
+| 코드 비대화 (F5) | 파일 크기 모니터링 없음 | Hook: PostEdit 크기 경고 |
+| 사고 깊이 부족 (F6) | Plan-before-act 없음 | Skill 게이트 + Rule |
 | 에이전트 역할 중복 | 여러 에이전트가 같은 작업을 수행 | Agent 통합 또는 Expert Pool로 전환 |
 | 팀 통신 실패 | 에이전트 간 산출물 연결 끊김 | I/O 프로토콜 재정의, 드라이런 검증 |
+
+### 워크플로우 6: Agent Design (에이전트 설계)
+
+요구사항에서 검증된 에이전트 정의까지 — 메타에이전트 워크플로우.
+
+**1. 요구사항 분석**
+
+| 질문 | 분기 |
+|------|------|
+| 반복되는 작업인가? | No → 일회성 프롬프트로 충분, 에이전트 불필요 |
+| 결과만 필요한가? (통신 불필요) | Yes → Sub-agent |
+| 에이전트 간 토론/피드백 필요? | Yes → Agent Team (실험적) |
+| 어느 scope? | 프로젝트 특화 → `.claude/agents/`, 범용 → `~/.claude/agents/` |
+
+→ **출력**: 실행 모드 (Sub-agent / Agent Team) + scope 결정
+
+**2. 역할 설계**
+
+시스템 프롬프트의 "right altitude" — 너무 구체적이면 경직, 너무 모호하면 표류:
+
+- **Core Responsibilities**: 2-4개. "이 에이전트가 하는 일"
+- **Working Principles**: Why 포함. edge case에서 맥락 판단 근거
+- **I/O Protocol**: 입력 형태, 출력 형태, 파일 경로/구조
+
+**3. Frontmatter 구성** (`resources/09-agent-template-schema.md` "핵심 결정 트리" 섹션 참조)
+
+핵심 결정 3가지:
+
+| 결정 | 기준 |
+|------|------|
+| **Model** | 판단/오케스트레이션 → opus, 구현 → sonnet, 탐색/분류 → haiku |
+| **Tools** | 최소 권한 원칙. 읽기 전용이면 Edit/Write 차단. `Agent(child)` 스폰 제한 |
+| **Permission** | 대화형 → default, 구현 → acceptEdits, 읽기 전용 → plan 또는 dontAsk |
+
+선택 결정:
+- `maxTurns`: 무한루프 방지 (리뷰어 10-20, 구현자 30-50)
+- `memory`: 학습이 필요하면 project, 개인 선호면 user
+- `skills`: 필요한 스킬 명시적 주입 (teammate 모드에서는 무시됨 주의)
+
+**4. 검증**
+
+| 단계 | 방법 |
+|------|------|
+| 트리거 검증 | should-trigger 5개 + should-NOT-trigger 5개 쿼리로 description 정확도 확인 |
+| 도구 검증 | 허용된 도구만으로 작업 완수 가능한가? 누락된 도구는? |
+| 드라이런 | 실제 작업 1회 실행, I/O 연결성 + 산출물 품질 확인 |
+| 비용 검증 | model + maxTurns 조합으로 예상 비용 범위 확인 |
+
+**5. 반복 개선**
+
+배치 후 관찰 → 피드백 반영:
+- description이 너무 넓으면 → 트리거 과다 → description 좁히기
+- description이 너무 좁으면 → 트리거 부족 → 키워드 추가
+- 도구 부족 → tools 확장 / 도구 과잉 → disallowedTools 추가
+- 시스템 프롬프트 모호 → 예시 추가, 원칙 구체화
 
 ## Invariant Lifecycle
 
@@ -247,7 +323,8 @@ Level 2+ 프로젝트(ARCHITECTURE.md + rules 존재)에서, `.claude/skills/doc
 | 위반을 보고 바로 MUST/NEVER rule 추가 | 반복 관찰 후 규칙화, Why를 먼저 기록 |
 | Hook으로 모든 것을 강제 | Hook은 안전/품질 게이트에만, 스타일은 rule로 |
 | 린트 에러 메시지가 불친절 | 에러 메시지에 수정 방법을 에이전트 지침으로 주입 |
-| 프로젝트 A의 harness를 B에 복사 | 각 저장소 맥락에 맞게 감사(워크플로우 1)부터 시작 |
+| 프로젝트 A의 harness를 B에 복사 | 각 저장소 맥락에 맞게 감사(워크플로우 1)부터 시작. "남의 agent-skills 19개를 전부 쓰기보다 자신의 프로젝트에 맞는 3~4개를 골라 수정하는 것이 진정한 하네스 엔지니어링" |
+| 코드 생성만 최적화하고 검증 방치 | 병목은 생성→**검증**으로 이동했다. Evaluator/Verifier 투자가 Generator 투자보다 ROI가 높음 |
 | Rule만 추가하고 효과 미확인 | 모니터링 신호 확인 + 정기 gardening |
 
 ### 컨텍스트 낭비
@@ -285,6 +362,13 @@ User: "하네스 점검해줘"
 → 워크플로우 1: 다차원 진단
 → 워크플로우 4: ARCHITECTURE.md에 새 패키지 3개 누락 발견, rules 2개 outdated → 갱신 PR
 
+### 에이전트 설계
+User: "보안 리뷰 에이전트 만들어줘"
+→ 워크플로우 6-1: 요구사항 → Sub-agent, project scope
+→ 워크플로우 6-2: 역할(OWASP Top 10, filepath:line 인용) + I/O(코드 경로 → 리뷰 보고서)
+→ 워크플로우 6-3: tools: Read,Grep,Glob,Bash / model: sonnet / permissionMode: plan
+→ 워크플로우 6-4: should-trigger 5개 + should-NOT 5개 → `.claude/agents/security-reviewer.md` 배치
+
 ## Technical Details
 
 - ARCHITECTURE.md 작성 가이드: `resources/04-architecture-guide.md`
@@ -294,7 +378,11 @@ User: "하네스 점검해줘"
 - 참고 자료 (출처 + 핵심 인사이트): `resources/03-references.md`
 - 아키텍처 테스트 도구 가이드 (언어별 매핑 + 감지 방법): `resources/06-arch-test-tools.md`
 - 불변식 분류 체계 + 발견/우선순위: `resources/07-invariant-taxonomy.md`
-- 에이전트 팀 패턴 + 정의 구조 + 검증: `resources/08-agent-team-patterns.md`
+- 에이전트 팀 패턴 + 정의 구조 + Agent Teams: `resources/08-agent-team-patterns.md`
+- 에이전트 템플릿 스키마 + frontmatter 결정 트리: `resources/09-agent-template-schema.md`
+- 메타 하네스 (스킬 자기 갱신 프로토콜 + 소스 카탈로그): `resources/10-meta-harness.md`
+- Resilience 카탈로그 (실패 모드 F1-F6 방어 + Resilient Skill Template): `resources/11-resilience-catalog.md`
+- Knowledge Base 분류 체계 (문서 유형 레지스트리 + 네이밍 규칙 + Setup 가이드): `resources/12-knowledge-base-taxonomy.md`
 - Hook/Permission 구성: `update-config` skill 참조
 - Skill 생성/갱신: `my-skill-creator` skill 참조
 - CLAUDE.md 설계/구조: `claude-guide` skill 참조

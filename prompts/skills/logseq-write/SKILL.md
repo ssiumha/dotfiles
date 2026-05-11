@@ -1,7 +1,10 @@
 ---
+disable-model-invocation: true
 name: logseq-write
-description: Writes Logseq pages following conventions. Use when creating namespace pages (troubleshoot, decision, qa, spec, incident), writing journal entries, promoting journal to pages, or editing existing Logseq pages. Do NOT use for reading/searching (use qmd directly).
+description: "[DEPRECATED — use obsidian-write] Writes Logseq pages (legacy `key:: value` properties + `___` namespace). 본 vault는 2026-04-29 Obsidian으로 마이그레이션됨. 별도 logseq vault에 작업 시에만 사용."
 ---
+
+> **Deprecated**: 본 글로벌 환경은 `obsidian-write`를 표준으로 사용한다. 이 스킬은 다른 logseq vault 작업 호환을 위해 보존되며, 일반 작업에서는 `obsidian-write` + `documentation` 참조.
 
 ## Atomic Notes 원칙
 
@@ -22,11 +25,12 @@ description: Writes Logseq pages following conventions. Use when creating namesp
 - 중복 내용 발견 시 block ref/embed 전환 제안
 - 저널: `- TODO/DONE {설명} #pj-{프로젝트}`, 회의 메모
 - 프로젝트 허브: `pj-{name}.md`에 `{{query}}`로 TODO 집계
+- `#thought` 태그: 사람 전용. AI는 이 태그를 사용하지 않으며, `#thought`가 붙은 블록을 편집하지 않는다
 
 ## 연결 원칙
 
 - **모든 문서는 최소 하나의 다른 문서와 연결**되어야 한다
-- namespace 페이지 작성 시 `qmd search`로 관련 기존 페이지를 찾아 `[[링크]]`로 연결
+- namespace 페이지 작성 시 `ir search`로 관련 기존 페이지를 찾아 `[[링크]]`로 연결
 - **namespace 페이지 생성 시 반드시 당일 저널에 링크 남기기**
   - 관련 저널 TODO가 있으면 DONE으로 변경하고 하위에 `-> [[{type}/{제목}]]` 링크 추가
   - 관련 TODO가 없으면 새 항목: `- DONE {설명} #pj-{project}` + `-> [[링크]]`
@@ -97,6 +101,7 @@ Simple query (Logseq 내장). Datalog 기반 advanced query와 별개.
 | QA 체크리스트/결과 | `pages/pj-{name}___qa___{제목}.md` |
 | 기능 스펙/요구사항 정리 | `pages/pj-{name}___spec___{제목}.md` |
 | 배포 실패/인프라 이슈 | `pages/pj-{name}___incident___{제목}.md` |
+| 장기 추적 이슈 (외부 의존, 커뮤니케이션 축적) | `pages/pj-{name}___issue___{제목}.md` |
 | 새 도메인 개념 | `pages/{개념명}.md` (기존 방식) |
 | 기타 필요 시 | 새 namespace 자유 생성 |
 
@@ -112,10 +117,20 @@ Simple query (Logseq 내장). Datalog 기반 advanced query와 별개.
 
 ### 회의/슬랙 대화 → 문서화
 
-회의록이나 슬랙 대화가 붙여넣어지면:
-1. 당일 저널에 원문 기록
-2. 요구사항이 포함되면 `spec/`으로 승격
-3. 결정사항이 포함되면 `decision/`으로 승격
+회의록이나 슬랙 대화가 붙여넣어지거나 Slack 채널을 조회한 결과를 기록할 때:
+
+**저널에 남기는 것** (휘발적, 1줄 요약 + 링크):
+- 단순 행정 (도메인 후보, 일정 조율, 확인 요청)
+- 이미 namespace 페이지가 있는 주제의 상태 업데이트
+
+**namespace 페이지로 승격하는 것** (구조화된 지식):
+- 아키텍처/설계 흐름이 정리된 내용 → `spec/`
+- 결정사항이 포함된 내용 → `decision/`
+- 새로운 기술적 제안/비교 → `reference/` 또는 `spec/`
+
+**판단 기준**: 이 내용이 1주일 뒤에도 다시 참조될 가능성이 있는가?
+- Yes → namespace 페이지로 승격. 저널에는 DONE + `-> [[링크]]`만 남긴다
+- No → 저널에 1줄 요약 + Slack 딥링크
 
 ## namespace 페이지 작성 규격
 
@@ -165,6 +180,19 @@ status:: {상태}
 
 - `type`은 namespace로 이미 구분되므로 별도 프로퍼티 불필요
 - `date`가 저널 링크 역할을 겸함 — 본문에서 저널 중복 참조하지 않는다
+
+### 선택 프로퍼티 (freshness)
+
+```
+last-verified:: [[YYYY-MM-DD]]
+next-check:: [[YYYY-MM-DD]]
+```
+
+- `last-verified`: 이 문서의 내용이 마지막으로 정확하다고 확인된 날짜
+- `next-check`: 다음 확인이 필요한 날짜
+- 적용 대상: issue, troubleshoot(investigating), incident(open) 등 status가 open/in-progress/waiting/blocked인 모든 namespace 페이지
+- resolved/closed/done이면 불필요
+- issue 페이지에서는 `next-check` 기본 7일 후 설정
 
 ### 카테고리별 템플릿
 
@@ -227,6 +255,30 @@ status: open / resolved / recurring
 - # 재발 방지
 ```
 
+#### issue
+
+status: open / in-progress / waiting / blocked / resolved / closed
+
+선택 프로퍼티: `owner::`, `stakeholders::`, `last-verified::`, `next-check::`
+
+```
+- # 상황
+- # 커뮤니케이션 로그
+- # 진행 상황
+- # 관련 자료
+```
+
+커뮤니케이션 로그 형식:
+```
+- # 커뮤니케이션 로그
+  - YYYY-MM-DD {채널: slack/email/meeting/call/github} {상대방}
+    - 질문/요청 내용
+    - 응답/결과
+    - → 상태 변화: {이전} → {이후}
+```
+
+troubleshoot과의 차이: troubleshoot은 한 번의 조사→해결 사이클. issue는 장기 추적 — 복수 사이클, 커뮤니케이션 축적, 상태 변화 이력.
+
 #### 새 카테고리
 
 템플릿 없이 namespace만 만들어도 됨. 공통 프로퍼티 + 자유 형식.
@@ -285,7 +337,7 @@ description:: {한 줄 설명 — 작성한 페이지의 맥락에서 추론}
 
 ### Step 2: 관련 개념 능동 탐색
 
-작성된 페이지의 핵심 키워드 3-5개를 추출하여 `qmd search`로 관련 기존 페이지를 탐색한다.
+작성된 페이지의 핵심 키워드 3-5개를 추출하여 `ir search`로 관련 기존 페이지를 탐색한다.
 
 **키워드 추출 기준:**
 - 페이지 제목의 핵심어
@@ -295,7 +347,7 @@ description:: {한 줄 설명 — 작성한 페이지의 맥락에서 추론}
 **탐색 실행:**
 
 ```bash
-qmd search "{키워드}" -n 5 --files
+ir search "{키워드}" -n 5 --files
 ```
 
 **결과 필터링:**
@@ -317,11 +369,33 @@ qmd search "{키워드}" -n 5 --files
 ### Step 3: 인덱스 갱신
 
 ```bash
-qmd update
+ir update
 ```
 
 ```bash
-qmd embed
+ir embed
 ```
 
 Step 1에서 새 페이지가 생성되었을 수 있으므로, 반드시 모든 작업 완료 후 마지막에 실행한다.
+
+### Step 4: 학습 질문 생성
+
+작성한 내용에 도메인 개념이 포함되어 있으면 사용자에게 2-3개의 학습 질문을 제시한다. soul.md의 능동 학습 원칙 실행 단계.
+
+**트리거 조건** (하나 이상 해당):
+- 새 도메인 개념이 등장 (미생성 키워드, 또는 기존 개념의 새로운 맥락)
+- spec, decision 등 판단이 수반되는 내용
+- 외부 산출물(Slack, 문서, 기사)을 정리한 경우
+
+**스킵 조건**:
+- 단순 TODO 상태 변경, 저널 행정 기록
+- 자동화 hook에서 호출된 경우 (session sync 등)
+- 사용자가 "바로 해"라고 지시한 경우
+
+**질문 설계 원칙**:
+- 개념 확인: "X가 이 맥락에서 어떤 역할을 하는지 감이 오세요?"
+- 연결: "X와 기존에 알던 Y의 관계가 보이시나요?"
+- 판단: "이 결정/제안의 trade-off가 뭘까요?"
+- 실무 적용: "이게 우리 프로젝트의 Z에 어떻게 영향을 줄까요?"
+
+**형식**: 질문 2-3개를 번호로 제시. 사용자가 답하면 보완/확장하고, 개념 페이지에 사용자의 이해를 반영. "스킵"하면 넘어간다.

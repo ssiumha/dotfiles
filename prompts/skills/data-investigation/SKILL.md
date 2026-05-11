@@ -6,7 +6,7 @@ description: >-
   Use when 데이터 분석, 조사, investigation, 이상 탐지, 패턴 분석,
   리포트 생성, 차트 시각화, 데이터 수집 파이프라인 구축.
   Also use when 데이터를 모아서 분석하고 보고서를 만드는 작업.
-  Do NOT use for 단순 DB 조회 (use db-irb), 단순 차트 하나 (use diagram).
+  Do NOT use for 단순 DB 조회 (use gandy), 단순 차트 하나 (use diagram).
 argument-hint: "[investigation-name]"
 ---
 
@@ -34,7 +34,7 @@ argument-hint: "[investigation-name]"
    - 어디서 가져올 수 있는지 (DB, API, 로그, CSV, 파일 등)
    - 사용자가 직접 제공할지, 수집 스크립트가 필요한지
    - 옵션:
-     - [1] DB 조회 (db-irb 활용)
+     - [1] DB 조회 (gandy 활용)
      - [2] CloudWatch 로그
      - [3] API / 외부 서비스
      - [4] 사용자가 직접 파일 제공
@@ -50,7 +50,7 @@ argument-hint: "[investigation-name]"
 
 1. **수집 스크립트 생성** (필요한 경우)
    - 데이터 소스에 따라 커스텀 스크립트 작성
-   - DB: `.rb` (db-irb 환경), API: `.py`, 로그: `.py` (boto3 등)
+   - DB: `.rb` (gandy 환경), API: `.py`, 로그: `.py` (boto3 등)
    - 출력은 항상 `data/` 하위에 JSON/CSV로 저장
    - 파일 네이밍: `00_xxx.json`, `01_xxx.json` (수집 순서 기반)
 
@@ -63,8 +63,8 @@ argument-hint: "[investigation-name]"
    - 소스 간 공통 키 결정 (exact match vs approximate match)
    - 매칭 불일치 가능성 사전 인지 (타임스탬프 오차, ID 체계 차이 등)
 
-4. **db-irb `to_json` 주의**
-   - db-irb의 `to_json` 함수는 `Hash#values`를 호출하여 **키를 삭제**한다 (DB raw 쿼리 결과가 배열로 변환됨)
+4. **gandy `to_json` 주의**
+   - gandy의 `to_json` 함수는 `Hash#values`를 호출하여 **키를 삭제**한다 (DB raw 쿼리 결과가 배열로 변환됨)
    - collect.rb에서 DB 쿼리 결과를 저장할 때는 `to_json` 대신 직접 `JSON.pretty_generate`를 사용하거나, 키를 보존하는 `save_json` 헬퍼를 정의할 것:
      ```ruby
      require 'json'

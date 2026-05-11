@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: mise-config
 description: Generates mise.toml project configuration. Use when setting up project tools, environment variables, or task automation with mise.
 ---
