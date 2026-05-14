@@ -25,9 +25,9 @@ FAIL 시 후속 step 실행 금지.
 
 | Check | Command | PASS | FAIL |
 |-------|---------|------|------|
-| 7 vars set | `[ -n "$TF_CTX_PROJECT" ] && [ -n "$TF_CTX_ENV" ] && [ -n "$TF_CTX_OWNER" ] && [ -n "$TF_CTX_REGION" ] && [ -n "$TF_CTX_PROFILE" ] && [ -n "$TF_STATE_BUCKET" ] && [ -n "$TF_STATE_KEY" ]` | exit 0 | exit ≠ 0 |
-| env 형식 | `echo "$TF_CTX_ENV" \| grep -qE '^(dev\|staging\|prod)$'` | exit 0 | exit ≠ 0 |
-| project 형식 | `echo "$TF_CTX_PROJECT" \| grep -qE '^[a-z0-9-]+$'` | exit 0 | exit ≠ 0 |
+| 6 vars set | `[ -n "$TF_CTX_PROJECT" ] && [ -n "$TF_CTX_ENV" ] && [ -n "$TF_CTX_REGION" ] && [ -n "$TF_CTX_PROFILE" ] && [ -n "$TF_STATE_BUCKET" ] && [ -n "$TF_STATE_KEY" ]` | exit 0 | exit ≠ 0 |
+| env 형식 | `printf %s "$TF_CTX_ENV" \| grep -qE '^(dev\|staging\|prod)$'` | exit 0 | exit ≠ 0 |
+| project 형식 | `printf %s "$TF_CTX_PROJECT" \| grep -qE '^[a-z0-9-]+$'` | exit 0 | exit ≠ 0 |
 
 ---
 
@@ -90,7 +90,7 @@ grep -cE '^[[:space:]]*required_version[[:space:]]*=' "$TF_DIR/versions.tf"
 | Check | Command | PASS | WARN | FAIL |
 |-------|---------|------|------|------|
 | locals 블록 | `grep -c '^locals' "$TF_DIR/ctx.tf"` | `≥ 1` | — | `0` |
-| 6 keys present | per key in `project,env,owner,region,profile,tags`: `grep -cE "^[[:space:]]+<k>[[:space:]]*=" "$TF_DIR/ctx.tf"` | 6/6 모두 `≥ 1` | 5/6 | `≤ 4/6` |
+| 5 keys present | per key in `project,env,region,profile,tags`: `grep -cE "^[[:space:]]+<k>[[:space:]]*=" "$TF_DIR/ctx.tf"` | 5/5 모두 `≥ 1` | 4/5 | `≤ 3/5` |
 
 ---
 
@@ -150,7 +150,7 @@ test "$(grep -cE 'provider[[:space:]]+"aws"[[:space:]]*\{[[:space:]]*\}' provide
 
 # Step 7
 grep -q '^locals' ctx.tf
-for k in project env owner region profile tags; do
+for k in project env region profile tags; do
   grep -qE "^[[:space:]]+${k}[[:space:]]*=" ctx.tf
 done
 
