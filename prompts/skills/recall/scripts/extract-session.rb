@@ -205,30 +205,42 @@ def parse_existing_page(path)
     end
   end
 
+  # H1 헤더를 표준 markdown(`# X`)·outliner(`- # X`) 양쪽 모두 인식.
+  # system H1(Summary/Conversation/Files) 영역 내 라인은 모두 버린다.
+  # user 영역은 그대로 보존한다.
   user_sections = []
   current_block = []
-  current_is_system = false
-  after_last_system = false  # # Files 이후의 비-섹션 블록은 system 잔재로 취급
+  in_system = false
 
-  lines[body_start..].each do |line|
-    if line.start_with?("- ")
-      user_sections << current_block if !current_block.empty? && !current_is_system && !after_last_system
+  flush = lambda do
+    while !current_block.empty? && current_block.first.strip.empty?
+      current_block.shift
+    end
+    while !current_block.empty? && current_block.last.strip.empty?
+      current_block.pop
+    end
+    user_sections << current_block unless current_block.empty?
+    current_block = []
+  end
 
-      current_block = [line]
-      section_match = line.match(/^- # (.+)$/)
-      if section_match
-        current_is_system = SYSTEM_SECTIONS.include?(section_match[1])
-        after_last_system = true if current_is_system    # system section 이후 비-섹션 블록 억제
-        after_last_system = false if !current_is_system   # user section 시작하면 리셋
+  (lines[body_start..] || []).each do |line|
+    m = line.match(/^# (.+?)\s*$/) || line.match(/^- # (.+?)\s*$/)
+    if m
+      title = m[1].strip
+      flush.call unless in_system
+      current_block = []
+      if SYSTEM_SECTIONS.include?(title)
+        in_system = true
       else
-        current_is_system = false
-        # section header가 아닌 `- ` 블록은 after_last_system 상태 유지
+        in_system = false
+        current_block = [line]
       end
-    elsif !current_block.empty?
+    else
+      next if in_system
       current_block << line
     end
   end
-  user_sections << current_block if !current_block.empty? && !current_is_system && !after_last_system
+  flush.call unless in_system
 
   [properties, user_properties, user_sections]
 end
