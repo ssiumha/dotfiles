@@ -147,7 +147,7 @@ filters:
 - 개념: `know/{제목}.md`
 - 저널: `journals/YYYY-MM-DD.md`
 - 제목: 한국어 설명적 제목, 간결하게
-- 모든 콘텐츠는 outliner 형식 (`- ` prefix)
+- **표준 markdown 형식** — heading은 `#`/`##`/`###` 그대로 사용. body의 list/checklist만 `- ` 사용. **`- # 헤딩`, `- ## 하위`처럼 bullet과 heading 결합은 logseq outliner 잔재 — 금지** (vault의 `~/Documents/obsidian/CLAUDE.md` 규약 + `scripts/migrate-outliner-to-markdown.rb`로 마이그레이션 진행 중)
 - 체크리스트는 `- [ ]/[x]/[/]/[-]` (Obsidian Tasks 호환). `TODO`/`DONE` 키워드 금지
 
 ### 필수 frontmatter
@@ -181,7 +181,7 @@ next-check: YYYY-MM-DD
 
 ### 카테고리별 템플릿
 
-**헤딩 규칙**: `- # 섹션명`은 최상위 구분에만 사용. 하위 그룹핑은 평문 라벨 + 들여쓰기.
+**헤딩 규칙**: 표준 markdown `# 섹션명` / `## 하위 섹션` 사용. bullet 결합(`- # ...`, `- ## ...`)은 logseq 잔재이며 금지. body의 list/checklist만 `- ` 사용.
 
 #### troubleshoot
 
@@ -193,11 +193,15 @@ project: pj-{name}
 date: YYYY-MM-DD
 status: investigating
 ---
-- # 상황
-- # 조사
-- # 근본 원인
-- # 결정
-- # 관련 자료
+# 상황
+
+# 조사
+
+# 근본 원인
+
+# 결정
+
+# 관련 자료
 ```
 
 #### decision
@@ -205,10 +209,13 @@ status: investigating
 status: proposed / accepted / rejected / superseded
 
 ```markdown
-- # 맥락
-- # 선택지
-- # 결정
-- # 근거
+# 맥락
+
+# 선택지
+
+# 결정
+
+# 근거
 ```
 
 #### qa
@@ -216,11 +223,14 @@ status: proposed / accepted / rejected / superseded
 status: draft / in-progress / done
 
 ```markdown
-- # 대상
-- # 체크리스트
-	- 그룹명
-		- [ ] 항목
-- # 결과
+# 대상
+
+# 체크리스트
+
+- 그룹명
+    - [ ] 항목
+
+# 결과
 ```
 
 #### spec
@@ -228,9 +238,11 @@ status: draft / in-progress / done
 status: draft / agreed / implemented / deprecated
 
 ```markdown
-- # 배경
-- # 요구사항
-- # 범위
+# 배경
+
+# 요구사항
+
+# 범위
 ```
 
 #### incident
@@ -238,11 +250,15 @@ status: draft / agreed / implemented / deprecated
 status: open / resolved / recurring
 
 ```markdown
-- # 상황
-- # 타임라인
-- # 원인
-- # 대응
-- # 재발 방지
+# 상황
+
+# 타임라인
+
+# 원인
+
+# 대응
+
+# 재발 방지
 ```
 
 #### issue
@@ -252,17 +268,21 @@ status: open / in-progress / waiting / blocked / resolved / closed
 선택 frontmatter: `owner`, `stakeholders`, `last-verified`, `next-check`
 
 ```markdown
-- # 상황
-- # 커뮤니케이션 로그
-- # 진행 상황
-- # 관련 자료
+# 상황
+
+# 커뮤니케이션 로그
+
+# 진행 상황
+
+# 관련 자료
 ```
 
 커뮤니케이션 로그 형식:
 
-```
-- # 커뮤니케이션 로그
-  - YYYY-MM-DD {채널: slack/email/meeting/call/github} {상대방}
+```markdown
+# 커뮤니케이션 로그
+
+- YYYY-MM-DD {채널: slack/email/meeting/call/github} {상대방}
     - 질문/요청 내용
     - 응답/결과
     - → 상태 변화: {이전} → {이후}
@@ -278,6 +298,21 @@ troubleshoot과의 차이: troubleshoot은 한 번의 조사→해결 사이클.
 
 - raw 데이터 (JSON, 스크린샷, 로그 등) → `assets/` 디렉토리에 저장
 - namespace 페이지에서 `![](assets/{파일명})` 또는 경로 텍스트로 참조
+
+### 바이너리 첨부(PDF·PPTX·이미지) 링크·임베드
+
+외부 산출물(PDF 설계서, PPTX, 이미지)을 vault로 가져올 때:
+
+- **보존**: `projects/{name}/assets/`(필요 시 하위 분류 폴더)에 원본 복사. binary는 `.gitignore` whitelist로 git 제외되지만 디스크 보존 — Obsidian에서 열람·임베드는 가능.
+- **클릭 가능한 링크는 wikilink로**: `[[파일명.pdf]]`. 백틱 경로(`` `path/x.pdf` ``)는 **코드 텍스트라 클릭 불가** — 링크는 wikilink로, 경로 안내가 목적일 때만 백틱.
+    - PDF → 클릭 시 Obsidian **내장 뷰어로 inline** 열림.
+    - PPTX·docx 등 미지원 포맷 → 클릭 시 **시스템 기본 앱**(Keynote/PowerPoint)으로 외부 열림(Obsidian 미리보기 불가).
+- **특정 페이지 참조 (PDF)**:
+    - 링크(점프): `[[파일.pdf#page=N]]`. **표 셀 안에선 alias 파이프를 escape** → `[[파일.pdf#page=N\|표시텍스트]]` (안 하면 `|`가 열 구분자로 깨짐).
+    - 임베드(인라인 렌더): `![[파일.pdf#page=N]]` (`#page=N&height=500` 높이 옵션).
+- **임베드 절제 원칙**: 임베드는 **핵심 화면만**. 화면별 상세가 많이 필요하면 요약 문서에 쌓지 말고 **화면 그룹 단위로 별도 문서를 잘라** 임베드한다. 요약·색인 문서는 페이지 **링크**로 가볍게 유지.
+- **렌더 한계**: git 제외 binary는 **로컬 Obsidian에서만** 링크·임베드가 렌더링(GitHub·타 머신 X). 텍스트가 어디서나 필요하면 `pdftotext -f N -l N <pdf> <out>`로 해당 페이지 텍스트만 떠서 코드블록으로 박제.
+- **페이지→위치 매핑**: 슬라이드 PDF에서 화면 ID별 페이지를 찾을 땐 `pdftotext -layout`로 텍스트를 떠서 화면 ID 라벨을 page와 함께 추출(페이지 많은 PDF를 이미지로 직접 읽는 것보다 저렴).
 
 ## 작성 후 필수 작업
 

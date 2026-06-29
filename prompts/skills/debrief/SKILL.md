@@ -49,27 +49,37 @@ gh pr view --json title,body,url,number
 
 ### 페이지 구조
 
-파일명: `know/pj-{name}___debrief___{제목}.md`
+파일명: `projects/{name}/debrief/{제목}.md` (프로젝트 종속이면 폴더 namespace)
 
-```
-project:: [[pj-{name}]]
-date:: [[YYYY-MM-DD]]
-status:: done
-branch:: {branch-name}
-pr:: PR {number}
+```markdown
+---
+project: pj-{name}
+date: YYYY-MM-DD
+status: done
+branch: {branch-name}
+pr: {number}
+---
+# Summary
 
-- # Summary
-  - {2-3줄 변경 요약 — 무엇을 왜}
-- # Changes
-  - {파일/모듈별 변경 그룹핑}
-    - {각 변경의 의도 설명}
-- # Decisions
-  - {설계 판단과 트레이드오프}
-    - 왜 이 방식을 선택했는지, 대안은 무엇이었는지
-- # Learned
-  - {사용된 패턴, 라이브러리, 기법 중 학습 가치 있는 것}
-- # Related
-  - {PR 링크, 관련 이슈, 참고 자료를 [[링크]]로}
+{2-3줄 변경 요약 — 무엇을 왜}
+
+# Changes
+
+## {모듈/기능 그룹}
+
+- {각 변경의 의도 설명}
+
+# Decisions
+
+- {설계 판단과 트레이드오프 — 왜 이 방식을 선택했는지, 대안은 무엇이었는지}
+
+# Learned
+
+- {사용된 패턴, 라이브러리, 기법 중 학습 가치 있는 것}
+
+# Related
+
+- {PR 링크, 관련 이슈, 참고 자료를 [[링크]]로}
 ```
 
 ### 작성 원칙
@@ -79,7 +89,7 @@ pr:: PR {number}
 - **Learned**: 범용적으로 재사용 가능한 지식만. 프로젝트 특수한 내용은 Changes에
 - **Related**: 관련 Obsidian 페이지를 `ir search`로 찾아 `[[링크]]`로 연결
 - pr 프로퍼티: PR이 없으면 생략
-- Logseq outliner 형식 준수 (`- ` prefix)
+- **표준 markdown 형식** — heading은 `#`/`##`/`###`, list는 `- `로만 사용. `- # heading` 같은 bullet+heading 결합(logseq outliner)은 deprecated. vault CLAUDE.md의 markdown 규약을 따른다
 - `#태그` 대신 `[[링크]]` 사용
 
 ## Phase 2.5: Issue 교차 참조
@@ -101,11 +111,11 @@ debrief 내용 생성 후, 관련 open issue 페이지를 탐색:
 
 `/obsidian-write` skill의 규격을 따라 페이지를 생성한다:
 
-1. `~/Documents/obsidian/know/pj-{name}___debrief___{제목}.md` 에 페이지 작성 (프로젝트 하위 namespace)
+1. `~/Documents/obsidian/projects/{name}/debrief/{제목}.md` 에 페이지 작성 (폴더 namespace)
 2. 당일 저널에 링크 추가:
    ```
-   - DONE {작업 요약} #pj-{project}
-     - -> [[pj-{name}/debrief/{제목}]]
+   - [x] {작업 요약} #pj-{project}
+     - -> [[{제목}]]
    ```
 3. `ir search`로 관련 기존 페이지를 찾아 Related 섹션에 `[[링크]]` 연결
 
@@ -133,7 +143,7 @@ ir embed
 User: "/debrief"
 → Phase 1: git log main..HEAD, git diff 분석
 → Phase 2: 변경 내러티브 구성
-→ Phase 3: Logseq debrief/ 페이지 생성 + 저널 링크
+→ Phase 3: debrief/ 페이지 생성 + 저널 링크
 ```
 
 ### PR 기반 debrief
@@ -141,7 +151,7 @@ User: "/debrief"
 User: "/debrief 42"
 → Phase 1: gh pr view 42 → branch 추출 → diff 분석
 → Phase 2: PR description + diff 기반 내러티브 구성
-→ Phase 3: Logseq debrief/ 페이지 생성 (pr:: PR 42 포함)
+→ Phase 3: debrief/ 페이지 생성 (pr:: PR 42 포함)
 ```
 
 ### branch 지정 debrief
@@ -149,5 +159,5 @@ User: "/debrief 42"
 User: "/debrief feature/add-eval-patterns"
 → Phase 1: git log main..feature/add-eval-patterns 분석
 → Phase 2: 변경 내러티브 구성
-→ Phase 3: Logseq debrief/ 페이지 생성
+→ Phase 3: debrief/ 페이지 생성
 ```

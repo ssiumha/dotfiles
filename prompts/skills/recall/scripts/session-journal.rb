@@ -77,21 +77,70 @@ summary += "..." if (first_user_msg || "").length > 60
 
 entry = "- [x] #{summary} #{project_tag}".strip
 
-# 멱등: 이미 같은 sid가 저널에 있으면 스킵
+# 세션은 작업 단위. 같은 sid가 어느 저널에든 이미 있으면 줄을 새로 만들지 않고,
+# 기간을 `created::`(처음 기록된 날) ~ `last-active::`(마지막 resume 된 날) 속성으로 표현한다.
+# 즉 "처음 기록된 날 = 시작, 마지막으로 resume 된 날 = 종료"가 그 작업의 기간이 된다.
+# (이전엔 오늘 저널만 검사해, resume 될 때마다 매일 같은 줄이 재기록되는 버그가 있었음)
+#   포맷:
+#     - [x] 요약 #pj-x (sid:xxxxxxxx)
+#         created:: 2026-06-04
+#         last-active:: 2026-06-23
+INDENT = "    "
+sid_re = /\(sid:#{sid_short}\)/
+
+existing_file = Dir.glob(LOGSEQ_JOURNALS / "*.md").sort.find do |f|
+  File.read(f, encoding: "utf-8") =~ sid_re
+end
+
+if existing_file
+  lines = File.read(existing_file, encoding: "utf-8").split("\n", -1)
+  idx = lines.find_index { |l| l =~ sid_re }
+
+  # 자식 블록 범위: sid 줄 직후부터 들여쓰기 줄이 이어지는 동안
+  child_end = idx + 1
+  child_end += 1 while child_end < lines.length && lines[child_end] =~ /\A\s+\S/
+  child_range = (idx + 1...child_end)
+
+  cr_idx = child_range.find { |i| lines[i] =~ /\A\s*created::/ }
+  la_idx = child_range.find { |i| lines[i] =~ /\A\s*last-active::/ }
+  start = (cr_idx && lines[cr_idx][/created::\s*(\S+)/, 1]) || File.basename(existing_file, ".md")
+
+  changed = false
+  if la_idx
+    cur = lines[la_idx][/last-active::\s*(\S+)/, 1]
+    if cur.nil? || today_str > cur
+      lines[la_idx] = "#{INDENT}last-active:: #{today_str}"
+      changed = true
+    end
+  else
+    # 옛 포맷(속성 없음) → created/last-active 삽입
+    ins = []
+    ins << "#{INDENT}created:: #{start}" unless cr_idx
+    ins << "#{INDENT}last-active:: #{today_str}"
+    lines.insert(idx + 1, *ins)
+    changed = true
+  end
+  File.write(existing_file, lines.join("\n")) if changed
+  exit 0
+end
+
 if journal_path.exist?
   journal_content = journal_path.read(encoding: "utf-8")
-  exit 0 if journal_content.include?(sid_short)
 else
   # 저널 파일이 없으면 생성
   journal_path.parent.mkpath
   journal_content = ""
 end
 
-# `# 오늘 진행` 섹션 끝(첫 sub-heading 직전)에 삽입
-final_entry = "#{entry} (sid:#{sid_short})"
+# `# 오늘 진행` 섹션 끝(첫 sub-heading 직전)에 삽입 — 시작일/마지막일 속성 포함
+new_block = [
+  "#{entry} (sid:#{sid_short})",
+  "#{INDENT}created:: #{today_str}",
+  "#{INDENT}last-active:: #{today_str}",
+]
 
 if journal_content.empty?
-  journal_path.write("# 오늘 진행\n#{final_entry}\n")
+  journal_path.write("# 오늘 진행\n#{new_block.join("\n")}\n")
 else
   lines = journal_content.split("\n", -1)
   marker_idx = lines.find_index { |l| l.match?(/\A#+\s+오늘 진행\s*\z/) }
@@ -106,13 +155,13 @@ else
       insert_pos -= 1
     end
 
-    lines.insert(insert_pos, final_entry)
+    lines.insert(insert_pos, *new_block)
     journal_path.write(lines.join("\n"))
   else
     # 섹션 없음 — 끝에 새 섹션과 함께 추가
     new_content = journal_content.dup
     new_content += "\n" unless new_content.end_with?("\n")
-    new_content += "\n# 오늘 진행\n#{final_entry}\n"
+    new_content += "\n# 오늘 진행\n#{new_block.join("\n")}\n"
     journal_path.write(new_content)
   end
 end

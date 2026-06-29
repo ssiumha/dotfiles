@@ -1,10 +1,7 @@
 ---
 name: refactoring
-description: "기존 코드의 안전한 리팩토링. Characterization Test로 동작 보존하며 구조 개선"
+description: "기존 코드의 안전한 리팩토링. Characterization Test로 동작을 보존하며 구조 개선. Use when 리팩토링, 레거시 코드 개선, 동작 보존, 구조 개선, 기존 코드 정리, characterization test 작성 시. Do NOT use for 새 기능 개발이나 버그 수정 (일반 편집 사용)."
 user-invocable: true
-tags: [refactoring, characterization-test, behavior-preservation, legacy]
-triggers:
-  keywords: [리팩토링, 레거시 코드, 동작 보존, 구조 개선, 기존 코드 개선, characterization test]
 ---
 
 # Refactoring

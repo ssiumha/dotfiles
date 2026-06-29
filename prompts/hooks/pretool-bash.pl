@@ -33,26 +33,42 @@ my $MIG_TAIL    = 'DB 마이그레이션 변경 명령은 직접 실행할 수 �
 my $DOCKER_TAIL = 'Docker 데이터 손실 명령은 직접 실행할 수 없습니다. 볼륨/이미지/네트워크 삭제는 사용자만 호출할 수 있습니다. 사용자에게 ! <명령> 으로 실행을 요청하세요. ps/logs/exec/inspect 같은 read-only는 허용됩니다.';
 
 # ---------- 디렉토리/경로 우회 ----------
-push @RULES, { name => 'cd-worktree',     re => qr{^cd\s+.*\.claude/worktrees},
-  msg => 'worktree 경로로 cd 금지. 이미 worktree 안에 있습니다. cd 없이 명령만 실행하세요.' };
-push @RULES, { name => 'git-C-worktree',  re => qr{^git\s+-C\s+.*\.claude/worktrees},
-  msg => 'git -C로 worktree 접근 금지. worktree에서 직접 git 명령을 실행하세요.' };
+push @RULES, { name => 'cd-worktree',
+  re   => qr{\bcd\b},
+  cond => qr{\.claude/worktrees},
+  msg  => 'worktree 경로로 cd 금지. 이미 worktree 안에 있습니다. cd 없이 명령만 실행하세요.' };
+push @RULES, { name => 'git-C-worktree',
+  re   => qr{\bgit\b},
+  cond => qr{-C\s+\S*\.claude/worktrees},
+  msg  => 'git -C로 worktree 접근 금지. worktree에서 직접 git 명령을 실행하세요.' };
 push @RULES, { name => 'git-dir-env',     re => qr{GIT_DIR=},
   msg => 'GIT_DIR= 금지. worktree에서 직접 git 명령을 실행하세요.' };
-push @RULES, { name => 'git-dir-flag',    re => qr{git\s+.*--git-dir},
-  msg => '--git-dir 금지. worktree에서 직접 git 명령을 실행하세요.' };
-push @RULES, { name => 'work-tree-flag',  re => qr{git\s+.*--work-tree},
-  msg => '--work-tree 금지. worktree에서 직접 git 명령을 실행하세요.' };
+push @RULES, { name => 'git-dir-flag',
+  re   => qr{\bgit\b},
+  cond => qr{--git-dir},
+  msg  => '--git-dir 금지. worktree에서 직접 git 명령을 실행하세요.' };
+push @RULES, { name => 'work-tree-flag',
+  re   => qr{\bgit\b},
+  cond => qr{--work-tree},
+  msg  => '--work-tree 금지. worktree에서 직접 git 명령을 실행하세요.' };
 
 # ---------- Git 명령 ----------
-push @RULES, { name => 'commit-amend',    re => qr{git\s+commit\s+.*--amend},
-  msg => 'git commit --amend는 직접 실행할 수 없습니다. 정말 필요한 경우, 사용자에게 ! git commit --amend 실행을 요청하세요.' };
-push @RULES, { name => 'checkout-b',      re => qr{git\s+checkout\s+-b},
-  msg => 'git checkout -b 금지. branch 생성은 worktree를 통해서만 가능합니다.' };
-push @RULES, { name => 'git-add-broad',   re => qr{^\s*git\s+add\s+(-A|--all|-a|\.|\*)(\s|$)},
-  msg => "git add -A/./--all/* 금지. 의도하지 않은 파일까지 스테이징될 위험.\n조치:\n  1) git status 로 변경 파일 확인\n  2) 추적 안 할 파일은 .gitignore 에 추가\n  3) git add <path> 로 명시적으로 스테이징\n정말 모두 추가가 맞으면 사용자에게 ! git add -A 직접 실행 요청." };
-push @RULES, { name => 'commit-binary',   re => qr{^\s*git\s+commit\b},
-  dyn => \&check_commit_binary, msg => undef };
+push @RULES, { name => 'commit-amend',
+  re   => qr{\bgit\b},
+  cond => qr{\bcommit\b.*--amend},
+  msg  => 'git commit --amend는 직접 실행할 수 없습니다. 정말 필요한 경우, 사용자에게 ! git commit --amend 실행을 요청하세요.' };
+push @RULES, { name => 'checkout-b',
+  re   => qr{\bgit\b},
+  cond => qr{\bcheckout\s+-b\b},
+  msg  => 'git checkout -b 금지. branch 생성은 worktree를 통해서만 가능합니다.' };
+push @RULES, { name => 'git-add-broad',
+  re   => qr{\bgit\b},
+  cond => qr{\badd\s+(-A|--all|-a|\.|\*)(\s|$)},
+  msg  => "git add -A/./--all/* 금지. 의도하지 않은 파일까지 스테이징될 위험.\n조치:\n  1) git status 로 변경 파일 확인\n  2) 추적 안 할 파일은 .gitignore 에 추가\n  3) git add <path> 로 명시적으로 스테이징\n정말 모두 추가가 맞으면 사용자에게 ! git add -A 직접 실행 요청." };
+push @RULES, { name => 'commit-binary',
+  re   => qr{\bgit\b},
+  cond => qr{\bcommit\b},
+  dyn  => \&check_commit_binary, msg => undef };
 push @RULES, { name => 'no-verify',       re => qr{--no-verify},
   msg => '--no-verify 금지. hook을 우회할 수 없습니다. 문제를 직접 해결하세요.' };
 
@@ -61,103 +77,199 @@ push @RULES, { name => 'cat-head-tail',   re => qr{(^|[;&|]\s*)(cat|head|tail)\s
   msg => 'cat/head/tail 금지. 파일은 Read로 직접 읽으세요(offset/limit 부분 읽기 가능, 라인 번호 포함). 출력을 자르고 싶으면 명령 자체에 limit을 거세요 — git log -n 5, rg -m 10, jq -c ".[0:5]". 잘린 컨텍스트로 잘못 판단하느니 전체를 보세요.' };
 push @RULES, { name => 'echo',            re => qr{(^|[;&|]\s*)echo\s},
   msg => 'echo 금지. 사용자에게 보일 텍스트는 응답 본문에 직접 작성하세요. 파일 작성은 Write를 사용하고, 변수 값은 명령 인자에 직접 전달하세요.' };
-push @RULES, { name => 'rm',              re => qr{(^|[;&|]\s*)rm(\s|$)},
-  msg => "rm/rm -rf 금지. 파일 삭제는 git 추적 여부에 따라 처리 방식이 다릅니다.\n조치:\n  1) git ls-files --error-unmatch <path> 로 git 추적 여부 확인\n  2) git 추적 파일이면 → git rm <path> 사용 (이력 보존 + 스테이징, 이후 커밋)\n  3) git 추적 안 된 파일이면 → 사용자에게 처리 방식을 물어보세요:\n     - 직접 삭제 (! rm <path> 사용자 실행)\n     - .gitignore 추가 후 보존\n     - 그대로 두기\n임의로 rm/rm -rf 실행하지 마세요. 정말 필요하면 사용자에게 ! rm 직접 실행을 요청하세요." };
+push @RULES, { name => 'rm',
+  re   => qr{\brm\s},
+  dyn  => \&check_rm_not_safe,
+  msg  => "rm/rm -rf 금지. 파일 삭제는 git 추적 여부에 따라 처리 방식이 다릅니다.\n조치:\n  1) git ls-files --error-unmatch <path> 로 git 추적 여부 확인\n  2) git 추적 파일이면 → git rm <path> 사용 (이력 보존 + 스테이징, 이후 커밋)\n  3) git 추적 안 된 파일이면 → 사용자에게 처리 방식을 물어보세요:\n     - 직접 삭제 (! rm <path> 사용자 실행)\n     - .gitignore 추가 후 보존\n     - 그대로 두기\n임의로 rm/rm -rf 실행하지 마세요. 정말 필요하면 사용자에게 ! rm 직접 실행을 요청하세요." };
 
 # ---------- K8s / Helmfile / Helm / Terraform / ArgoCD ----------
-push @RULES, { name => 'helmfile',        re => qr{(^|[;&|]\s*)helmfile\s+(apply|sync|destroy|delete)\b},
-  msg => "helmfile apply/sync/destroy/delete 금지. $INFRA_TAIL" };
-push @RULES, { name => 'kubectl-mutating',re => qr{(^|[;&|]\s*)kubectl\s+(create|delete|apply|edit|patch|replace|scale|drain|cordon|uncordon|taint|label|annotate|expose|run|set|autoscale)\b},
-  msg => "kubectl 상태 변경 명령 금지. $INFRA_TAIL" };
-push @RULES, { name => 'kubectl-rollout', re => qr{(^|[;&|]\s*)kubectl\s+rollout\s+(restart|undo|pause|resume)\b},
-  msg => "kubectl rollout 변경 금지. $INFRA_TAIL" };
-push @RULES, { name => 'helm',            re => qr{(^|[;&|]\s*)helm\s+(install|upgrade|uninstall|delete|rollback)\b},
-  msg => "helm 배포 변경 명령 금지. $INFRA_TAIL" };
-push @RULES, { name => 'terraform',       re => qr{(^|[;&|]\s*)terraform\s+(apply|destroy|taint|untaint|import|state\s+(rm|mv|replace-provider))\b},
-  msg => "terraform 변경 명령 금지. $INFRA_TAIL" };
-push @RULES, { name => 'argocd',          re => qr{(^|[;&|]\s*)argocd\s+app\s+(sync|delete|rollback|patch|set|create|terminate-op)\b},
-  msg => "argocd app 변경 명령 금지. $INFRA_TAIL" };
+push @RULES, { name => 'helmfile',
+  re   => qr{\bhelmfile\b},
+  cond => qr{\b(apply|sync|destroy|delete)\b},
+  msg  => "helmfile apply/sync/destroy/delete 금지. $INFRA_TAIL" };
+push @RULES, { name => 'kubectl-mutating',
+  re   => qr{\bkubectl\b},
+  cond => qr{\b(create|delete|apply|edit|patch|replace|scale|drain|cordon|uncordon|taint|label|annotate|expose|run|set|autoscale)\b},
+  msg  => "kubectl 상태 변경 명령 금지. $INFRA_TAIL" };
+push @RULES, { name => 'kubectl-rollout',
+  re   => qr{\bkubectl\b},
+  cond => qr{\brollout\b.*\b(restart|undo|pause|resume)\b},
+  msg  => "kubectl rollout 변경 금지. $INFRA_TAIL" };
+push @RULES, { name => 'helm',
+  re   => qr{\bhelm\b},
+  cond => qr{\b(install|upgrade|uninstall|delete|rollback)\b},
+  msg  => "helm 배포 변경 명령 금지. $INFRA_TAIL" };
+push @RULES, { name => 'terraform',
+  re   => qr{\bterraform\b},
+  cond => qr{\b(apply|destroy|taint|untaint|import)\b|\bstate\s+(rm|mv|replace-provider)\b},
+  msg  => "terraform 변경 명령 금지. $INFRA_TAIL" };
+push @RULES, { name => 'argocd',
+  re   => qr{\bargocd\b},
+  cond => qr{\bapp\b.*\b(sync|delete|rollback|patch|set|create|terminate-op)\b},
+  msg  => "argocd app 변경 명령 금지. $INFRA_TAIL" };
 
 # ---------- AWS ----------
-push @RULES, { name => 'aws-destructive', re => qr{(^|[;&|]\s*)aws\s+\S+\s+(delete|destroy|terminate|stop|reboot)-},
-  msg => "AWS destructive 명령 금지. $AWS_TAIL" };
-push @RULES, { name => 'aws-s3-rm',       re => qr{(^|[;&|]\s*)aws\s+s3\s+(rm|rb|mv)\b},
-  msg => "aws s3 rm/rb/mv 금지. $AWS_TAIL" };
-push @RULES, { name => 'aws-s3-sync-del', re => qr{(^|[;&|]\s*)aws\s+s3\s+sync\b.*--delete\b},
-  msg => "aws s3 sync --delete 금지 — 대상 객체가 삭제됩니다. $AWS_TAIL" };
-push @RULES, { name => 'aws-iam',         re => qr{(^|[;&|]\s*)aws\s+iam\s+(create|attach|detach|put|update)-},
-  msg => "aws iam 변경 명령 금지 — 권한 정책 변경은 보안 critical입니다. $AWS_TAIL" };
-push @RULES, { name => 'aws-secrets',     re => qr{(^|[;&|]\s*)aws\s+(secretsmanager|kms|ssm)\s+(put|update|create|disable|schedule|cancel|restore)-},
-  msg => "aws secrets/kms/ssm 변경 명령 금지 — 시크릿/키/파라미터 변경은 사용자만. $AWS_TAIL" };
-push @RULES, { name => 'aws-cfn',         re => qr{(^|[;&|]\s*)aws\s+cloudformation\s+(create-stack|update-stack|execute-change-set|create-change-set|cancel-update-stack|continue-update-rollback|rollback-stack)\b},
-  msg => "aws cloudformation 스택 변경 금지. $AWS_TAIL" };
-push @RULES, { name => 'aws-ec2-run',     re => qr{(^|[;&|]\s*)aws\s+ec2\s+(run|start)-instances\b},
-  msg => "aws ec2 run/start-instances 금지 — 비용 발생. $AWS_TAIL" };
-push @RULES, { name => 'aws-ec2-sg',      re => qr{(^|[;&|]\s*)aws\s+ec2\s+(authorize|revoke)-security-group-},
-  msg => "aws ec2 security-group 변경 금지 — 방화벽 규칙은 사용자만. $AWS_TAIL" };
-push @RULES, { name => 'aws-ec2-modify',  re => qr{(^|[;&|]\s*)aws\s+ec2\s+modify-},
-  msg => "aws ec2 modify-* 금지 — 인스턴스/볼륨 속성 변경은 사용자만. $AWS_TAIL" };
-push @RULES, { name => 'aws-rds',         re => qr{(^|[;&|]\s*)aws\s+rds\s+(modify|restore|reboot|create|promote|failover|start)-},
-  msg => "aws rds 변경 금지. $AWS_TAIL" };
-push @RULES, { name => 'aws-lambda',      re => qr{(^|[;&|]\s*)aws\s+lambda\s+(update|put|publish|invoke)-},
-  msg => "aws lambda 변경/실행 금지. $AWS_TAIL" };
-push @RULES, { name => 'aws-route53',     re => qr{(^|[;&|]\s*)aws\s+route53\s+(change-resource-record-sets|create-|update-|associate-vpc-with-hosted-zone)},
-  msg => "aws route53 DNS 변경 금지 — 레코드 변경은 사용자만. $AWS_TAIL" };
-push @RULES, { name => 'aws-dynamodb',    re => qr{(^|[;&|]\s*)aws\s+dynamodb\s+(put|update|batch-write)-},
-  msg => "aws dynamodb put/update/batch-write 금지 — 데이터 변경은 사용자만. $AWS_TAIL" };
-push @RULES, { name => 'aws-ses',         re => qr{(^|[;&|]\s*)aws\s+(ses|sesv2)\s+send-},
-  msg => "aws ses send-* 금지 — 이메일 발송은 사용자만. $AWS_TAIL" };
-push @RULES, { name => 'aws-sns',         re => qr{(^|[;&|]\s*)aws\s+sns\s+publish\b},
-  msg => "aws sns publish 금지 — 알림 발송은 사용자만. $AWS_TAIL" };
-push @RULES, { name => 'aws-ecs',         re => qr{(^|[;&|]\s*)aws\s+ecs\s+(update|run)-},
-  msg => "aws ecs update/run 금지. $AWS_TAIL" };
-push @RULES, { name => 'aws-eks',         re => qr{(^|[;&|]\s*)aws\s+eks\s+(update|associate|disassociate)-},
-  msg => "aws eks 변경 금지. $AWS_TAIL" };
+push @RULES, { name => 'aws-destructive',
+  re   => qr{\baws\b},
+  cond => qr{\b(delete|destroy|terminate|stop|reboot)-[a-z]+},
+  msg  => "AWS destructive 명령 금지. $AWS_TAIL" };
+push @RULES, { name => 'aws-s3-rm',
+  re   => qr{\baws\b},
+  cond => qr{\bs3\b.*\b(rm|rb|mv)\b},
+  msg  => "aws s3 rm/rb/mv 금지. $AWS_TAIL" };
+push @RULES, { name => 'aws-s3-sync-del',
+  re   => qr{\baws\b},
+  cond => qr{\bs3\b.*\bsync\b.*--delete\b},
+  msg  => "aws s3 sync --delete 금지 — 대상 객체가 삭제됩니다. $AWS_TAIL" };
+push @RULES, { name => 'aws-iam',
+  re   => qr{\baws\b},
+  cond => qr{\biam\b.*\b(create|attach|detach|put|update)-},
+  msg  => "aws iam 변경 명령 금지 — 권한 정책 변경은 보안 critical입니다. $AWS_TAIL" };
+push @RULES, { name => 'aws-secrets',
+  re   => qr{\baws\b},
+  cond => qr{\b(secretsmanager|kms|ssm)\b.*\b(put|update|create|disable|schedule|cancel|restore)-},
+  msg  => "aws secrets/kms/ssm 변경 명령 금지 — 시크릿/키/파라미터 변경은 사용자만. $AWS_TAIL" };
+push @RULES, { name => 'aws-cfn',
+  re   => qr{\baws\b},
+  cond => qr{\bcloudformation\b.*\b(create-stack|update-stack|execute-change-set|create-change-set|cancel-update-stack|continue-update-rollback|rollback-stack)\b},
+  msg  => "aws cloudformation 스택 변경 금지. $AWS_TAIL" };
+push @RULES, { name => 'aws-ec2-run',
+  re   => qr{\baws\b},
+  cond => qr{\bec2\b.*\b(run|start)-instances\b},
+  msg  => "aws ec2 run/start-instances 금지 — 비용 발생. $AWS_TAIL" };
+push @RULES, { name => 'aws-ec2-sg',
+  re   => qr{\baws\b},
+  cond => qr{\bec2\b.*\b(authorize|revoke)-security-group-},
+  msg  => "aws ec2 security-group 변경 금지 — 방화벽 규칙은 사용자만. $AWS_TAIL" };
+push @RULES, { name => 'aws-ec2-modify',
+  re   => qr{\baws\b},
+  cond => qr{\bec2\b.*\bmodify-},
+  msg  => "aws ec2 modify-* 금지 — 인스턴스/볼륨 속성 변경은 사용자만. $AWS_TAIL" };
+push @RULES, { name => 'aws-rds',
+  re   => qr{\baws\b},
+  cond => qr{\brds\b.*\b(modify|restore|reboot|create|promote|failover|start)-},
+  msg  => "aws rds 변경 금지. $AWS_TAIL" };
+push @RULES, { name => 'aws-lambda',
+  re   => qr{\baws\b},
+  cond => qr{\blambda\b.*\b(update|put|publish|invoke)-},
+  msg  => "aws lambda 변경/실행 금지. $AWS_TAIL" };
+push @RULES, { name => 'aws-route53',
+  re   => qr{\baws\b},
+  cond => qr{\broute53\b.*(\bchange-resource-record-sets\b|\bcreate-|\bupdate-|\bassociate-vpc-with-hosted-zone\b)},
+  msg  => "aws route53 DNS 변경 금지 — 레코드 변경은 사용자만. $AWS_TAIL" };
+push @RULES, { name => 'aws-dynamodb',
+  re   => qr{\baws\b},
+  cond => qr{\bdynamodb\b.*\b(put|update|batch-write)-},
+  msg  => "aws dynamodb put/update/batch-write 금지 — 데이터 변경은 사용자만. $AWS_TAIL" };
+push @RULES, { name => 'aws-ses',
+  re   => qr{\baws\b},
+  cond => qr{\b(ses|sesv2)\b.*\bsend-},
+  msg  => "aws ses send-* 금지 — 이메일 발송은 사용자만. $AWS_TAIL" };
+push @RULES, { name => 'aws-sns',
+  re   => qr{\baws\b},
+  cond => qr{\bsns\b.*\bpublish\b},
+  msg  => "aws sns publish 금지 — 알림 발송은 사용자만. $AWS_TAIL" };
+push @RULES, { name => 'aws-ecs',
+  re   => qr{\baws\b},
+  cond => qr{\becs\b.*\b(update|run)-},
+  msg  => "aws ecs update/run 금지. $AWS_TAIL" };
+push @RULES, { name => 'aws-eks',
+  re   => qr{\baws\b},
+  cond => qr{\beks\b.*\b(update|associate|disassociate)-},
+  msg  => "aws eks 변경 금지. $AWS_TAIL" };
 
 # ---------- DB CLI ----------
 push @RULES, { name => 'sql-cli-mutating',
-  re   => qr{(^|[;&|]\s*)(psql|mysql|mariadb|sqlite3|cqlsh)\b},
+  re   => qr{\b(psql|mysql|mariadb|sqlite3|cqlsh)\b},
   cond => qr{\b(drop\s+(table|database|schema|index|view|materialized)|truncate|delete\s+from|update\s+\w+\s+set|alter\s+table\s+\w+\s+drop)\b}i,
   msg  => "SQL DROP/TRUNCATE/DELETE/UPDATE/ALTER DROP 금지. $SQL_TAIL" };
 push @RULES, { name => 'mongo-mutating',
-  re   => qr{(^|[;&|]\s*)(mongo|mongosh)\b},
+  re   => qr{\b(mongo|mongosh)\b},
   cond => qr{(\.drop\(|dropDatabase|deleteMany|deleteOne|\.remove\()},
   msg  => "mongo drop/deleteMany/remove 금지. $SQL_TAIL" };
 push @RULES, { name => 'redis-flush',
-  re   => qr{(^|[;&|]\s*)redis-cli\b[^|;&]*\b(flushdb|flushall)\b}i,
+  re   => qr{\bredis-cli\b},
+  cond => qr{\b(flushdb|flushall)\b}i,
   msg  => "redis FLUSHDB/FLUSHALL 금지 — 데이터 통째 삭제. $SQL_TAIL" };
 
 # ---------- DB 마이그레이션 ----------
-push @RULES, { name => 'prisma-reset',    re => qr{(^|[;&|]\s*)(npx\s+|pnpm\s+|yarn\s+|bunx?\s+)?prisma\s+migrate\s+reset\b},
-  msg => "prisma migrate reset 금지. $MIG_TAIL" };
-push @RULES, { name => 'prisma-push',     re => qr{(^|[;&|]\s*)(npx\s+|pnpm\s+|yarn\s+|bunx?\s+)?prisma\s+db\s+push\b.*(--force-reset|--accept-data-loss)},
-  msg => "prisma db push --force-reset/--accept-data-loss 금지. $MIG_TAIL" };
-push @RULES, { name => 'rails-db',        re => qr{(^|[;&|]\s*)(bundle\s+exec\s+)?(rails|rake)\s+db:(drop|reset|rollback|migrate:reset|schema:load|structure:load|truncate_all|seed:replant)\b},
-  msg => "rails/rake db:drop|reset|rollback|migrate:reset 금지. $MIG_TAIL" };
-push @RULES, { name => 'alembic',         re => qr{(^|[;&|]\s*)alembic\s+downgrade\b},
-  msg => "alembic downgrade 금지. $MIG_TAIL" };
-push @RULES, { name => 'knex',            re => qr{(^|[;&|]\s*)(npx\s+|pnpm\s+|yarn\s+)?knex\s+migrate:rollback\b},
-  msg => "knex migrate:rollback 금지. $MIG_TAIL" };
-push @RULES, { name => 'typeorm',         re => qr{(^|[;&|]\s*)(npx\s+|pnpm\s+|yarn\s+)?typeorm\s+(migration:revert|schema:drop)\b},
-  msg => "typeorm migration:revert / schema:drop 금지. $MIG_TAIL" };
-push @RULES, { name => 'sqitch',          re => qr{(^|[;&|]\s*)sqitch\s+revert\b},
-  msg => "sqitch revert 금지. $MIG_TAIL" };
-push @RULES, { name => 'flyway',          re => qr{(^|[;&|]\s*)flyway\s+(clean|undo)\b},
-  msg => "flyway clean/undo 금지. $MIG_TAIL" };
+push @RULES, { name => 'prisma-reset',
+  re   => qr{\bprisma\b},
+  cond => qr{\bmigrate\s+reset\b},
+  msg  => "prisma migrate reset 금지. $MIG_TAIL" };
+push @RULES, { name => 'prisma-push',
+  re   => qr{\bprisma\b},
+  cond => qr{\bdb\s+push\b.*(--force-reset|--accept-data-loss)},
+  msg  => "prisma db push --force-reset/--accept-data-loss 금지. $MIG_TAIL" };
+push @RULES, { name => 'rails-db',
+  re   => qr{\b(rails|rake)\b},
+  cond => qr{\bdb:(drop|reset|rollback|migrate:reset|schema:load|structure:load|truncate_all|seed:replant)\b},
+  msg  => "rails/rake db:drop|reset|rollback|migrate:reset 금지. $MIG_TAIL" };
+push @RULES, { name => 'alembic',
+  re   => qr{\balembic\b},
+  cond => qr{\bdowngrade\b},
+  msg  => "alembic downgrade 금지. $MIG_TAIL" };
+push @RULES, { name => 'knex',
+  re   => qr{\bknex\b},
+  cond => qr{\bmigrate:rollback\b},
+  msg  => "knex migrate:rollback 금지. $MIG_TAIL" };
+push @RULES, { name => 'typeorm',
+  re   => qr{\btypeorm\b},
+  cond => qr{\b(migration:revert|schema:drop)\b},
+  msg  => "typeorm migration:revert / schema:drop 금지. $MIG_TAIL" };
+push @RULES, { name => 'sqitch',
+  re   => qr{\bsqitch\b},
+  cond => qr{\brevert\b},
+  msg  => "sqitch revert 금지. $MIG_TAIL" };
+push @RULES, { name => 'flyway',
+  re   => qr{\bflyway\b},
+  cond => qr{\b(clean|undo)\b},
+  msg  => "flyway clean/undo 금지. $MIG_TAIL" };
 
 # ---------- Docker ----------
-push @RULES, { name => 'docker-rm',       re => qr{(^|[;&|]\s*)docker\s+(rm|rmi)\b},
-  msg => "docker rm/rmi 금지 — 컨테이너/이미지 삭제는 사용자만. $DOCKER_TAIL" };
-push @RULES, { name => 'docker-prune',    re => qr{(^|[;&|]\s*)docker\s+(volume|network|image|container|builder|system)\s+(rm|prune)\b},
-  msg => "docker volume/network/image/system rm|prune 금지 — 데이터/캐시 삭제는 사용자만. $DOCKER_TAIL" };
-push @RULES, { name => 'docker-down-v',   re => qr{(^|[;&|]\s*)docker(\s+compose|-compose)\s+down\b[^;&|]*(\s-v\b|\s--volumes\b)},
-  msg => "docker compose down -v/--volumes 금지 — 볼륨 삭제로 DB 데이터 손실. -v 없이 down은 허용. $DOCKER_TAIL" };
-push @RULES, { name => 'docker-kill',     re => qr{(^|[;&|]\s*)docker(\s+compose|-compose)?\s+kill\b},
-  msg => "docker kill 금지 — SIGKILL은 사용자만. graceful 종료는 docker stop을 사용. $DOCKER_TAIL" };
+push @RULES, { name => 'docker-prune',
+  re   => qr{\bdocker\b},
+  cond => qr{\b(volume|network|image|container|builder|system)\b.*\b(rm|prune)\b},
+  msg  => "docker volume/network/image/system rm|prune 금지 — 데이터/캐시 삭제는 사용자만. $DOCKER_TAIL" };
+push @RULES, { name => 'docker-rm',
+  re   => qr{\bdocker\b},
+  cond => qr{\b(rm|rmi)\b},
+  msg  => "docker rm/rmi 금지 — 컨테이너/이미지 삭제는 사용자만. $DOCKER_TAIL" };
+push @RULES, { name => 'docker-down-v',
+  re   => qr{\bdocker\b},
+  cond => qr{\bdown\b[^|;&]*\s(-v\b|--volumes\b)},
+  msg  => "docker compose down -v/--volumes 금지 — 볼륨 삭제로 DB 데이터 손실. -v 없이 down은 허용. $DOCKER_TAIL" };
+push @RULES, { name => 'docker-kill',
+  re   => qr{\bdocker\b},
+  cond => qr{\bkill\b},
+  msg  => "docker kill 금지 — SIGKILL은 사용자만. graceful 종료는 docker stop을 사용. $DOCKER_TAIL" };
 
 # ============================================================
 # 동적 검사 콜백
 # ============================================================
+# rm: wrapper/quoted 안에 등장해도 차단. 단 직전 토큰이 패키지 매니저/VCS이면
+# 그 도구의 의미(`git rm`, `npm rm`)이거나 더 정확한 룰(docker-rm)이 잡으므로 skip.
+sub check_rm_not_safe {
+  my $cmd = shift;
+  my $safe_prev = qr/^(git|npm|pnpm|yarn|cargo|bun|docker|s3|volume|image|container|builder|system|network)$/;
+  while ($cmd =~ /\brm\s/g) {
+    my $start  = pos($cmd) - 3;
+    my $prefix = substr($cmd, 0, $start);
+    if ($prefix =~ /(\S+)\s+\z/) {
+      next if $1 =~ $safe_prev;
+    }
+    # `git -C <path> rm`, `git --git-dir=... rm` 처럼 옵션이 끼면 직전 토큰이
+    # path/플래그값이라 위 검사를 통과 못 함. 현재 명령 segment(직전 shell
+    # operator 이후)가 git으로 시작하면 git rm으로 간주.
+    my $segment = $prefix;
+    $segment =~ s/.*[;&|]//s;
+    next if $segment =~ /^\s*(?:sudo\s+)?git\b/;
+
+    return (1, undef);
+  }
+  return (0, undef);
+}
+
 # git commit 시 staged 영역에 빌드 산출물/바이너리/대용량 파일이 있으면 차단.
 # 이미지(png/jpg/gif/webp/svg/ico/bmp)는 정상 커밋 대상으로 분류.
 sub check_commit_binary {
@@ -223,8 +335,23 @@ sub match_rule {
   return (1, $rule->{msg});
 }
 
+sub strip_message_bodies {
+  my $cmd = shift;
+  # heredoc 본문 비우기: `cat <<'EOF' ... EOF` / `cat <<EOF ... EOF`.
+  # claude의 commit 패턴 `git commit -m "$(cat <<'EOF' ... EOF\n)"`이
+  # 본문에 들어간 도구 이름(helmfile, terraform 등)으로 룰 오탐 유발.
+  $cmd =~ s/(<<-?'?(\w+)'?)(.+?)(\n\2(?=\W|$))/$1$4/sg;
+  # 단일/이중 인용 -m / --message 값 비우기 (단순 케이스).
+  $cmd =~ s/((?:^|\s)(?:-m|--message)\s+)'[^']*'/$1''/g;
+  $cmd =~ s/((?:^|\s)(?:-m|--message)\s+)"[^"]*"/$1""/g;
+  $cmd =~ s/((?:^|\s)--message=)'[^']*'/$1''/g;
+  $cmd =~ s/((?:^|\s)--message=)"[^"]*"/$1""/g;
+  return $cmd;
+}
+
 sub evaluate {
   my ($cmd) = @_;
+  $cmd = strip_message_bodies($cmd);
   for my $rule (@RULES) {
     my ($blocked, $msg) = match_rule($cmd, $rule);
     return ($rule->{name}, $msg) if $blocked;
@@ -256,6 +383,10 @@ sub run_tests {
     ['git add .',                                  'git-add-broad',   'git add .'],
     ['git add file.txt',                           undef,             'git add 명시 통과'],
     ['git push --no-verify',                       'no-verify',       '--no-verify'],
+    ["git commit -m \"\$(cat <<'EOF'\nhelmfile destroy\nhelmfile apply\nEOF\n)\"", undef, 'heredoc 메시지 본문 helmfile 통과'],
+    ["git commit -m 'helmfile destroy 설명'",       undef,             '단일인용 메시지 helmfile 통과'],
+    ['git commit -m "terraform apply 설명"',        undef,             '이중인용 메시지 terraform 통과'],
+    ['git commit -m "msg" --amend',                'commit-amend',    '메시지 비운 뒤 --amend 검출'],
     # 기본 명령
     ['cat foo',                                    'cat-head-tail',   'cat'],
     ['head -n 5 file',                             'cat-head-tail',   'head'],
@@ -266,10 +397,30 @@ sub run_tests {
     ['rm -rf dir',                                 'rm',              'rm -rf'],
     ['rmdir foo',                                  undef,             'rmdir 통과'],
     ['npm rm foo',                                 undef,             'npm rm 통과'],
+    ['pnpm rm foo',                                undef,             'pnpm rm 통과'],
+    ['yarn rm foo',                                undef,             'yarn rm 통과'],
+    ['cargo rm foo',                               undef,             'cargo rm 통과'],
+    ['bun rm foo',                                 undef,             'bun rm 통과'],
     ['git rm file',                                undef,             'git rm 통과'],
+    ['git -C /Users/x/repo rm file',               undef,             'git -C <path> rm 통과'],
+    ['git -C /tmp/foo rm a b c',                   undef,             'git -C 다중 파일 rm 통과'],
+    ['sudo git -C /tmp rm file',                   undef,             'sudo git -C rm 통과'],
+    ['cd /tmp && rm foo',                          'rm',              'segment 분리 후 rm 차단'],
+    ["sh remote-box 'rm -rf /tmp/x'",      'rm',              'wrapper + quoted rm 차단'],
+    ['bash -c "rm -rf /tmp/x"',                    'rm',              'bash -c rm 차단'],
+    ['sh -c "rm /tmp/x"',                          'rm',              'sh -c rm 차단'],
+    ["ssh host 'rm -rf /var/log/x'",               'rm',              'ssh remote rm 차단'],
+    ['sudo rm file',                               'rm',              'sudo rm 차단'],
+    ['mkdir foo; rm -rf old',                      'rm',              'sequential rm 차단'],
+    ['term-rm.txt build',                          undef,             '단어에 rm 포함 통과'],
     # K8s/IaC
-    ['helmfile apply',                             'helmfile',        'helmfile apply'],
+    ['helmfile apply',                             'helmfile',        'helmfile apply 직접'],
+    ['helmfile -l name=myapp apply',               'helmfile',        'helmfile 옵션 + apply'],
+    ['helmfile --kube-context prod sync',          'helmfile',        'helmfile 옵션 + sync'],
+    ['mise x -- helmfile -l name=myapp apply',     'helmfile',        'wrapper + 옵션 + apply'],
+    ['mise x -- helmfile apply 2>&1 | grep UP',    'helmfile',        'wrapper + 파이프 grep'],
     ['helmfile diff',                              undef,             'helmfile diff 통과'],
+    ['helmfile lint',                              undef,             'helmfile lint 통과'],
     ['kubectl apply -f x.yaml',                    'kubectl-mutating','kubectl apply'],
     ['kubectl get pods',                           undef,             'kubectl get 통과'],
     ['kubectl rollout restart deploy/foo',         'kubectl-rollout', 'rollout restart'],
@@ -347,6 +498,30 @@ sub run_tests {
     ['docker compose down',                        undef,             'compose down 통과'],
     ['docker kill abc',                            'docker-kill',     'docker kill'],
     ['docker stop abc',                            undef,             'docker stop 통과'],
+    # Wrapper / 옵션 끼움 우회 검증 (re/cond 분리로 차단)
+    ['mise x -- kubectl apply -f x.yaml',          'kubectl-mutating','kubectl wrapper (mise)'],
+    ['kubectl --namespace foo apply -f x.yaml',    'kubectl-mutating','kubectl 글로벌 옵션 + apply'],
+    ['kubectl -n foo apply -f x',                  'kubectl-mutating','kubectl 단문자 옵션 + apply'],
+    ['kubectl --kubeconfig=/tmp/cfg delete pod x', 'kubectl-mutating','kubectl =옵션 + delete'],
+    ['helm --kube-context prod upgrade myapp .',   'helm',            'helm 옵션 + upgrade'],
+    ['mise x -- helm install foo bar',             'helm',            'helm wrapper (mise)'],
+    ['terraform -chdir=infra apply',               'terraform',       'terraform 옵션 + apply'],
+    ['mise x -- terraform destroy',                'terraform',       'terraform wrapper'],
+    ['aws --profile prod ec2 terminate-instances --instance-ids i-x', 'aws-destructive', 'aws 글로벌 옵션 + destructive'],
+    ['sudo aws s3 rm s3://bkt/obj',                'aws-s3-rm',       'sudo + aws s3 rm'],
+    ['aws --region us-east-1 iam create-user --user-name x', 'aws-iam', 'aws 옵션 + iam create'],
+    ['pnpm prisma migrate reset',                  'prisma-reset',    'pnpm wrapper'],
+    ['mise x -- alembic downgrade -1',             'alembic',         'alembic wrapper'],
+    ['mise x -- docker compose down -v',           'docker-down-v',   'compose wrapper + -v'],
+    # False positive 검증 (통과해야 함)
+    ['kubectl logs foo',                           undef,             'kubectl logs 통과'],
+    ['kubectl exec -it pod -- ls',                 undef,             'kubectl exec 통과'],
+    ['aws s3 ls',                                  undef,             'aws s3 ls 통과'],
+    ['aws ec2 describe-snapshots',                 undef,             'aws describe- 통과'],
+    ['docker logs abc',                            undef,             'docker logs 통과'],
+    ['docker inspect abc',                         undef,             'docker inspect 통과'],
+    ['terraform plan -out=tfplan',                 undef,             'terraform plan 통과'],
+    ['git log --oneline',                          undef,             'git log 통과'],
   );
 
   my ($pass, $fail) = (0, 0);

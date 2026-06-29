@@ -1,10 +1,7 @@
 ---
 name: strategic-thinking
-description: "체계적 의사결정 프레임워크. First Principles, Trade-off 분석, Cognitive Bias 점검"
+description: "체계적 의사결정 프레임워크 (First Principles, Trade-off 분석, Cognitive Bias 점검). Use when 아키텍처/기술 선택 결정, trade-off 분석, 대안 비교, 전략적 판단, 근본 원인 규명이 필요할 때. Do NOT use for 단순 코드 리뷰 (use code-review) or 원칙 평가 (use principles)."
 user-invocable: true
-tags: [decision, architecture, trade-off, first-principles, bias]
-triggers:
-  keywords: [아키텍처 결정, 기술 선택, trade-off, 전략적 판단, 의사결정, 대안 비교, 근본 원인]
 ---
 
 # Strategic Thinking
