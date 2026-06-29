@@ -1,0 +1,40 @@
+require 'net/http'
+require 'uri'
+require 'json'
+
+class JsonRpcClient
+  def initialize(url, headers: {})
+    @uri = URI(url)
+    @headers = { 'Content-Type' => 'application/json' }.merge(headers)
+    @id = 0
+  end
+
+  def call(method, params = nil)
+    @id += 1
+    body = { jsonrpc: '2.0', method: method, params: params, id: @id }
+    http = Net::HTTP.new(@uri.host, @uri.port)
+    http.use_ssl = @uri.scheme == 'https'
+    req = Net::HTTP::Post.new(@uri.request_uri, @headers)
+    req.body = JSON.generate(body)
+    res = JSON.parse(http.request(req).body)
+    raise "RPC error: #{res['error']}" if res['error']
+    res['result']
+  end
+
+  def method_missing(name, *args, **kwargs)
+    params = kwargs.empty? ? (args.empty? ? nil : args) : kwargs
+    call(name.to_s, params)
+  end
+
+  def respond_to_missing?(*, **) = true
+end
+
+def jsonrpc(name, url, headers: {}, methods: [])
+  client = JsonRpcClient.new(url, headers: headers)
+  methods.each do |m|
+    client.define_singleton_method(m) { |*args, **kwargs| call(m, kwargs.empty? ? (args.empty? ? nil : args) : kwargs) }
+  end
+  define_method(name) { client }
+end
+
+load "#{ENV['HOME']}/.irbrc" if File.exist?("#{ENV['HOME']}/.irbrc")
