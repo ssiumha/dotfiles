@@ -32,10 +32,13 @@ nnoremap <buffer> r :call webdav#ui#list(b:webdav_current_path, b:webdav_server)
 nnoremap <buffer> R :call webdav#operations#rename()<CR>
 nnoremap <buffer> D :call webdav#operations#delete()<CR>
 
-let b:undo_ftplugin = "setlocal buftype< bufhidden< noswapfile< nomodifiable< nowrap< cursorline< conceallevel< statusline<"
-      \ . " | silent! nunmap <buffer> <CR>"
-      \ . " | silent! nunmap <buffer> t"
-      \ . " | silent! nunmap <buffer> -"
-      \ . " | silent! nunmap <buffer> r"
-      \ . " | silent! nunmap <buffer> R"
-      \ . " | silent! nunmap <buffer> D"
+" NOTE: map/unmap commands absorb a literal '|' into their {lhs}, so they
+" cannot be chained with '| nunmap ...'. Wrap each in execute() so the '|'
+" acts as a real command separator and every unmap actually runs.
+let b:undo_ftplugin = "setlocal buftype< bufhidden< swapfile< modifiable< nowrap< cursorline< conceallevel< statusline<"
+      \ . " | exe 'silent! nunmap <buffer> <CR>'"
+      \ . " | exe 'silent! nunmap <buffer> t'"
+      \ . " | exe 'silent! nunmap <buffer> -'"
+      \ . " | exe 'silent! nunmap <buffer> r'"
+      \ . " | exe 'silent! nunmap <buffer> R'"
+      \ . " | exe 'silent! nunmap <buffer> D'"

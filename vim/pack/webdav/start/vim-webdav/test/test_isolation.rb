@@ -34,28 +34,32 @@ class TestWebDAVIsolation < TestWebDAVBase
     vim_cmd("call append(0, 'NormalFile')")
     vim_cmd("write")
 
-    # Open WebDAV file in new buffer
+    # Open WebDAV file — it opens as its OWN buffer (does not morph the normal
+    # file's buffer). Verify via filetype (short, quote-free command — avoids the
+    # old bare `echo exists()` which only ever matched the ruler digit by luck).
     vim_cmd("WebDAVGet /test/file1.txt")
     wait_for_text("This is test file content")
-
-    # Verify WebDAV buffer is managed
-    vim_cmd("echo exists('b:webdav_managed')")
-    wait_for_text("1")
-
+    vim_cmd("setlocal filetype?")
+    wait_for_text("filetype=webdav")
     output = capture
-    # exists() returns 1 if variable exists
-    assert_match(/1/, output, "WebDAV file should have webdav_managed variable")
+    assert_includes output, "filetype=webdav", "WebDAV file should open as a webdav-filetype buffer"
 
-    # Switch back to normal buffer
-    vim_cmd("bprevious")
-
-    # Verify normal buffer is still not managed
-    vim_cmd("echo exists('b:webdav_managed')")
-    wait_for_text("0")
-
+    # Both buffers must coexist: opening the document did NOT destroy/morph the
+    # normal file's buffer. :ls lists every buffer by name.
+    vim_cmd("ls")
+    wait_for_text("normal.txt")
     output = capture
-    # exists() returns 0 if variable doesn't exist
-    assert_match(/0/, output, "Normal buffer should not have webdav_managed variable")
+    assert_includes output, "normal.txt", "Normal file buffer must still exist (not morphed away)"
+    assert_includes output, "webdav://", "WebDAV document must have its own separate buffer"
+    send_enter  # dismiss the :ls "Press ENTER" prompt
+
+    # Switch back to the normal buffer by name; it is a plain (non-webdav)
+    # buffer, confirming WebDAV state did not leak into it.
+    vim_cmd("buffer /tmp/normal.txt")
+    vim_cmd("setlocal filetype?")
+    wait_for_text("filetype=text")
+    output = capture
+    refute_match(/filetype=webdav\b/, output, "Normal buffer must not be a webdav buffer")
   end
 
   # Test buffer switching preserves independent states
@@ -127,6 +131,48 @@ class TestWebDAVIsolation < TestWebDAVBase
 
     output = capture
     assert_includes output, "CLEAN", "WebDAV variables should not leak to new buffers"
+  end
+
+  # Regression: opening a file from the list must NOT morph the list buffer
+  # into the document. List and document are separate buffers, so the list's
+  # buffer-local mappings (r/t/D) must not leak into the document buffer
+  # (otherwise 'r' in a document navigates the listing instead of replacing a
+  # char). See ftplugin undo_ftplugin + buffer#setup buffer switch.
+  def test_document_buffer_separate_from_list
+    start_vim("WEBDAV_DEFAULT_URL" => "http://localhost:9999")
+
+    # Open list and remember its buffer number
+    vim_cmd("WebDAVList /test/")
+    wait_for_text("test/")
+    vim_cmd("let g:list_bufnr = bufnr('%')")
+
+    # Sanity: the list buffer DOES map 'r' (refresh)
+    vim_cmd("echo empty(maparg('r','n')) ? 'LIST_NO_R' : 'LIST_HAS_R'")
+    wait_for_text("LIST_HAS_R")
+
+    # Open a markdown file from the list
+    send_keys("/한글.md")
+    send_enter  # execute search
+    wait_for_text("한글")
+    send_enter  # open file
+    wait_for_text("한글")
+
+    # Document must be a DIFFERENT buffer (no morph)
+    vim_cmd("echo (bufnr('%') != g:list_bufnr) ? 'SEPARATE' : 'SAME_BUFFER'")
+    wait_for_text("SEPARATE")
+    output = capture
+    assert_includes output, "SEPARATE", "Document must open in a separate buffer, not morph the list"
+
+    # The leaked list mappings must be gone in the document buffer
+    vim_cmd("echo empty(maparg('r','n')) ? 'DOC_NO_R' : 'DOC_HAS_R'")
+    wait_for_text("DOC_NO_R")
+    output = capture
+    assert_includes output, "DOC_NO_R", "Document buffer must not inherit the list's 'r' mapping"
+
+    vim_cmd("echo empty(maparg('t','n')) ? 'DOC_NO_T' : 'DOC_HAS_T'")
+    wait_for_text("DOC_NO_T")
+    output = capture
+    assert_includes output, "DOC_NO_T", "Document buffer must not inherit the list's 't' mapping"
   end
 
   # Test that :wq on normal files works without WebDAV interference

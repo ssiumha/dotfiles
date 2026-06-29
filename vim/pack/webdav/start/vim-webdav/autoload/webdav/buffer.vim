@@ -1,6 +1,12 @@
 " autoload/webdav/buffer.vim - Buffer management functions
 " Functions for WebDAV buffer lifecycle management
 
+" Canonical (unescaped) buffer name for a WebDAV document.
+" Shared by setup (find + :file rename) so both use the exact same string.
+function! s:buffer_name(url, path) abort
+  return 'webdav://' . a:url . a:path
+endfunction
+
 " Validate that buffer is WebDAV-managed and ready for operations
 " Returns: 1 if valid, 0 if not (with error message)
 function! webdav#buffer#validate()
@@ -38,6 +44,21 @@ endfunction
 " Setup WebDAV buffer with metadata and save handler
 " Parameters: path, server_name, server_info, etag, last_modified, body
 function! webdav#buffer#setup(path, server_name, server_info, etag, last_modified, body)
+  " Ensure we are in a dedicated document buffer — never morph the list buffer
+  " into a document (that leaks the list's buffer-local mappings/state). All
+  " document-creation paths funnel through setup, so this is the single switch.
+  let target = s:buffer_name(a:server_info.url, a:path)
+  if bufname('%') !=# target
+    " Exact-match an already-loaded buffer of the same name (e.g. same file in
+    " another tab) to reuse it and avoid E95 on the :file rename below.
+    let bnr = bufnr('^' . escape(target, '.*[]^$~\') . '$')
+    if bnr > 0
+      execute 'buffer' bnr
+    else
+      enew
+    endif
+  endif
+
   " Make buffer modifiable first (in case we're reusing a non-modifiable buffer)
   setlocal modifiable
 
@@ -62,7 +83,7 @@ function! webdav#buffer#setup(path, server_name, server_info, etag, last_modifie
 
   " Set buffer name with webdav:// protocol to identify WebDAV buffers
   " This is required for BufWriteCmd to work properly
-  let buffer_name = 'webdav://' . a:server_info.url . a:path
+  let buffer_name = s:buffer_name(a:server_info.url, a:path)
   " Escape % and # first (Vim special chars), then apply fnameescape
   let escaped_name = fnameescape(escape(buffer_name, '%#'))
   silent! execute 'file ' . escaped_name

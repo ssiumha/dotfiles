@@ -30,4 +30,7 @@ nnoremap <buffer> <silent> gf :call webdav#wikilink#open()<CR>
 " Note: <CR> mapping is handled by note.vim's OpenWiki() which dispatches to
 " webdav#wikilink#open() for WebDAV buffers
 
-let b:undo_ftplugin = "setlocal noswapfile< statusline< | silent! nunmap <buffer> - | silent! nunmap <buffer> gf"
+" Wrap each unmap in execute() — map/unmap commands swallow a literal '|'
+" into their {lhs}, so chaining with '| nunmap ...' silently skips all but
+" the first. execute() makes the '|' a real separator.
+let b:undo_ftplugin = "setlocal swapfile< statusline< | exe 'silent! nunmap <buffer> -' | exe 'silent! nunmap <buffer> gf'"

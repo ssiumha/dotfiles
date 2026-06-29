@@ -121,6 +121,16 @@ function! webdav#ui#list(path = '/', server_name = '')
   endif
   let cmd = webdav#http#build_request('PROPFIND', current_path, server_info)
 
+  " Build the listing in a dedicated scratch buffer so we never morph a
+  " document (or real file) buffer into a list. server_name/current_path were
+  " already resolved from the CURRENT buffer's b: vars above, so it is now safe
+  " to switch away. Reuse the current buffer only when it is already a list
+  " (refresh/go_up) or an empty unnamed scratch (the tabnew window).
+  if &filetype !=# 'webdavlist'
+        \ && !(empty(bufname('%')) && !&modified && line('$') == 1 && empty(getline(1)))
+    enew
+  endif
+
   setlocal buftype=nofile bufhidden=wipe
   setlocal modifiable
 
