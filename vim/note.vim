@@ -178,8 +178,6 @@ augroup MyMarkdown
   autocmd FileType markdown,webdav setlocal formatoptions+=ro
   autocmd FileType markdown,webdav inoremap <buffer><expr> <CR>
         \ getline('.') =~# '^\s*[-*+]\s*$' ? '<Esc>S<CR>' : '<CR>'
-  " Copilot accept: <C-]> (Tab은 리스트 indent용)
-  autocmd FileType markdown,webdav imap <buffer><silent><script><expr> <C-]> copilot#Accept("\<CR>")
   autocmd FileType markdown,webdav nnoremap <buffer> <cr> :call OpenWiki()<cr>
   autocmd FileType markdown,webdav nnoremap <buffer> <c-c><c-l> :call SmartLink()<cr>
   autocmd FileType markdown,webdav inoremap <buffer> <C-c><C-l> <C-o>:call SmartLink()<CR>

@@ -15,7 +15,7 @@ cnoremap <c-a> <home>
 cnoremap <c-e> <end>
 
 inoremap <c-a> <home>
-imap <silent><script><expr> <c-e> copilot#Accept("\<End>")
+inoremap <c-e> <end>
 inoremap <c-f> <c-o>w
 inoremap <c-b> <c-o>b
 
@@ -644,12 +644,6 @@ Plug 'diepm/vim-rest-console', { 'for': 'rest' }
         \}
 
 " Plug 'augmentcode/augment.vim'
-Plug 'github/copilot.vim'
-  let g:copilot_filetypes = {
-        \ '*': v:true,
-        \ }
-  " let g:copilot_no_tab_map = v:true
-  " imap <silent><script><expr> <tab> copilot#Accept("\<CR>")
 call plug#end()
 
 "----------------

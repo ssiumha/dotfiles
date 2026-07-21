@@ -176,6 +176,7 @@ require('pckr').add{
         map('n', 'ghS', gs.stage_buffer, 'Stage buffer')
         map('n', 'ghu', gs.undo_stage_hunk, 'Undo stage hunk')
         map('n', 'ghp', gs.preview_hunk, 'Preview hunk')
+        map('n', 'ghi', gs.preview_hunk_inline, 'Preview hunk inline (구↔신 펼치기)')
         map('n', 'ghb', function() gs.blame_line{full=true} end, 'Blame line')
         map('n', 'ghd', gs.diffthis, 'Diff this')
       end,
@@ -792,6 +793,339 @@ do
     end
     dedoc_search(docset)
   end)
+end
+
+-------------------
+-- ReviewDiff: remote 대비 변경 파일을 좌측 읽기전용 패널로 띄우고,
+-- 선택 시 전체 파일 + inline diff(붉은 배경, 삭제줄 인라인)로 연다. LSP는 실파일 버퍼라 그대로 동작.
+-------------------
+do
+  local function gitline(cmd)
+    local out = vim.trim(vim.fn.system(cmd))
+    if vim.v.shell_error ~= 0 then return '' end
+    return out
+  end
+
+  -- origin의 기본 브랜치 (origin/HEAD). 없으면 origin/master 폴백.
+  local function default_ref()
+    local head = gitline('git rev-parse --abbrev-ref origin/HEAD')
+    if head ~= '' then return head end
+    return 'origin/master'
+  end
+
+  -- review mode 진입: gitsigns base를 remote merge-base로, 시각 토글 ON (global)
+  local function enter_review(base)
+    local gs = require('gitsigns')
+    -- change_base(global) 자체가 이미 열린 버퍼까지 새 base로 재diff한다.
+    -- gs.refresh()를 추가로 부르면 async 재diff와 레이스가 나 git_obj revision이
+    -- 기본값으로 되돌아가 hunk가 0이 되므로 호출하지 않는다.
+    gs.toggle_linehl(true)
+    gs.toggle_deleted(true)
+    gs.toggle_word_diff(true)
+    gs.change_base(base, true)
+  end
+
+  -- 채색 하이라이트. jellybeans엔 GitSigns*Ln 배경이 없어 linehl/삭제줄이 안 보임 → 직접 부여.
+  -- colorscheme이 덮을 수 있어 ColorScheme에도 재적용.
+  local function set_reviewdiff_hl()
+    local set = function(g, o) vim.api.nvim_set_hl(0, g, o) end
+    -- 패널 리스트용
+    set('ReviewDiffAdd', { fg = '#99ad6a' })  -- +N (green)
+    set('ReviewDiffDel', { fg = '#d98870' })  -- -N (red)
+    set('ReviewDiffBin', { fg = '#fad07a' })  -- [bin] (yellow)
+    set('ReviewDiffHeader',  { fg = '#8fbfdc', bold = true })          -- 섹션 헤더 (blue)
+    set('ReviewDiffFileAdd', { fg = '#a8d76a' })                       -- 추가된 파일명 (bright green)
+    set('ReviewDiffFileDel', { fg = '#e07a6a', strikethrough = true }) -- 삭제된 파일명 (red, 취소선)
+    -- 변경/추가 라인 배경 (linehl) — transparent 테마에서도 또렷하게
+    set('GitSignsAddLn',    { bg = '#2f5026' })
+    set('GitSignsChangeLn', { bg = '#54501f' })
+    -- 삭제된 줄 (show_deleted: virtual line) — 붉은 배경 + 붉은 글자
+    set('GitSignsDeleteVirtLn', { bg = '#5a2626', fg = '#ff9d8a' })
+    set('GitSignsDeleteVirtLnInLine', { bg = '#7a3030', fg = '#ffc4b8' })
+    -- word_diff: 라인 내 바뀐 글자 강조 (가장 진하게)
+    set('GitSignsAddInline',    { bg = '#3f7a35' })
+    set('GitSignsChangeInline', { bg = '#7a7028' })
+    set('GitSignsDeleteInline', { bg = '#8a3535' })
+  end
+  set_reviewdiff_hl()
+  vim.api.nvim_create_autocmd('ColorScheme', { callback = set_reviewdiff_hl })
+
+  -- ── 읽기 전용 파일 리스트 패널 (qf 대신: qfedit/qfreplace 등 간섭 회피) ──
+  -- entries[lnum] = { path=절대경로, rel=상대경로, status='A'|'M'|'D'|'R' } 또는 false(헤더/help)
+  local panel = { buf = nil, win = nil, target = nil, entries = nil, base = nil, root = nil, layout = nil }
+  local ns_panel = vim.api.nvim_create_namespace('reviewdiff_panel')
+
+  -- 파일을 열 대상(메인) 창으로 포커스. 없으면 레이아웃 방향으로 생성.
+  local function focus_target()
+    if panel.target and vim.api.nvim_win_is_valid(panel.target)
+        and panel.target ~= panel.win then
+      vim.api.nvim_set_current_win(panel.target)
+      return
+    end
+    local nav = ({ left = 'l', top = 'j', bottom = 'k' })[panel.layout] or 'k'
+    local mk = ({ left = 'rightbelow vsplit', top = 'belowright split',
+      bottom = 'aboveleft split' })[panel.layout] or 'aboveleft split'
+    vim.api.nvim_set_current_win(panel.win)
+    vim.cmd('wincmd ' .. nav)
+    if vim.api.nvim_get_current_win() == panel.win then
+      vim.cmd(mk)
+    end
+  end
+
+  -- 삭제된 파일: 작업트리에 없으니 base 버전 내용을 읽기전용으로 대상 창에 띄운다.
+  local function show_deleted_file(rel)
+    local content = vim.fn.systemlist({ 'git', '-C', panel.root, 'show', panel.base .. ':' .. rel })
+    if vim.v.shell_error ~= 0 then
+      vim.notify('ReviewDiff: cannot show deleted ' .. rel, vim.log.levels.WARN)
+      return
+    end
+    focus_target()
+    local b = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, content)
+    local ft = vim.filetype.match({ filename = rel, contents = content })
+    if ft then vim.bo[b].filetype = ft end
+    vim.bo[b].modifiable = false
+    vim.bo[b].buftype = 'nofile'
+    vim.bo[b].bufhidden = 'wipe'
+    vim.api.nvim_win_set_buf(0, b)
+    pcall(vim.api.nvim_buf_set_name, b, rel .. ' (deleted@' .. panel.base:sub(1, 7) .. ')')
+    panel.target = vim.api.nvim_get_current_win()
+  end
+
+  -- 커서 줄 열기. mode: 'edit'(대상창+포커스) | 'preview'(대상창, 포커스는 패널 유지)
+  --                    | 'vsplit'(우측 분할) | 'tab'
+  local function open_under_cursor(mode)
+    if not (panel.win and vim.api.nvim_win_is_valid(panel.win)) then return end
+    local lnum = vim.api.nvim_win_get_cursor(panel.win)[1]
+    local e = panel.entries and panel.entries[lnum]
+    if not e then return end  -- 헤더/빈줄/help
+    if e.status == 'D' then
+      show_deleted_file(e.rel)
+    else
+      local esc = vim.fn.fnameescape(e.path)
+      if mode == 'tab' then
+        vim.cmd('tabedit ' .. esc)
+      elseif mode == 'vsplit' then
+        focus_target(); vim.cmd('vsplit ' .. esc)
+      else
+        focus_target(); vim.cmd('edit ' .. esc)
+      end
+      panel.target = vim.api.nvim_get_current_win()
+    end
+    -- preview: diff만 우측에 띄우고 커서는 패널로 복귀 (netrw 스타일)
+    if mode == 'preview' and panel.win and vim.api.nvim_win_is_valid(panel.win) then
+      vim.api.nvim_set_current_win(panel.win)
+    end
+  end
+
+  local function close_panel()
+    if panel.win and vim.api.nvim_win_is_valid(panel.win) then
+      vim.api.nvim_win_close(panel.win, true)
+    end
+    if panel.buf and vim.api.nvim_buf_is_valid(panel.buf) then
+      pcall(vim.api.nvim_buf_delete, panel.buf, { force = true })
+    end
+    panel.buf, panel.win, panel.entries = nil, nil, nil
+  end
+
+  -- :ReviewDiff [ref]   ref 대비 변경 파일을 좌측 패널로. <CR>=열기, s=우측분할, t=탭, q=닫기
+  -- :ReviewDiff! [ref]  먼저 git fetch 후 동일 동작
+  vim.api.nvim_create_user_command('ReviewDiff', function(opts)
+    -- `nvim +ReviewDiff!` 처럼 startup 중(+cmd)에 호출되면 VimEnter(플러그인 로드 완료)
+    -- 보다 먼저 실행돼 gitsigns가 아직 attach되지 않는다. VimEnter 후로 한 번 미뤄 재실행.
+    if vim.v.vim_did_enter == 0 then
+      vim.api.nvim_create_autocmd('VimEnter', { once = true, callback = function()
+        vim.cmd((opts.bang and 'ReviewDiff! ' or 'ReviewDiff ') .. opts.args)
+      end })
+      return
+    end
+    local root = gitline('git rev-parse --show-toplevel')
+    if root == '' then
+      vim.notify('ReviewDiff: not a git repo', vim.log.levels.WARN)
+      return
+    end
+    if opts.bang then
+      vim.notify('ReviewDiff: fetching origin...', vim.log.levels.INFO)
+      vim.fn.system({ 'git', '-C', root, 'fetch', '--quiet' })
+    end
+    local ref = opts.args ~= '' and opts.args or default_ref()
+    -- 3-dot(merge-base) 기준 → GitHub PR diff와 일치. 실패 시 ref 직접 비교로 폴백.
+    local base = gitline('git merge-base ' .. vim.fn.shellescape(ref) .. ' HEAD')
+    if base == '' then base = ref end
+
+    enter_review(base)
+
+    -- 상태 분류: name-status (R/C는 새 경로). 삭제 파일도 포함.
+    local stat_lines = vim.fn.systemlist({
+      'git', '-C', root, 'diff', '--name-status', base,
+    })
+    if vim.v.shell_error ~= 0 or #stat_lines == 0 then
+      vim.notify('ReviewDiff: no changed files vs ' .. ref, vim.log.levels.INFO)
+      return
+    end
+    -- +/- 라인수: numstat `adds\tdels\tpath` (rename은 path가 달라 누락 가능)
+    local counts = {}
+    for _, line in ipairs(vim.fn.systemlist({
+      'git', '-C', root, 'diff', '--numstat', base,
+    })) do
+      local a, d, p = line:match('^(%S+)\t(%S+)\t(.+)$')
+      if p then counts[p] = { a = a, d = d } end
+    end
+    -- 상태별 그룹: Modified(M/R/C/T) / Added(A) / Deleted(D)
+    local mod, add, del = {}, {}, {}
+    for _, line in ipairs(stat_lines) do
+      local code, rest = line:match('^(%S+)\t(.+)$')
+      if code then
+        local c0 = code:sub(1, 1)
+        local rel = rest
+        if c0 == 'R' or c0 == 'C' then rel = rest:match('\t(.+)$') or rest end
+        local e = { rel = rel, status = c0, c = counts[rel] }
+        if c0 == 'A' then add[#add + 1] = e
+        elseif c0 == 'D' then del[#del + 1] = e
+        else mod[#mod + 1] = e end
+      end
+    end
+    -- 각 그룹 path 순 정렬 (결정적)
+    local by_rel = function(x, y) return x.rel < y.rel end
+    table.sort(mod, by_rel); table.sort(add, by_rel); table.sort(del, by_rel)
+
+    -- 패널 라인/채색/엔트리 빌드. entry=false → 헤더/빈줄/help(열기 대상 아님)
+    -- 명시적 카운터 사용: seg=nil 을 #segs+1 로 넣으면 저장이 안 돼 인덱스가 어긋난다.
+    local lines, segs, entries = {}, {}, {}
+    local n = 0
+    local function push(text, seg, entry)
+      n = n + 1
+      lines[n] = text
+      segs[n] = seg or false
+      entries[n] = entry
+    end
+    local function header(title, n)
+      if #lines > 0 then push('', nil, false) end
+      local s = title .. ' (' .. n .. ')'
+      push(s, { { 0, #s, 'ReviewDiffHeader' } }, false)
+    end
+    local function file_row(e, path_hl)
+      local c = e.c
+      local a_s, d_s
+      if c and c.a == '-' then a_s, d_s = '[bin]', ''
+      elseif c then a_s, d_s = '+' .. c.a, '-' .. c.d
+      else a_s, d_s = '', '' end
+      local text = string.format('%-6s%-6s%s', a_s, d_s, e.rel)
+      local seg = {}
+      if a_s == '[bin]' then seg[#seg + 1] = { 0, 5, 'ReviewDiffBin' }
+      elseif a_s ~= '' then seg[#seg + 1] = { 0, #a_s, 'ReviewDiffAdd' } end
+      if d_s ~= '' then seg[#seg + 1] = { 6, 6 + #d_s, 'ReviewDiffDel' } end
+      if path_hl then seg[#seg + 1] = { 12, #text, path_hl } end
+      push(text, seg, { path = root .. '/' .. e.rel, rel = e.rel, status = e.status })
+    end
+
+    local help = '<CR>/o open · O preview · s split · t tab · q quit'
+    push(help, { { 0, #help, 'Comment' } }, false)
+    if #mod > 0 then header('Modified', #mod); for _, e in ipairs(mod) do file_row(e, nil) end end
+    if #add > 0 then header('Added', #add); for _, e in ipairs(add) do file_row(e, 'ReviewDiffFileAdd') end end
+    if #del > 0 then header('Deleted', #del); for _, e in ipairs(del) do file_row(e, 'ReviewDiffFileDel') end end
+
+    -- 기존 패널이 떠 있으면 정리 후 새로 생성
+    close_panel()
+    local prev = vim.api.nvim_get_current_win()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    for i, seg in ipairs(segs) do
+      if seg then
+        for _, r in ipairs(seg) do
+          vim.api.nvim_buf_set_extmark(buf, ns_panel, i - 1, r[1],
+            { end_col = r[2], hl_group = r[3] })
+        end
+      end
+    end
+    vim.bo[buf].modifiable = false
+    vim.bo[buf].buftype = 'nofile'
+    vim.bo[buf].bufhidden = 'wipe'
+    vim.bo[buf].swapfile = false
+    vim.bo[buf].filetype = 'reviewdiff'
+
+    -- 레이아웃: vim.g.reviewdiff_panel = 'bottom'(기본) | 'top' | 'left'
+    -- 크기: vim.g.reviewdiff_size (기본 가로 14줄 / 세로 52칸)
+    local layout = vim.g.reviewdiff_panel or 'bottom'
+    local opencmd = ({ left = 'topleft vsplit', top = 'topleft split',
+      bottom = 'botright split' })[layout] or 'botright split'
+    vim.cmd(opencmd)
+    local win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(win, buf)
+    local wo = vim.wo[win]
+    if layout == 'left' then
+      vim.cmd('vertical resize ' .. (vim.g.reviewdiff_size or 52))
+      wo.winfixwidth = true
+    else
+      vim.cmd('resize ' .. (vim.g.reviewdiff_size or 14))
+      wo.winfixheight = true
+    end
+    wo.number, wo.relativenumber = false, false
+    wo.cursorline, wo.wrap = true, false
+    wo.signcolumn = 'no'
+
+    panel.buf, panel.win, panel.target, panel.layout = buf, win, prev, layout
+    panel.entries, panel.base, panel.root = entries, base, root
+
+    -- 첫 파일 행으로 커서 이동 (헤더 건너뜀)
+    for i, e in ipairs(entries) do
+      if e then vim.api.nvim_win_set_cursor(win, { i, 0 }); break end
+    end
+
+    local map = function(lhs, fn, desc)
+      vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true, desc = desc })
+    end
+    map('<CR>', function() open_under_cursor('edit') end, 'open')
+    map('o',    function() open_under_cursor('edit') end, 'open')
+    map('O',    function() open_under_cursor('preview') end, 'preview (커서 유지)')
+    map('s',    function() open_under_cursor('vsplit') end, 'open (vsplit)')
+    map('t',    function() open_under_cursor('tab') end, 'open (tab)')
+    map('q',    close_panel, 'close panel')
+  end, {
+    nargs = '?',
+    bang = true,
+    complete = function() return { 'origin/master', 'origin/main', 'origin/develop' } end,
+  })
+
+  -- :ReviewDiffDebug  현재 버퍼의 gitsigns/렌더 상태를 한 번에 출력 (원인 진단용)
+  vim.api.nvim_create_user_command('ReviewDiffDebug', function()
+    local gs = require('gitsigns')
+    local c = require('gitsigns.config').config
+    local buf = vim.api.nvim_get_current_buf()
+    local hunks = gs.get_hunks(buf)
+    local em = 0
+    for n, id in pairs(vim.api.nvim_get_namespaces()) do
+      if n:match('gitsigns') then
+        em = em + #vim.api.nvim_buf_get_extmarks(buf, id, 0, -1, {})
+      end
+    end
+    print(vim.inspect({
+      buf = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ':.'),
+      attached = hunks ~= nil,
+      hunks = hunks and #hunks or 'nil(not attached)',
+      base = c.base,
+      linehl = c.linehl,
+      show_deleted = c.show_deleted,
+      word_diff = c.word_diff,
+      signcolumn = vim.wo.signcolumn,
+      termguicolors = vim.o.termguicolors,
+      gitsigns_extmarks = em,
+      ChangeLn_bg = vim.api.nvim_get_hl(0, { name = 'GitSignsChangeLn' }).bg,
+      AddLn_bg = vim.api.nvim_get_hl(0, { name = 'GitSignsAddLn' }).bg,
+      max_file_length = c.max_file_length,
+      line_count = vim.api.nvim_buf_line_count(buf),
+    }))
+  end, {})
+
+  -- :ReviewDiffEnd  review mode 종료 (패널 닫기 + base/시각 토글 원복)
+  vim.api.nvim_create_user_command('ReviewDiffEnd', function()
+    close_panel()
+    local gs = require('gitsigns')
+    gs.reset_base(true)
+    gs.toggle_linehl(false)
+    gs.toggle_deleted(false)
+    gs.toggle_word_diff(false)
+  end, {})
 end
 
 -------------------
