@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# openpath - open a file path in the right app.
+#   - Obsidian vault note (*.md under the vault) → Obsidian
+#   - any other file                             → editor (MacVim, else nvim)
+#
+# Relative paths are resolved against the vault, then --base (or $PWD), then
+# left as-is. Force the target with --obsidian / --vim.
+#
+#   openpath projects/foo/issue/bar.md
+#   openpath --base /repo/root infra/hosts/web-01/etc/nginx/nginx.conf
+#   openpath --vim notes/scratch.md
+set -euo pipefail
+
+VAULT_DIR="${OBSIDIAN_DIR:-$HOME/Documents/obsidian}"
+VAULT_NAME="${OBSIDIAN_VAULT:-obsidian}"
+
+opener=auto
+base="$PWD"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --vim)      opener=vim;          shift ;;
+    --obsidian) opener=obsidian;     shift ;;
+    --base)     base="${2:-$PWD}";   shift 2 ;;
+    --)         shift; break ;;
+    -*)         shift ;;             # ignore unknown flags
+    *)          break ;;
+  esac
+done
+arg="${1:?usage: openpath [--obsidian|--vim] [--base DIR] <path>}"
+
+# strip a display-only 'obsidian/' prefix (bmf prints it)
+arg="${arg#obsidian/}"
+
+# resolve to an absolute path: ~/ → home, vault-relative → base-relative → as-is
+# (wezterm hands us a literal ~/ — no shell expanded it)
+if [[ "$arg" == "~/"* ]]; then
+  abs="$HOME/${arg:2}"
+elif [[ "$arg" == /* ]]; then
+  abs="$arg"
+elif [[ -e "$VAULT_DIR/$arg" ]]; then
+  abs="$VAULT_DIR/$arg"
+elif [[ -e "$base/$arg" ]]; then
+  abs="$base/$arg"
+else
+  abs="$base/$arg"
+fi
+
+# auto-dispatch by location/type
+if [[ "$opener" == auto ]]; then
+  if [[ "$abs" == "$VAULT_DIR"/* && "$abs" == *.md ]]; then
+    opener=obsidian
+  else
+    opener=vim
+  fi
+fi
+
+case "$opener" in
+  obsidian)
+    rel="${abs#$VAULT_DIR/}"
+    open "obsidian://open?vault=$VAULT_NAME&file=${rel%.md}"
+    ;;
+  vim)
+    if command -v mvim >/dev/null 2>&1; then
+      mvim --remote-tab-silent "$abs"
+    else
+      nvim "$abs"
+    fi
+    ;;
+esac
