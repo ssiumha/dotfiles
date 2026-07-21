@@ -4,6 +4,8 @@ config/gh/hosts.yml
 config/k9s/aliases.yaml
 config/k9s/config.yaml
 config/k9s/config.yml
+config/bmf/dest
+config/irb/irb_history
 config/nvim/pack
 config/nvim/plugin
 config/zed
