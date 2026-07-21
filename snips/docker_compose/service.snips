@@ -311,6 +311,83 @@ services:
     restart: unless-stopped
 endsnippet
 
+snippet service_cloudbeaver "web DB console with declarative datasource seed + bootstrap"
+# CloudBeaver Community — Postgres web console with first-boot auto-bootstrap.
+#
+# Refs (verified against image dbeaver/cloudbeaver:26.0.4):
+# - First-boot guard:    run-cloudbeaver-server.sh:7-10
+#                        (skips seed if workspace/.metadata exists)
+# - Auto-bootstrap env:  CBConstants.java:70-72  (3 vars: CB_SERVER_NAME / CB_ADMIN_NAME /
+#                        CB_ADMIN_PASSWORD). CB_SERVER_URL is NOT consumed.
+# - Admin name caveat:   DEFAULT_ADMIN_NAME="cbadmin" / DEFAULT_ADMIN_TEAM="admin".
+#                        User/team subjectId share a namespace — CB_ADMIN_NAME="admin"
+#                        conflicts with the default admin TEAM and aborts auto-config
+#                        ("User or team 'admin' already exists"). Use "cbadmin" or other.
+# - Password policy:     PasswordPolicyService.ts is FE-only. BE auto-bootstrap path
+#                        (finishConfiguration → setUserCredentials) does not enforce
+#                        requireMixedCase / minLength etc — simple passwords pass.
+# - Datasource seed:     conf/initial-data-sources.conf is copied verbatim to
+#                        workspace/GlobalConfiguration/.dbeaver/data-sources.json on
+#                        first boot only. Mount as a Compose config (NOT a volume) so
+#                        the workspace stays writable.
+# - Config file mode:    0444 required — container runs as UID 8978; default Docker
+#                        configs mount as root:root 0440 which dbeaver cannot read,
+#                        silently failing the cp seed step.
+# - Reverse proxy:       SPA uses /api/gql (GraphQL XHR) + /api/ws (WebSocket). If a
+#                        front gate (oauth2-proxy etc.) returns 302 to fetch/WS, the
+#                        SPA can enter a reconnect burn loop. Either bypass /api on
+#                        trusted IPs or skip the gate entirely behind a VPN.
+services:
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:26.0.4
+    restart: unless-stopped
+    environment:
+      CB_SERVER_NAME: "DB Console"
+      CB_ADMIN_NAME: cbadmin
+      CB_ADMIN_PASSWORD: "changeme"
+      CLOUDBEAVER_APP_ANONYMOUS_ACCESS_ENABLED: "false"
+    volumes:
+      # Workspace must be a writable bind/volume; image declares VOLUME on it.
+      - ./data/cloudbeaver:/opt/cloudbeaver/workspace
+    configs:
+      - source: cloudbeaver-datasources
+        target: /opt/cloudbeaver/conf/initial-data-sources.conf
+        mode: 0444
+    ports:
+      - "8978:8978"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+configs:
+  cloudbeaver-datasources:
+    # Compose interpolates ${VAR} from the host shell / --env-file at parse time.
+    # Edit connections/passwords here; they are written verbatim to
+    # workspace/GlobalConfiguration/.dbeaver/data-sources.json on first boot.
+    content: |
+      {
+        "folders": {},
+        "connections": {
+          "pg-app": {
+            "provider": "postgresql",
+            "driver": "postgres-jdbc",
+            "name": "App DB",
+            "save-password": true,
+            "configuration": {
+              "host": "postgres",
+              "port": "5432",
+              "database": "app_db",
+              "url": "jdbc:postgresql://postgres:5432/app_db",
+              "user": "postgres",
+              "password": "${POSTGRES_PASSWORD}",
+              "configurationType": "MANUAL",
+              "type": "dev",
+              "auth-model": "native"
+            }
+          }
+        }
+      }
+endsnippet
+
 snippet service_socat_tunnel "tcp tunnel via socat (e.g. db proxy)"
 services:
   socat:

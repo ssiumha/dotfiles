@@ -251,3 +251,8 @@ PKG_CONFIG_PATH="/opt/homebrew/opt/icu4c/lib/pkgconfig:/opt/homebrew/opt/openssl
 LDFLAGS="-L/opt/homebrew/opt/openssl/lib"
 CPPFLAGS="-I/opt/homebrew/opt/openssl/include"
 endsnippet
+
+snippet compose_envs ""
+COMPOSE_FILE = "{{ env.HOME }}/some/path/compose.yaml"
+COMPOSE_ENV_FILES = "{{ env.HOME }}/some/path/.env"
+endsnippet
