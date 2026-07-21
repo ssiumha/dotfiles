@@ -9,6 +9,22 @@ set -euo pipefail
 ORG_DIR="${ORG_DIR:-$HOME/org}"
 OBSIDIAN_DIR="${OBSIDIAN_DIR:-$HOME/Documents/obsidian}"
 
+# destination allowlist for dest mode (the things worth re-opening — workspace
+# docs, integration portals, ops dashboards). This is DATA, not code: the repo
+# ships NO domains. Patterns live machine-local in $BMF_DEST_FILE (one POSIX-ERE
+# fragment per line, '#' comments and blanks ignored), OR'd into an ERE matched
+# against the URL column. BMF_DEST_RE env var overrides/seeds it. If empty (no
+# file configured), dest mode is unavailable and the picker starts in all mode.
+BMF_DEST_RE="${BMF_DEST_RE:-}"
+BMF_DEST_FILE="${BMF_DEST_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/bmf/dest}"
+if [[ -f "$BMF_DEST_FILE" ]]; then
+  _extra=$(grep -vE '^[[:space:]]*(#|$)' "$BMF_DEST_FILE" 2>/dev/null | paste -sd '|' -)
+  if [[ -n "$_extra" ]]; then
+    [[ -n "$BMF_DEST_RE" ]] && BMF_DEST_RE="$BMF_DEST_RE|$_extra" || BMF_DEST_RE="$_extra"
+  fi
+  unset _extra
+fi
+
 # --- options ---
 
 BMF_POPUP=0
@@ -82,6 +98,29 @@ harvest_bookmarks_frontmatter() {
   done
 }
 
+# --- harvest_files ---
+# Output: display\trelpath\tsource (tab-separated)
+#
+# Harvests document/attachment files (ppt, pdf, sheets, docs) from OBSIDIAN_DIR
+# so they can be filtered by project and opened. Project tag is added centrally
+# in harvest() from the source path. Display: "{ext} {basename}".
+
+harvest_files() {
+  local t=$'\t'
+  [[ -d "$OBSIDIAN_DIR" ]] || return 0
+
+  rg --files \
+    --glob '*.pptx' --glob '*.ppt' --glob '*.key' \
+    --glob '*.pdf'  --glob '*.xlsx' --glob '*.docx' \
+    --glob '!archives/' --glob '!archive/' "$OBSIDIAN_DIR" 2>/dev/null \
+    | awk -v obs="$OBSIDIAN_DIR/" -v t="$t" '{
+        rel=$0; sub(obs,"",rel)
+        base=rel; sub(/.*\//,"",base)
+        ext=base; sub(/.*\./,"",ext)
+        printf "%s %s%s%s%sobsidian/%s\n", ext, base, t, rel, t, rel
+      }' || true
+}
+
 # --- harvest ---
 # Output: display\ttarget\tsource (tab-separated, deduped by target)
 
@@ -91,6 +130,9 @@ harvest() {
   {
     # Priority 1: bookmarks/*.md frontmatter (curated, with metadata)
     harvest_bookmarks_frontmatter
+
+    # document/attachment files (ppt, pdf, sheets, docs)
+    harvest_files
 
     for dir in "$ORG_DIR" "$OBSIDIAN_DIR"; do
       [[ -d "$dir" ]] || continue
@@ -109,7 +151,7 @@ harvest() {
             if(match(line,/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/)){
               full=substr(line,RSTART,RLENGTH)
               name=full; sub(/^\[/,"",name); sub(/\].*$/,"",name)
-              url=full; sub(/^[^(]*\(/,"",url); sub(/\)$/,"",url)
+              url=full; sub(/^[^]]*\]\(/,"",url); sub(/\)$/,"",url)
               ctx=line
               gsub(/\[[^\]]*\]\([^)]*\)/,"",ctx)
               gsub(/- \[.\] /,"",ctx)
@@ -135,7 +177,7 @@ harvest() {
             if(match(line,/\[([^\]]+)\]\(([^)#][^)]*)\)/)){
               full=substr(line,RSTART,RLENGTH)
               name=full; sub(/^\[/,"",name); sub(/\].*$/,"",name)
-              url=full; sub(/^[^(]*\(/,"",url); sub(/\)$/,"",url)
+              url=full; sub(/^[^]]*\]\(/,"",url); sub(/\)$/,"",url)
               if(url ~ /^https?:\/\//) next
               ctx=line
               gsub(/\[[^\]]*\]\([^)]*\)/,"",ctx)
@@ -174,16 +216,23 @@ harvest() {
   } | awk -F'\t' '!seen[$2]++ {
     name = $1; target = $2; source = $3
     if (target ~ /^archives\//) next
-    domain = ""
-    if (target ~ /^https?:\/\//) {
+    had_meta = (name ~ /\033\[2m/)
+
+    # project tag from source path: [obsidian/]projects/{x}/… → pj-{x}
+    proj = source; sub(/^obsidian\//, "", proj)
+    if (proj ~ /^projects\/[^\/]+\//) { sub(/^projects\//, "", proj); sub(/\/.*/, "", proj) }
+    else proj = ""
+    if (proj != "" && name !~ /\[pj-/)
+      name = name " \033[2m[pj-" proj "]\033[0m"
+
+    # domain hint for URLs whose display name is not the bare URL
+    if (target ~ /^https?:\/\// && !had_meta && $1 != target) {
       domain = target
       sub(/^https?:\/\//, "", domain)
       sub(/\/.*/, "", domain)
+      if (domain != "") name = name "  \033[2m" domain "\033[0m"
     }
-    if (domain != "" && name !~ /\033\[2m/ && name != target)
-      printf "%s  \033[2m%s\033[0m\t%s\t%s\n", name, domain, target, source
-    else
-      printf "%s\t%s\t%s\n", name, target, source
+    printf "%s\t%s\t%s\n", name, target, source
   }'
 }
 
@@ -210,21 +259,32 @@ pick() {
   local mode_file cache_file
   mode_file=$(mktemp)
   cache_file=$(mktemp)
-  echo "all" > "$mode_file"
+  # dest mode needs a configured allowlist; without one, start in all mode
+  local default_mode="dest"
+  [[ -z "$BMF_DEST_RE" ]] && default_mode="all"
+  echo "$default_mode" > "$mode_file"
   harvest > "$cache_file"
   trap "rm -f $mode_file $cache_file" EXIT
 
-  local bind_cycle="cur=\$(cat $mode_file); if [ \"\$cur\" = all ]; then echo url; elif [ \"\$cur\" = url ]; then echo local; else echo all; fi > $mode_file"
-  local bind_reload="mode=\$(cat $mode_file); if [ \"\$mode\" = url ]; then awk -F'\t' '\$2 ~ /^https?:\/\//' $cache_file; elif [ \"\$mode\" = local ]; then awk -F'\t' '\$2 !~ /^https?:\/\//' $cache_file; else cat $cache_file; fi"
+  # ctrl-t cycle: dest (destinations) → all → url → local → file (documents) → dest
+  local bind_cycle="cur=\$(cat $mode_file); case \$cur in dest) echo all ;; all) echo url ;; url) echo local ;; local) echo file ;; *) echo dest ;; esac > $mode_file"
+  local bind_reload="mode=\$(cat $mode_file); case \$mode in dest) awk -F'\t' '\$2 ~ /^https?:\/\// && \$2 ~ /$BMF_DEST_RE/' $cache_file ;; url) awk -F'\t' '\$2 ~ /^https?:\/\//' $cache_file ;; local) awk -F'\t' '\$2 !~ /^https?:\/\//' $cache_file ;; file) awk -F'\t' '\$2 ~ /\\.(pptx?|key|pdf|xlsx?|docx?)\$/' $cache_file ;; *) cat $cache_file ;; esac"
   local bind_header="mode=\$(cat $mode_file); printf '[%s] enter:open  ctrl-y:copy  ctrl-e:nvim  ctrl-t:filter' \$(echo \$mode | tr a-z A-Z)"
 
+  local init_list
+  if [[ "$default_mode" == dest ]]; then
+    init_list=$(awk -F'\t' '$2 ~ /^https?:\/\// && $2 ~ /'"$BMF_DEST_RE"'/' "$cache_file")
+  else
+    init_list=$(cat "$cache_file")
+  fi
+
   local selected
-  selected=$(cat "$cache_file" | fzf \
+  selected=$(printf '%s\n' "$init_list" | fzf \
     --prompt="bm> " \
     --ansi \
     --delimiter="\t" \
     --with-nth=1 \
-    --header='[ALL] enter:open  ctrl-y:copy  ctrl-e:nvim  ctrl-t:filter' \
+    --header="[$(echo "$default_mode" | tr a-z A-Z)] enter:open  ctrl-y:copy  ctrl-e:nvim  ctrl-t:filter" \
     --expect="ctrl-y,ctrl-e" \
     --bind "ctrl-t:execute-silent($bind_cycle)+reload($bind_reload)+transform-header($bind_header)" \
     --preview='
@@ -260,7 +320,16 @@ pick() {
         [[ "$resolved" != /* && "$resolved" != ~/* ]] && resolved="$base/$resolved"
         [[ "$resolved" == ~/* ]] && resolved="$home/${resolved:2}"
         if [[ -f "$resolved" ]]; then
-          bat --color=always --style=numbers "$resolved" 2>/dev/null || cat "$resolved"
+          case "$resolved" in
+            *.pptx|*.ppt|*.key|*.pdf|*.xlsx|*.docx|*.jpg|*.JPG|*.png|*.webp|*.avif|*.zip)
+              printf "\033[1;36m%s\033[0m\n" "${resolved##*/}"
+              printf "\033[2m%s\033[0m\n" "$resolved"
+              ls -lh "$resolved" 2>/dev/null | awk "{print \$5, \$6, \$7, \$8}"
+              ;;
+            *)
+              bat --color=always --style=numbers "$resolved" 2>/dev/null || cat "$resolved"
+              ;;
+          esac
         else
           printf "%s\n" "$resolved"
         fi
@@ -302,6 +371,10 @@ pick() {
     *)
       case "$resolved" in
         http://*|https://*)
+          open "$resolved"
+          ;;
+        *.pptx|*.ppt|*.key|*.pdf|*.xlsx|*.docx|*.jpg|*.JPG|*.png|*.webp|*.avif|*.zip)
+          # document/attachment files → open in default app
           open "$resolved"
           ;;
         *)
