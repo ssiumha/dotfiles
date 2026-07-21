@@ -60,6 +60,52 @@ export XDG_RUNTIME_DIR="$HOME/.local/run"
 export HISTSIZE=500000
 export SAVEHIST=500000
 
+# Keep destructive commands out of history so Ctrl-R / ↑ cannot re-run them.
+# Hook fires once per accepted line; returning 1 prevents both in-memory and
+# file storage. Patterns anchor at the command head (after stripping optional
+# leading whitespace and a single sudo prefix) so safe lines that merely
+# mention a keyword as an argument (e.g. `echo "DROP TABLE x"`) pass through.
+zshaddhistory() {
+  emulate -L zsh
+  setopt extended_glob
+  local -i max_lines=${ZSH_HIST_MAX_LINES:-5}
+  local nl=${1//[^$'\n']/}
+  if (( ${#nl} > max_lines )); then
+    return 1
+  fi
+  local line=${1%%$'\n'}
+  local head=${line##[[:space:]]#}
+  head=${head##(sudo[[:space:]]##)#}
+  local lhead=${head:l}
+  case $head in
+    'rm -rf /'|'rm -rf / '*|'rm -rf /*'|'rm -rf /* '*) return 1 ;;
+    'rm -fr /'|'rm -fr / '*|'rm -fr /*'|'rm -fr /* '*) return 1 ;;
+    'rm -rf *'|'rm -rf * '*|'rm -fr *'|'rm -fr * '*) return 1 ;;
+    'rm -rf '*'--no-preserve-root'*|'rm -fr '*'--no-preserve-root'*) return 1 ;;
+    'rm -rf $HOME'*|'rm -rf ~'|'rm -rf ~ '*|'rm -rf ~/'*) return 1 ;;
+    'dd '*' of=/'*) return 1 ;;
+    'mkfs'|'mkfs '*|'mkfs.'*) return 1 ;;
+    ':()'*'{ :|:&'*) return 1 ;;
+    'terraform destroy'|'terraform destroy '*) return 1 ;;
+    'tofu destroy'|'tofu destroy '*|'opentofu destroy'|'opentofu destroy '*) return 1 ;;
+    'terraform apply '*'-auto-approve'*|'tofu apply '*'-auto-approve'*) return 1 ;;
+    'kubectl delete '(ns|namespace|namespaces|crd|crds|cluster|clusters|pv|pvc|node|nodes|pod|pods|all)' '*) return 1 ;;
+    'helm uninstall '*) return 1 ;;
+    'aws s3 rm '*'--recursive'*) return 1 ;;
+    'aws s3 rb '*) return 1 ;;
+    'git push -f'|'git push -f '*|'git push --force'|'git push --force '*) return 1 ;;
+    'git reset --hard'|'git reset --hard '*) return 1 ;;
+    'git clean -'[a-zA-Z]#[fF][a-zA-Z]#[dD]*|'git clean -'[a-zA-Z]#[dD][a-zA-Z]#[fF]*) return 1 ;;
+    'git branch -D '*) return 1 ;;
+  esac
+  case $lhead in
+    'drop table '*|'drop database '*|'drop schema '*|'drop index '*) return 1 ;;
+    'truncate table '*) return 1 ;;
+    'delete from '*) return 1 ;;
+  esac
+  return 0
+}
+
 export ZSH_CACHE_DIR="$XDG_CACHE_HOME/zsh/.zcompcache"
 
 export MISE_GLOBAL_CONFIG_FILE="$HOME/.mise.toml"
