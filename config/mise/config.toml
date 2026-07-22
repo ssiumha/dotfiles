@@ -112,19 +112,15 @@ esac
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-echo -e '# logseq 등록'
-ir collection add logseq-pages ~/Documents/logseq/pages 2>/dev/null || true
-ir collection add logseq-journals ~/Documents/logseq/journals 2>/dev/null || true
+echo -e '# obsidian 등록'
+ir collection add obsidian ~/Documents/obsidian 2>/dev/null || true
 echo -e '# 한국어 전처리기 설치'
 ir preprocessor install ko
-ir preprocessor bind ko logseq-pages
-ir preprocessor bind ko logseq-journals
+ir preprocessor bind ko obsidian
 echo -e '# BM25 인덱싱'
-ir update logseq-pages
-ir update logseq-journals
+ir update obsidian
 echo -e '# 벡터 임베딩'
-ir embed logseq-pages
-ir embed logseq-journals
+ir embed obsidian
 echo -e '# 데몬 시작'
 ir daemon start
 """
