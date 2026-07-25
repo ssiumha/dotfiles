@@ -122,6 +122,6 @@ user-invocable: true
 
 - `/design-first` — 구현 전 점진적 설계 합의
 - `/plan-review tdd` — 새 기능의 테스트 주도 개발
-- `/safe-refactoring` — 기존 코드의 안전한 리팩토링
+- `/refactoring` — 기존 코드의 안전한 리팩토링
 
 > Origin: moai-adk foundation-philosopher + foundation-thinking 통합

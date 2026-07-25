@@ -69,16 +69,26 @@ push @RULES, { name => 'commit-binary',
   re   => qr{\bgit\b},
   cond => qr{\bcommit\b},
   dyn  => \&check_commit_binary, msg => undef };
+push @RULES, { name => 'commit-scratch',
+  re   => qr{\bgit\b},
+  cond => qr{\bcommit\b},
+  dyn  => \&check_commit_scratch, msg => undef };
 push @RULES, { name => 'no-verify',       re => qr{--no-verify},
   msg => '--no-verify 금지. hook을 우회할 수 없습니다. 문제를 직접 해결하세요.' };
+push @RULES, { name => 'gh-api-pr-create',
+  re   => qr{\bgh\b},
+  cond => qr{\bapi\b(?=[^|;&]*/pulls['"]?(?:\s|$))(?=[^|;&]*(?:-X\s*POST|--method[= ]POST|\s-[fF]\s|--field|--raw-field))},
+  msg  => 'gh api로 PR 생성 금지. PR 생성은 gh pr create로 — 사용자 허가(permission prompt)를 거쳐야 합니다.' };
 
 # ---------- 기본 명령 ----------
+# cat/head/tail·echo 차단 — 일부만 읽고 전체를 판단하거나, 확인 없이 출력을
+# 흉내 내는 실수를 막는다. 파일은 Read로 전체를 읽는 것이 원칙.
 push @RULES, { name => 'cat-head-tail',   re => qr{(^|[;&|]\s*)(cat|head|tail)\s},
   msg => 'cat/head/tail 금지. 파일은 Read로 직접 읽으세요(offset/limit 부분 읽기 가능, 라인 번호 포함). 출력을 자르고 싶으면 명령 자체에 limit을 거세요 — git log -n 5, rg -m 10, jq -c ".[0:5]". 잘린 컨텍스트로 잘못 판단하느니 전체를 보세요.' };
 push @RULES, { name => 'echo',            re => qr{(^|[;&|]\s*)echo\s},
   msg => 'echo 금지. 사용자에게 보일 텍스트는 응답 본문에 직접 작성하세요. 파일 작성은 Write를 사용하고, 변수 값은 명령 인자에 직접 전달하세요.' };
 push @RULES, { name => 'rm',
-  re   => qr{\brm\s},
+  re   => qr{\brm(?:[\s;&|]|$)},
   dyn  => \&check_rm_not_safe,
   msg  => "rm/rm -rf 금지. 파일 삭제는 git 추적 여부에 따라 처리 방식이 다릅니다.\n조치:\n  1) git ls-files --error-unmatch <path> 로 git 추적 여부 확인\n  2) git 추적 파일이면 → git rm <path> 사용 (이력 보존 + 스테이징, 이후 커밋)\n  3) git 추적 안 된 파일이면 → 사용자에게 처리 방식을 물어보세요:\n     - 직접 삭제 (! rm <path> 사용자 실행)\n     - .gitignore 추가 후 보존\n     - 그대로 두기\n임의로 rm/rm -rf 실행하지 마세요. 정말 필요하면 사용자에게 ! rm 직접 실행을 요청하세요." };
 
@@ -252,8 +262,9 @@ push @RULES, { name => 'docker-kill',
 sub check_rm_not_safe {
   my $cmd = shift;
   my $safe_prev = qr/^(git|npm|pnpm|yarn|cargo|bun|docker|s3|volume|image|container|builder|system|network)$/;
-  while ($cmd =~ /\brm\s/g) {
-    my $start  = pos($cmd) - 3;
+  # (?=[\s;&|]|$): 인자 없이 끝나는 rm도 잡는다 — `| xargs rm`은 stdin으로 파일 목록을 받는 실제 삭제 벡터
+  while ($cmd =~ /\brm(?=[\s;&|]|$)/g) {
+    my $start  = pos($cmd) - 2;
     my $prefix = substr($cmd, 0, $start);
     if ($prefix =~ /(\S+)\s+\z/) {
       next if $1 =~ $safe_prev;
@@ -264,10 +275,41 @@ sub check_rm_not_safe {
     my $segment = $prefix;
     $segment =~ s/.*[;&|]//s;
     next if $segment =~ /^\s*(?:sudo\s+)?git\b/;
+    # 검색 명령의 패턴 인자에 등장하는 rm은 삭제가 아님: rg 'rm -rf' src, grep "rm " logs
+    next if $segment =~ /^\s*(?:rg|grep|egrep|fgrep|ast-grep|sg)\b/;
 
     return (1, undef);
   }
   return (0, undef);
+}
+
+# 검증·재현용 스크래치가 신규 파일로 staged되면 차단.
+# 기능 검증의 산출물은 검증 결과(보고)이지 검증 도구가 아니다 — 도구는 세션
+# 스크래치패드에 둔다.
+my $SCRATCH_DIR  = qr/\A(scratch|scratchpad|repro|repros|poc|pocs|sandbox|playground|experiments?|tmp|temp)\z|(?:-harness|-repro|-poc)\z/;
+my $SCRATCH_BASE = qr/\A(scratch|repro|poc|playground)\z/;
+
+sub scratch_paths {
+  my @files = @_;
+  grep {
+    my @segs = split m{/}, $_;
+    my $base = pop @segs;
+    $base =~ s/\.[^.]+\z// if defined $base;
+    (grep { $_ =~ $SCRATCH_DIR } @segs) || (defined $base && $base =~ $SCRATCH_BASE);
+  } @files;
+}
+
+sub check_commit_scratch {
+  my $staged = `git diff --cached --name-only --diff-filter=A 2>/dev/null`;
+  return (0, undef) unless length $staged;
+  my @bad = scratch_paths(grep { length } split /\n/, $staged);
+  return (0, undef) unless @bad;
+  my $msg = "검증·재현용 스크래치로 보이는 신규 파일이 staged되어 있습니다:\n"
+          . join("\n", @bad)
+          . "\n\n기능 검증·재현 도구는 저장소가 아닌 세션 스크래치패드에 만드세요."
+          . "\n저장소에 남길 가치가 있으면(회귀 테스트 정식 편입 등) 사용자에게 먼저 물어보세요."
+          . "\n의도적 커밋이면 사용자에게 ! git commit 직접 실행을 요청하세요.";
+  return (1, $msg);
 }
 
 # git commit 시 staged 영역에 빌드 산출물/바이너리/대용량 파일이 있으면 차단.
@@ -383,6 +425,10 @@ sub run_tests {
     ['git add .',                                  'git-add-broad',   'git add .'],
     ['git add file.txt',                           undef,             'git add 명시 통과'],
     ['git push --no-verify',                       'no-verify',       '--no-verify'],
+    ['gh api repos/o/r/pulls -f title=x -f head=b -f base=main', 'gh-api-pr-create', 'gh api PR 생성 차단'],
+    ['gh api --method POST repos/o/r/pulls -f title=x', 'gh-api-pr-create', 'gh api --method POST PR 생성 차단'],
+    ['gh api repos/o/r/pulls',                     undef,             'gh api pulls 목록 조회 통과'],
+    ['gh api repos/o/r/pulls/123/comments -f body=hi', undef,         'gh api PR 코멘트 통과'],
     ["git commit -m \"\$(cat <<'EOF'\nhelmfile destroy\nhelmfile apply\nEOF\n)\"", undef, 'heredoc 메시지 본문 helmfile 통과'],
     ["git commit -m 'helmfile destroy 설명'",       undef,             '단일인용 메시지 helmfile 통과'],
     ['git commit -m "terraform apply 설명"',        undef,             '이중인용 메시지 terraform 통과'],
@@ -406,13 +452,16 @@ sub run_tests {
     ['git -C /tmp/foo rm a b c',                   undef,             'git -C 다중 파일 rm 통과'],
     ['sudo git -C /tmp rm file',                   undef,             'sudo git -C rm 통과'],
     ['cd /tmp && rm foo',                          'rm',              'segment 분리 후 rm 차단'],
-    ["sh remote-box 'rm -rf /tmp/x'",      'rm',              'wrapper + quoted rm 차단'],
+    ["sh remote-box 'rm -rf /tmp/x'",              'rm',              'wrapper + quoted rm 차단'],
     ['bash -c "rm -rf /tmp/x"',                    'rm',              'bash -c rm 차단'],
     ['sh -c "rm /tmp/x"',                          'rm',              'sh -c rm 차단'],
     ["ssh host 'rm -rf /var/log/x'",               'rm',              'ssh remote rm 차단'],
     ['sudo rm file',                               'rm',              'sudo rm 차단'],
     ['mkdir foo; rm -rf old',                      'rm',              'sequential rm 차단'],
     ['term-rm.txt build',                          undef,             '단어에 rm 포함 통과'],
+    ["rg 'rm -rf' src",                            undef,             'rg 패턴 인자 rm 통과'],
+    ['grep -r "rm " logs',                         undef,             'grep 패턴 인자 rm 통과'],
+    ['grep foo file | xargs rm',                   'rm',              'grep 파이프 뒤 rm 차단'],
     # K8s/IaC
     ['helmfile apply',                             'helmfile',        'helmfile apply 직접'],
     ['helmfile -l name=myapp apply',               'helmfile',        'helmfile 옵션 + apply'],
@@ -537,6 +586,30 @@ sub run_tests {
       $fail++;
       push @failures, sprintf("FAIL  %-40s expected=%-22s got=%-22s\n  cmd: %s",
         $desc, ($expected // '(pass)'), ($got // '(pass)'), $cmd);
+    }
+  }
+
+  # scratch_paths 단위 테스트 (git 상태 의존 없는 판정 로직만 커버)
+  my @sp_cases = (
+    ['infra/dev/loadtest-harness/run.sh',           1, '*-harness 디렉토리 차단'],
+    ['docs/repro/steps.md',                         1, 'repro 디렉토리 차단'],
+    ['src/scratch/x.py',                            1, 'scratch 디렉토리 차단'],
+    ['repro.sh',                                    1, '루트 repro 파일 차단'],
+    ['tools/perf-poc/bench.py',                     1, '*-poc 디렉토리 차단'],
+    ['prompts/skills/harness-engineering/SKILL.md', 0, 'harness- prefix 통과'],
+    ['src/lib/temperature.rb',                      0, 'temp 부분 문자열 통과'],
+    ['app/models/user.rb',                          0, '일반 파일 통과'],
+    ['spec/reproduction_spec.rb',                   0, 'repro 부분 문자열 통과'],
+  );
+  for my $c (@sp_cases) {
+    my ($path, $expected, $desc) = @$c;
+    my $got = scratch_paths($path) ? 1 : 0;
+    if ($got == $expected) {
+      $pass++;
+    } else {
+      $fail++;
+      push @failures, sprintf("FAIL  %-40s expected=%s got=%s\n  path: %s",
+        $desc, $expected, $got, $path);
     }
   }
   binmode STDOUT, ':utf8';

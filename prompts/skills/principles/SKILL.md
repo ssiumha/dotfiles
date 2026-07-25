@@ -1,5 +1,4 @@
 ---
-disable-model-invocation: true
 name: principles
 description: "소프트웨어 공학 원칙 바스켓. 원칙 카탈로그 열람, 코드/설계/프로세스/테스트의 원칙 준수도 평가, 위반 식별 및 개선 가이드. Use when 원칙 평가, 원칙 점검, 원칙 검증, principles check, 코드 품질 근본 진단, 설계 원칙 리뷰, 아키텍처 원칙 점검, 프로세스 원칙 점검, 테스트 원칙 점검, 테스트 설계, or when other review skills need a principled foundation. Do NOT use for specific code review (use code-review), security audit (use security), or strategic decisions (use strategic-thinking)."
 user-invocable: true
@@ -40,6 +39,7 @@ argument-hint: "[evaluate|catalog|check <principle>] [target]"
 | TDA | design | 객체에게 상태를 물어서 판단하지 말고, 해야 할 일을 시켜라 |
 | UL | design | 도메인 전문가와 개발자가 같은 언어를 쓴다. 코드가 곧 도메인 용어 |
 | INTENTION-REVEALING-NAMES | design | 이름은 무엇을 하는지가 아니라 왜 존재하는지를 드러낸다 |
+| SELF-DOCUMENTING-CODE | design | 문서화보다 문서처럼 읽히는 코드가 우선 — 이름·구조·타입이 의도를 말하게 |
 | SoC | architecture | 서로 다른 관심사를 섞지 않는다 |
 | COHESION-COUPLING | architecture | 모듈 내부는 높은 응집, 모듈 간은 낮은 결합 |
 | CONWAYS-LAW | architecture | 시스템 구조는 그 시스템을 만든 조직의 커뮤니케이션 구조를 따른다 |

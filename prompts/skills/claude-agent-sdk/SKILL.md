@@ -8,10 +8,10 @@ description: Builds Claude Agent SDK agents in Python. Use when creating custom 
 
 Python 기반 독립 실행형 AI 에이전트 코드 생성.
 
-**vs agent-creator**:
-| 항목 | agent-creator | claude-agent-sdk |
+**vs Claude Code 서브에이전트 정의**:
+| 항목 | `.claude/agents/*.md` (harness-engineering 참조) | claude-agent-sdk |
 |------|---------------|------------------|
-| 결과물 | `.claude/agents/*.md` | `*.py` 파일 |
+| 결과물 | 에이전트 정의 markdown | `*.py` 파일 |
 | 실행 환경 | Claude Code 내부 | 독립 Python 앱 |
 | 용도 | 작업 위임 | 프로덕션 자동화 |
 

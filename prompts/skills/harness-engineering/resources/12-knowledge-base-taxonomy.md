@@ -9,20 +9,20 @@
 
 | 저장소 | 용도 | 탐색 | 수명 |
 |--------|------|------|------|
-| **Logseq** (`~/Documents/obsidian/`) | 개인 지식 — 이벤트 기록, 의사결정, 트러블슈팅, 학습 | `ir search` (BM25/hybrid) | 영속 |
+| **Obsidian** (`~/Documents/obsidian/`) | 개인 지식 — 이벤트 기록, 의사결정, 트러블슈팅, 학습 | `ir search` (BM25/hybrid) | 영속 |
 | **Repo docs/** (프로젝트 `.docs/` 또는 `docs/`) | 프로젝트 지식 — 에이전트가 직접 참조하는 기록 시스템 | Glob, Grep, Read | 프로젝트 수명 |
 
 ### 경계 원칙
 
-| 질문 | Logseq | Repo docs/ |
+| 질문 | Obsidian | Repo docs/ |
 |------|--------|-----------|
-| 이 프로젝트가 삭제되어도 가치가 있는가? | Yes → Logseq | No → Repo |
-| 에이전트가 매 세션 참조해야 하는가? | No → Logseq | Yes → Repo |
-| 커뮤니케이션 이력이 포함되는가? | Yes → Logseq | No → Repo |
-| 코드와 함께 버전 관리되어야 하는가? | No → Logseq | Yes → Repo |
+| 이 프로젝트가 삭제되어도 가치가 있는가? | Yes → Obsidian | No → Repo |
+| 에이전트가 매 세션 참조해야 하는가? | No → Obsidian | Yes → Repo |
+| 커뮤니케이션 이력이 포함되는가? | Yes → Obsidian | No → Repo |
+| 코드와 함께 버전 관리되어야 하는가? | No → Obsidian | Yes → Repo |
 
 **양쪽에 걸치는 경우**: Repo에 정규 문서, vault에서 `[[링크]]`로 참조.
-예: ADR은 Repo에, 그 ADR을 만든 맥락/회의록은 Logseq `decision/`에.
+예: ADR은 Repo에, 그 ADR을 만든 맥락/회의록은 Obsidian `decision/`에.
 
 ---
 
@@ -45,7 +45,7 @@
 
 안정도가 높을수록 변경이 적고, 다른 문서가 더 많이 의존한다.
 
-| 계층 | 안정도 | 내용 | Logseq 예시 | Repo 예시 |
+| 계층 | 안정도 | 내용 | Obsidian 예시 | Repo 예시 |
 |------|--------|------|-------------|-----------|
 | **L0** | 최고 | 개념·용어·도메인 모델 | `스테이블코인`, `온오프램프` | ARCHITECTURE.md |
 | **L1** | 높음 | 결정·스펙·계약 | `decision/`, `spec/` | `docs/decisions/ADR-*` |
@@ -84,28 +84,28 @@
 
 | 방향 | 허용 | 방법 |
 |------|------|------|
-| Logseq → Repo | OK | 파일 경로 텍스트로 참조 |
-| Repo → Logseq | **NG** | Repo는 vault에 의존하지 않는다 (에이전트가 Repo만으로 동작 가능해야) |
-| Logseq ↔ Logseq | OK | `[[링크]]` |
+| Obsidian → Repo | OK | 파일 경로 텍스트로 참조 |
+| Repo → Obsidian | **NG** | Repo는 vault에 의존하지 않는다 (에이전트가 Repo만으로 동작 가능해야) |
+| Obsidian ↔ Obsidian | OK | `[[링크]]` |
 | Repo ↔ Repo | OK | 상대 경로 참조 |
 
 ---
 
-## Logseq 문서 유형 (등록됨)
+## Obsidian 문서 유형 (등록됨)
 
-`/obsidian-write` 스킬이 관리. 상세 템플릿은 logseq-write SKILL.md 참조.
+`/obsidian-write` 스킬이 관리. 상세 템플릿은 obsidian-write SKILL.md 참조.
 
 | 유형 | 네이밍 | 트리거 | 스킬 | 안정도 |
 |------|--------|--------|------|--------|
-| troubleshoot | `pj-{name}/troubleshoot/{제목}` | 조사→해결 완료 | logseq-write | L2 (이벤트) |
-| decision | `pj-{name}/decision/{제목}` | 결정 확정 | logseq-write | L1 (결정) |
-| qa | `pj-{name}/qa/{제목}` | QA 완료 | logseq-write | L2 |
-| spec | `pj-{name}/spec/{제목}` | 스펙 도출 | logseq-write | L1 |
-| incident | `pj-{name}/incident/{제목}` | 배포 실패/인프라 이슈 | logseq-write | L2 |
-| issue | `pj-{name}/issue/{제목}` | 장기 추적 이슈 | logseq-write | L2 |
+| troubleshoot | `pj-{name}/troubleshoot/{제목}` | 조사→해결 완료 | obsidian-write | L2 (이벤트) |
+| decision | `pj-{name}/decision/{제목}` | 결정 확정 | obsidian-write | L1 (결정) |
+| qa | `pj-{name}/qa/{제목}` | QA 완료 | obsidian-write | L2 |
+| spec | `pj-{name}/spec/{제목}` | 스펙 도출 | obsidian-write | L1 |
+| incident | `pj-{name}/incident/{제목}` | 배포 실패/인프라 이슈 | obsidian-write | L2 |
+| issue | `pj-{name}/issue/{제목}` | 장기 추적 이슈 | obsidian-write | L2 |
 | debrief | `pj-{name}/debrief/{제목}` | 코드 작업 완료 | debrief | L2 |
 | session | `session/{slug} {sid}` | 세션 종료 | recall (자동) | L3 (저널) |
-| 개념 | `{개념명}` (루트) | 도메인 용어 | logseq-write | L0 (개념) |
+| 개념 | `{개념명}` (루트) | 도메인 용어 | obsidian-write | L0 (개념) |
 
 범용(프로젝트 무관): `{type}/{제목}` — `pj-` prefix 없이.
 
@@ -141,12 +141,12 @@
    - `pj-foo/troubleshoot/redis-timeout` → troubleshoot인 것이 자명
 
 2. **깊이 제한** — 최대 2단
-   - Logseq: `pj-{name}/{type}/{제목}` (3 segment)
+   - Obsidian: `pj-{name}/{type}/{제목}` (3 segment)
    - Repo: `docs/{type}/{파일명}` (3 segment)
    - 4단 이상 금지
 
 3. **slug 규칙**
-   - Logseq: 한국어 설명적 제목 (`redis-timeout-해결`)
+   - Obsidian: 한국어 설명적 제목 (`redis-timeout-해결`)
    - Repo: 영문 kebab-case (`auth-strategy`)
 
 4. **번호 매기기** — ADR만 순차 번호. 나머지는 번호 없이 slug만.
@@ -162,7 +162,7 @@
 3. **ADP/SDP 검증** — 이 유형이 참조할 기존 유형, 이 유형을 참조할 기존 유형을 확인. 역방향 의존이 생기지 않는가?
 4. 네이밍 규칙 확정 (디렉토리 + 파일명 패턴)
 5. 이 파일의 해당 테이블에 행 추가 (안정도 컬럼 필수)
-6. 템플릿이 필요하면 해당 스킬에 추가 (logseq-write 또는 별도 스킬)
+6. 템플릿이 필요하면 해당 스킬에 추가 (obsidian-write 또는 별도 스킬)
 7. 스킬 description에 트리거 키워드 추가
 
 ### 유형 폐기
@@ -174,7 +174,7 @@
 
 | 동작 | 담당 스킬 |
 |------|-----------|
-| Logseq 문서 작성 | logseq-write |
+| Obsidian 문서 작성 | obsidian-write |
 | Repo docs/ 구조 설계 | harness-engineering (Setup Phase 4) |
 | 문서 신선도 점검 | harness-engineering (Gardening) |
 | 새 유형 등록 | meta-prompt (신호 → 흡수) |

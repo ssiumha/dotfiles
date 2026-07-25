@@ -2,7 +2,7 @@
 
 ## Justfile Examples
 
-### Case 1: myapp project
+### Case 1: sample project
 
 **Before** (current):
 ```just

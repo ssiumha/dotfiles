@@ -158,6 +158,7 @@ Admin      x      x      x
 4. **박스 내부 패딩**: 텍스트 좌우 최소 1칸 여백
 5. **정렬 일관성**: 같은 레벨 노드는 같은 높이/열에 배치
 6. **순수 ASCII 우선**: LLM이 `+-|>` 를 유니코드보다 안정적으로 생성
+7. **박스 내부는 영어/ASCII 전용**: 한글·전각 문자는 `len() ≠ 렌더 폭`(2칸)이라 우측 테두리가 무너진다. 한국어 설명은 다이어그램 밖 본문·표에
 
 ### 피해야 할 패턴
 
@@ -165,6 +166,28 @@ Admin      x      x      x
 - 화살표 라벨 없는 복잡한 연결
 - 비정렬 박스 (들쑥날쑥)
 - 유니코드와 ASCII 혼용
+
+### 정렬 검증 — 좌표 기반 생성
+
+박스 3개 이상, 또는 세로 파이프가 여러 행을 관통하는 다이어그램(시퀀스·계층 밴드)은 **눈짐작으로 그리지 않는다**. 눈짐작은 연속 오정렬을 낳는다 — 좌표 기반 스크립트로 생성하고 assert를 통과한 출력만 문서에 붙여넣는다.
+
+```python
+W = 90                        # 전체 폭
+def line(label, subs=None):   # 라이프라인/보더 행
+    s = list(label.ljust(11) + "-" * (W - 11))
+    for c, t in (subs or {}).items(): s[c:c+len(t)] = list(t)
+    return "".join(s).rstrip()
+def chan(marks):              # 채널 행 (화살표·번호 라벨)
+    s = [" "] * W
+    for c, t in marks.items(): s[c:c+len(t)] = list(t)
+    return "".join(s).rstrip()
+rows = [line("User"), chan({12: "|1", 48: "^"}), ...]
+# 검증: 파이프 열 일치·박스 폭 균일을 assert 로 강제
+assert all(r[col] in "|^v<->+" for r in rows for col in PIPES if len(r) > col)
+```
+
+- 수정 요청이 오면 출력 문자를 직접 고치지 말고 **스크립트를 고쳐 재생성**한다
+- 박스 폭은 `{전체폭}` 단일 값으로 assert — 1자 오차도 실패로 처리
 
 ## Examples
 
@@ -197,6 +220,16 @@ User: "시스템 개요 + 상세 흐름 그려줘"
 → 전체 의존관계: Mermaid (교차 다수)
 → 개별 요청 흐름: ASCII (선형)
 ```
+
+## Mermaid 함정
+
+- **라벨에 bare URL 금지** — `http://foo-api:8081` 같은 스킴 포함 문자열이 라벨에 있으면 라벨이 markdown으로 파싱되어 "Unsupported markdown: link"로 렌더된다 (Obsidian·GitHub 공통). 스킴을 떼고 `foo-api:8081`로
+- **architecture-beta는 저밀도 전용** — 그리드 자동 배치 + rank 제어 부재라 노드 ~8개/저밀도까지만 실용적. 그 이상은 그룹 경계 침범·대각 교차로 붕괴 → flowchart(dagre)로. 그룹은 배치 힌트가 아니라 점선 테두리일 뿐이고, 엣지 라벨도 미지원
+- **아키텍처 다이어그램에서 렌더러 버전 의존 문법**(architecture-beta 등)을 쓸 땐 요구 버전을 문서에 부기
+
+## C4 문서 세트
+
+C4 스타일 문서 세트(레벨 시맨틱·방향 컨벤션·deployment vs topology·명명 원칙)는 `resources/c4-guide.md` 참조.
 
 ## Mermaid 치트시트
 

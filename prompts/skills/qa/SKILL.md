@@ -101,7 +101,7 @@ argument-hint: "[create|run|list] [feature-name]"
 2. **선택적 작업**
    - **초기화**: 체크박스 전부 `[ ]`로 리셋 (재검증용)
    - **아카이브**: 완료된 QA를 `.claude/qa/archive/`로 이동
-   - **Logseq 기록**: QA 완료 시 `know/pj-{name}___qa___{feature}.md`로 결과 기록 제안
+   - **Obsidian 기록**: QA 완료 시 `projects/{name}/qa/{feature}.md`로 결과 기록 제안 (형식은 obsidian-write 참조)
 
 ## 중요 원칙
 

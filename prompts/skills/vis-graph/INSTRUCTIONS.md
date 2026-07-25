@@ -1,6 +1,6 @@
 # vis-graph
 
-파일 의존성 그래프(dep), DB 스키마 ERD(schema), vault 지식 그래프(logseq)를 vis-network 기반 인터랙티브 HTML로 시각화합니다.
+파일 의존성 그래프(dep), DB 스키마 ERD(schema), Obsidian vault 지식 그래프(vault)를 vis-network 기반 인터랙티브 HTML로 시각화합니다.
 
 **실행 방식**: mise task (`mise run vis:graph <command>`)로 동작. 이 skill은 래퍼.
 
@@ -9,10 +9,10 @@
 | 인자 패턴 | 모드 | 상세 |
 |-----------|------|------|
 | `schema <conn-string>` | **Schema** | `modes/schema.md` 참조 |
-| `logseq [install <dir>]` | **Logseq** | `modes/logseq.md` 참조 |
+| `vault` | **Vault** | `modes/vault.md` 참조 |
 | 그 외 (기본) | **Dep** | `modes/dep.md` 참조 |
 
-첫 번째 인자가 `schema`이면 Schema 모드, `logseq`이면 Logseq 모드, 아니면 Dep 모드로 진입한다.
+첫 번째 인자가 `schema`이면 Schema 모드, `vault`이면 Vault 모드, 아니면 Dep 모드로 진입한다.
 **해당 모드의 `modes/*.md` 파일을 Read하여 지침을 따른다.**
 
 ---

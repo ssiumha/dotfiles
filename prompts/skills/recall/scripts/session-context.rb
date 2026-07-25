@@ -44,32 +44,44 @@ exit 0 if project.nil? || project.empty?
 
 # frontmatter `project: session-{name}` 매치하는 세션 페이지 검색 (최신순)
 # 파일명: "YYYY-MM-DD {slug} {sid8}.md" — 날짜순 정렬 = 파일명 정렬
+#
+# 성능: .session/ 전체(수백 파일) glob 대신 YYYY-MM 월 디렉토리를 최신순으로
+# 순회하며 MAX_SESSIONS개 매치 시 조기 종료. lookback은 최대 MAX_LOOKBACK_MONTHS개월
+# — 세션 페이지가 쌓여도 시작 비용이 상수로 유지된다.
+MAX_LOOKBACK_MONTHS = 6
+
 project_marker = "project: session-#{project}"
-pages = Dir.glob(SESSION_DIR.join("**", "*.md").to_s).select do |page|
-  found = false
+
+def page_matches?(page, project_marker)
   in_fm = false
-  begin
-    File.foreach(page, encoding: "utf-8") do |line|
-      if line.start_with?("---")
-        in_fm = !in_fm
-        break unless in_fm  # 두 번째 --- 닫힘 → 종료
-        next
-      end
-      next unless in_fm
-      if line.strip == project_marker
-        found = true
-        break
-      end
+  File.foreach(page, encoding: "utf-8") do |line|
+    if line.start_with?("---")
+      in_fm = !in_fm
+      break unless in_fm  # 두 번째 --- 닫힘 → 종료
+      next
     end
-  rescue Errno::ENOENT, Encoding::InvalidByteSequenceError
-    found = false
+    next unless in_fm
+    return true if line.strip == project_marker
   end
-  found
+  false
+rescue Errno::ENOENT, Encoding::InvalidByteSequenceError
+  false
+end
+
+month_dirs = SESSION_DIR.children
+                        .select { |d| d.directory? && d.basename.to_s.match?(/\A\d{4}-\d{2}\z/) }
+                        .sort.reverse.first(MAX_LOOKBACK_MONTHS)
+
+pages = []
+month_dirs.each do |month|
+  break if pages.size >= MAX_SESSIONS
+  Dir.glob(month.join("**", "*.md").to_s).sort.reverse.each do |page|
+    break if pages.size >= MAX_SESSIONS
+    pages << page if page_matches?(page, project_marker)
+  end
 end
 
 exit 0 if pages.empty?
-
-pages.sort!.reverse!  # 파일명에 날짜 포함 → 최신순
 
 # 각 페이지에서 compact index 항목 추출
 entries = []

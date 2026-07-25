@@ -1,6 +1,6 @@
 ---
 name: obsidian-write
-description: Writes Obsidian pages (frontmatter, checkbox, folder-based namespace, wikilink) following conventions. Use when creating namespace pages (troubleshoot, decision, qa, spec, incident, issue), writing journal entries, promoting journal to pages, or editing existing pages. Vault 위치/namespace 매핑은 `documentation` skill 참조. Do NOT use for reading/searching (use ir directly).
+description: Writes Obsidian pages (frontmatter, checkbox, folder-based namespace, wikilink) following conventions. Use when creating namespace pages (troubleshoot, decision, qa, spec, incident, issue), writing journal entries, updating Living Plan items, promoting journal to pages, or editing existing pages. Vault 위치/namespace 매핑은 `documentation` skill 참조. Do NOT use for reading/searching (use ir directly).
 ---
 
 ## Atomic Notes 원칙
@@ -94,6 +94,42 @@ filters:
 
 승격 시 기존 `[ ]`를 `[x]`로 변경한다.
 
+### 자동 stamp (session-journal.rb)
+
+stop hook이 세션 종료 시 찍는 `- [x] {요약} #pj-{name} (sid:xxxxxxxx)` 항목은 **sid당 vault 전체에서 한 줄만** 존재하며, 기간을 자식 속성으로 가진다:
+
+```
+- [x] {요약} #pj-{name} (sid:xxxxxxxx)
+    created:: 2026-06-04      ← 처음 기록된 날 = 작업 시작
+    last-active:: 2026-06-23  ← 마지막으로 resume 된 날
+```
+
+- 세션이 여러 날에 걸쳐 resume 되면 새 줄을 만들지 않고 `last-active::`만 연장한다. **Why:** 예전엔 멱등 체크가 오늘 저널만 봐서 같은 세션이 resume 될 때마다 매일 재기록되는 중복 버그가 있었다
+- 여러 날 작업의 진척·상태는 자동 stamp가 아니라 Living Plan `- [/]` 항목이나 issue/ 페이지가 담당. stamp는 "이 세션이 이 기간에 활동했다"는 마커일 뿐
+
+### 진행 중 계획 갱신 (Living Plan)
+
+저널 `- [ ]` / `- [/]`에 `# 작업 계획`이 있는 항목은 living document로 관리한다.
+
+**적용 기준** — 모든 체크박스가 아니라 **다단계 + 외부 의존 작업**만: 계획 체크박스 3개+, 외부 산출물(스펙·디자인·샘플) 의존, 여러 세션에 걸친 진행. 단순 1회성 체크박스에는 불필요.
+
+**구조**:
+
+```
+- [/] {제목} #pj-{name}
+    - # 변경 이력          ← append-only, 시간순
+        - MM/DD HH:mm — {무엇이 바뀌었는지 한 줄}
+    - # 현재 상태          ← 항상 최신 스냅샷으로 덮어쓴다
+    - # 작업 계획          ← `- [ ]` / `- [x]` 항목, 완료 시 전환
+    - # 확인 필요          ← 미결 질문, 해소되면 제거
+```
+
+**갱신 규칙**:
+- 현재 상태 / 작업 계획: 최신 기준으로 덮어쓴다 (스냅샷)
+- 변경 이력: 절대 수정/삭제하지 않는다. 갱신할 때마다 `{MM/DD HH:mm} — {변경 내용 한 줄}` append
+
+**갱신 트리거**: 외부 스펙/산출물 갱신(새 버전 수령), 결정 확정(확인 필요에서 제거), 스코프 변경(작업 계획 갱신), 새 도메인 개념 발견(`[[링크]]`로 감싸고 개념 페이지 생성 제안)
+
 ### 회의/슬랙 대화 → 문서화
 
 회의록이나 슬랙 대화가 붙여넣어지거나 Slack 채널을 조회한 결과를 기록할 때:
@@ -178,6 +214,7 @@ next-check: YYYY-MM-DD
 - 적용 대상: issue, troubleshoot(investigating), incident(open) 등 active 상태 namespace 페이지
 - resolved/closed/done이면 불필요
 - issue 페이지에서는 `next-check` 기본 7일 후 설정
+- 일일 wakeup이 `next-check` 기한 초과를 자동 감지한다
 
 ### 카테고리별 템플릿
 
@@ -288,7 +325,7 @@ status: open / in-progress / waiting / blocked / resolved / closed
     - → 상태 변화: {이전} → {이후}
 ```
 
-troubleshoot과의 차이: troubleshoot은 한 번의 조사→해결 사이클. issue는 장기 추적 — 복수 사이클, 커뮤니케이션 축적, 상태 변화 이력.
+troubleshoot과의 차이: troubleshoot은 한 번의 조사→해결 사이클. issue는 장기 추적 — 복수 사이클, 커뮤니케이션 축적, 상태 변화 이력. troubleshoot이 해결 없이 길어지면 issue로 승격한다.
 
 #### 새 카테고리
 
@@ -318,7 +355,7 @@ troubleshoot과의 차이: troubleshoot은 한 번의 조사→해결 사이클.
 
 페이지 작성이 완료되면 아래 3단계를 순서대로 수행한다.
 
-**예외**: 자동화 hook(session sync 등)에서 호출되는 경우 Step 1, 2는 생략하고 Step 3만 실행한다. 사용자가 직접 `/obsidian-write`를 호출하거나 `/debrief` 등 사용자 initiated skill에서 호출할 때만 Step 1, 2를 수행한다.
+**예외**: 자동화 hook(session sync 등)과 `/debrief`에서 호출되는 경우 Step 1, 2, 4는 생략하고 Step 3(`ir update`만, embed 생략)을 실행한다. 사용자가 직접 `/obsidian-write`를 호출한 경우에만 전체 Step을 수행한다.
 
 ### Step 1: 미생성 키워드 제안
 

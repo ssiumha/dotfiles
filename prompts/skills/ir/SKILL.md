@@ -1,6 +1,6 @@
 ---
 name: ir
-description: Local markdown search engine CLI. Use when searching notes, querying documents, managing collections, indexing, embedding, or retrieving document content. Also use when ir search, ir update, ir embed, ir collection, ir status, ir daemon, ir get.
+description: Local markdown search engine CLI (BM25/Vector/Hybrid). Use when searching notes, querying documents, managing collections, indexing, embedding, or retrieving document content.
 allowed-tools: Bash(ir:*)
 ---
 
