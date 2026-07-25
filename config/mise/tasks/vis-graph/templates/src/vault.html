@@ -1,6 +1,6 @@
-{% include partials/head.html title="Logseq Knowledge Graph" %}
+{% include partials/head.html title="Obsidian Vault Knowledge Graph" %}
 
-  /* Logseq-specific */
+  /* Vault-specific */
   #node-namespace { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
   #node-aliases { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
   #legend { max-width: 500px; }
@@ -50,7 +50,7 @@ const COLORS = {
 
 {% include partials/base.js %}
 
-// --- Logseq-specific state ---
+// --- Vault-specific state ---
 let orphansVisible = true;
 let clustered = false;
 
@@ -216,7 +216,7 @@ function clusterByNamespace() {
   });
 }
 
-// --- Logseq-specific: highlightMultiConnected override (preserves phantom borderWidth) ---
+// --- Vault-specific: highlightMultiConnected override (preserves phantom borderWidth) ---
 function highlightMultiConnected(nodeIds) {
   const connEdges = edgesDataset.get().filter(e => nodeIds.has(e.from) || nodeIds.has(e.to));
   const connNodes = new Set(nodeIds);

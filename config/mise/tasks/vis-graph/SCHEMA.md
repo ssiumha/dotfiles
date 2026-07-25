@@ -101,7 +101,7 @@ vis-graph의 모든 모드는 이 JSON 포맷을 공유한다.
 
 ---
 
-### logseq (지식 그래프)
+### vault (Obsidian 지식 그래프)
 
 **추가 Node 필드:**
 

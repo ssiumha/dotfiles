@@ -1,6 +1,6 @@
 """Common utilities for vis-graph scripts.
 
-Shared by build-graph.py, extract-schema.py, and logseq-graph.py.
+Shared by build-graph.py, extract-schema.py, and vault-graph.py.
 Uses only the Python standard library (3.10+).
 """
 from __future__ import annotations

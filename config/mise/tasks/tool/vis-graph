@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#MISE description="인터랙티브 그래프 시각화 (dep/schema/logseq/render)"
+#MISE description="인터랙티브 그래프 시각화 (dep/schema/vault/render)"
 #MISE alias="vis:graph"
 
 """vis-graph — unified CLI for interactive graph visualization.
@@ -7,7 +7,7 @@
 Usage:
     mise run vis:graph dep --root . --scope src/
     mise run vis:graph schema --conn postgresql://localhost/mydb
-    mise run vis:graph logseq --pages ~/Documents/logseq/pages
+    mise run vis:graph vault --vault ~/Documents/obsidian
     mise run vis:graph render --type schema < data.json
     mise run vis:graph build-templates
 """
@@ -38,8 +38,8 @@ def cmd_schema(argv: list[str]) -> None:
     _load_module("extract_schema", "extract-schema.py").main(argv)
 
 
-def cmd_logseq(argv: list[str]) -> None:
-    _load_module("logseq_graph", "logseq-graph.py").main(argv)
+def cmd_vault(argv: list[str]) -> None:
+    _load_module("vault_graph", "vault-graph.py").main(argv)
 
 
 def cmd_render(argv: list[str]) -> None:
@@ -48,7 +48,7 @@ def cmd_render(argv: list[str]) -> None:
     from vis_graph_common import inject_template
 
     p = argparse.ArgumentParser(description="Render GRAPH_DATA JSON to HTML")
-    p.add_argument("--type", required=True, choices=["dep", "schema", "logseq"],
+    p.add_argument("--type", required=True, choices=["dep", "schema", "vault"],
                    help="Template type to use")
     p.add_argument("--input", type=Path, help="JSON file (default: stdin)")
     p.add_argument("--output", type=Path, default=Path("graph.html"), help="Output HTML file")
@@ -87,7 +87,7 @@ def cmd_build_templates(argv: list[str]) -> None:
 COMMANDS = {
     "dep": cmd_dep,
     "schema": cmd_schema,
-    "logseq": cmd_logseq,
+    "vault": cmd_vault,
     "render": cmd_render,
     "build-templates": cmd_build_templates,
 }
@@ -98,7 +98,7 @@ usage: mise run vis:graph <command> [args...]
 commands:
   dep              File dependency graph
   schema           DB schema ERD
-  logseq           Logseq knowledge graph
+  vault            Obsidian vault knowledge graph
   render           Render GRAPH_DATA JSON to HTML
   build-templates  Rebuild flattened templates from src/
 """
