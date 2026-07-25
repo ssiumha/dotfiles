@@ -246,6 +246,11 @@ git_repo_info() {
   branch="${branch%%...*}"
   branch="${branch%% *}"
 
+  # ahead/behind — git status -b 헤더에 이미 포함(추가 비용 0)
+  local ab=""
+  [[ "$header" =~ 'ahead ([0-9]+)' ]] && ab+="↑${match[1]}"
+  [[ "$header" =~ 'behind ([0-9]+)' ]] && ab+="↓${match[1]}"
+
   local changes="" staged=""
   local line
   for line in "${lines[@]:1}"; do
@@ -253,7 +258,19 @@ git_repo_info() {
     [[ "${line[1]}" != " " && "${line[1]}" != "?" ]] && staged="+"
   done
 
-  echo "${branch}${changes}${staged}"
+  # 진행 중 상태(merge/rebase/cherry-pick 등) — git-dir 파일 stat, near-zero
+  local state="" gd
+  gd=$(git rev-parse --git-dir 2>/dev/null)
+  if [[ -n "$gd" ]]; then
+    if [[ -d "$gd/rebase-merge" || -d "$gd/rebase-apply" ]]; then state=" %F{1}REBASE%f"
+    elif [[ -f "$gd/MERGE_HEAD" ]];        then state=" %F{1}MERGE%f"
+    elif [[ -f "$gd/CHERRY_PICK_HEAD" ]];  then state=" %F{1}CHERRY%f"
+    elif [[ -f "$gd/REVERT_HEAD" ]];       then state=" %F{1}REVERT%f"
+    elif [[ -f "$gd/BISECT_LOG" ]];        then state=" %F{1}BISECT%f"
+    fi
+  fi
+
+  echo "${branch}${changes}${staged}${ab}${state}"
 }
 
 _cmd_start=0
@@ -267,6 +284,7 @@ preexec() {
 _elapsed_ignore=(vim nvim less man top htop btop tmux)
 
 precmd() {
+  local exit_code=$?    # 반드시 첫 줄 — 이후 명령이 $?를 덮어씀
   local elapsed=""
   if (( _cmd_start > 0 )); then
     local dt=$(( EPOCHREALTIME - _cmd_start ))
@@ -281,12 +299,15 @@ precmd() {
     _cmd_name=""
   fi
 
+  local exitseg=""
+  (( exit_code != 0 )) && exitseg=" %F{1}✗${exit_code}%f"
+
   local reset_color="\e[49m\e[39m"
 
   txt="\n"
   txt+="%K{0} %~ ${reset_color}"
   txt+="%K{8} $(git_repo_info) ${reset_color}"
-  txt+="${elapsed}"
+  txt+="${elapsed}${exitseg}"
 
   print -P $txt
 }
