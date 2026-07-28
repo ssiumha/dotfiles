@@ -72,11 +72,14 @@ return {
   normalize_output_to_unicode_nfc = true,
 
   font = wezterm.font_with_fallback {
-    'D2Coding Nerd Font Mono',
+    'D2CodingLigature Nerd Font Mono',
     'Menlo',
     'Monaco',
     'Fira Code',
   },
+
+  -- 합자 비활성 (D2CodingLigature의 리거처 끔 — 무합자 선호)
+  harfbuzz_features = { 'calt=0', 'clig=0', 'liga=0' },
 
   keys = {
     -- quick-select a file path on screen, then force-open it:
