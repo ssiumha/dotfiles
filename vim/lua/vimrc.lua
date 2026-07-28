@@ -282,6 +282,18 @@ require('pckr').add{
     })
   end },
 
+  { 'j-hui/fidget.nvim', config = function()
+    require('fidget').setup({
+      -- LSP 진행 표시 (예: "jdtls indexing 60%") — "로딩 중인지" 즉답
+      progress = {
+        display = { done_ttl = 3, progress_ttl = 30 },
+      },
+      notification = {
+        window = { winblend = 0, border = 'none' },
+      },
+    })
+  end },
+
   'WTFox/jellybeans.nvim',
 
 }
@@ -393,6 +405,103 @@ vim.api.nvim_create_user_command('FzfLuaTest', function()
   })
 end, {})
 
+-------------------
+-- Command palette (Spotlight / cmd+P) — <space><space>
+-- 큐레이션 액션 목록을 설명과 함께 fzf-lua로. 자주 쓰는 기능의 discoverable 인덱스.
+-- entry: { label, desc, action }   action = ':Command...' (문자열) | function
+-- 문자열 액션은 exists() 가드로 해당 명령이 있을 때만 노출(컨텍스트별 필터).
+-------------------
+do
+  local function registry()
+    return {
+      -- navigation / search
+      { 'Find file',           'fzf 파일 열기',              ':Files' },
+      { 'Search text',         'ripgrep 프로젝트 검색',       ':Rg ' },
+      { 'Buffers',             '열린 버퍼',                  ':Buffers' },
+      { 'Git files',           'git 추적 파일',              ':GitFiles' },
+      { 'Recent files',        '히스토리',                   ':History' },
+      { 'Commands',            'ex-command 전체',            ':Commands' },
+      -- git
+      { 'Git log',             'Flog (all branches)',       ':Flog -all' },
+      { 'Git status',          'fugitive :Git',             ':Git' },
+      { 'Review diff',         'origin 대비 변경 리뷰',       ':ReviewDiff' },
+      { 'Review diff (fetch)', 'fetch 후 리뷰',              ':ReviewDiff!' },
+      { 'Review diff: end',    '리뷰 모드 종료',              ':ReviewDiffEnd' },
+      -- test
+      { 'Test: nearest',       '커서 위치 테스트',            ':TestNearest' },
+      { 'Test: file',          '파일 테스트',                ':TestFile' },
+      { 'Test: last',          '마지막 테스트 재실행',         ':TestLast' },
+      -- tools
+      { 'Terminal',            'floaterm 토글',              ':FloatermToggle' },
+      { 'Snippet',             'MySnip (fzf 스니펫)',        ':MySnip' },
+      { 'Table mode',          '마크다운 테이블 토글',         ':TableModeToggle' },
+      { 'DB UI',               'dadbod-ui 토글',             ':DBUIToggle' },
+      -- LSP (visibility + actions)
+      { 'LSP: health',         ':checkhealth vim.lsp',      ':checkhealth vim.lsp' },
+      { 'LSP: install/manage', '서버 설치·제거 (fzf)',        ':LspInstall' },
+      { 'LSP: restart',        '현재 버퍼 서버 재시작',        function()
+          if vim.fn.exists(':LspRestart') == 2 then vim.cmd('LspRestart'); return end
+          for _, c in ipairs(vim.lsp.get_clients({ bufnr = 0 })) do c:stop() end
+          vim.defer_fn(function() vim.cmd('edit') end, 300)
+        end },
+      { 'LSP: rename',         '심볼 이름 변경',              function() vim.lsp.buf.rename() end },
+      { 'LSP: code action',    '코드 액션',                  function() require('fzf-lua').lsp_code_actions({ silent = true }) end },
+      { 'LSP: references',     '참조 찾기',                  function() require('fzf-lua').lsp_references() end },
+      { 'LSP: definitions',    '정의로',                     function() require('fzf-lua').lsp_definitions() end },
+      { 'LSP: doc symbols',    '문서 심볼',                  function() require('fzf-lua').lsp_document_symbols() end },
+      { '@ workspace symbol',  '@ 타이핑 → live 심볼 검색',    function() require('fzf-lua').lsp_live_workspace_symbols() end },
+      { 'LSP: diagnostics',    'quickfix로 보기',            function() vim.diagnostic.setqflist({ open = true }) end },
+      { 'Format',              'conform 포맷',               function() require('conform').format({ lsp_format = 'fallback' }) end },
+    }
+  end
+
+  -- 보이는 줄 전체(라벨+설명)를 그대로 검색 대상으로. 구분자/nth 없음 → 필터가 항상 동작.
+  -- 선택 복원은 줄 문자열 → 엔트리 맵으로 (라벨 유일하므로 줄도 유일).
+  local function build()
+    local map, lines = {}, {}
+    for _, e in ipairs(registry()) do
+      local ok = true
+      if type(e[3]) == 'string' then
+        local cmd = e[3]:match('^:(%a[%w_]*)')  -- 첫 명령어 토큰
+        if cmd and vim.fn.exists(':' .. cmd) ~= 2 then ok = false end
+      end
+      if ok then
+        local line = string.format('%-22s  %s', e[1], e[2])
+        lines[#lines + 1] = line
+        map[line] = e
+      end
+    end
+    return map, lines
+  end
+
+  vim.keymap.set('n', '<space><space>', function()
+    local map, lines = build()
+    require('fzf-lua').fzf_exec(lines, {
+      prompt = '  ',
+      fzf_opts = { ['-i'] = true },  -- 대소문자 무시
+      winopts = { title = ' palette ', height = 0.6, width = 0.6 },
+      actions = {
+        ['default'] = function(sel)
+          if not sel or not sel[1] then return end
+          local e = map[sel[1]]
+          if not e then return end
+          local act = e[3]
+          if type(act) == 'function' then
+            act()
+          elseif type(act) == 'string' then
+            local body = act:sub(2)              -- 선행 ':' 제거
+            if body:sub(-1) == ' ' then          -- 인자 대기형(예: 'Rg ')은 cmdline에 남김
+              vim.api.nvim_feedkeys(':' .. body, 'n', false)
+            else
+              vim.cmd(body)
+            end
+          end
+        end,
+      },
+    })
+  end, { desc = 'Command palette' })
+end
+
 
 -------------------
 -- neovim/nvim-lspconfig
@@ -400,8 +509,10 @@ end, {})
 -------------------
 local lsp_tools = {
   lua_ls     = { tool = 'lua-language-server',              bin = 'lua-language-server',        ft = 'lua',        tags = { 'lua' } },
-  ts_ls      = { tool = 'npm:typescript-language-server',   bin = 'typescript-language-server', ft = 'typescript', tags = { 'web', 'ts' } },
-  vtsls      = { tool = 'npm:@vtsls/language-server',       bin = 'vtsls',                     ft = 'typescript', tags = { 'web', 'ts' } },
+  -- ts_ls / vtsls: tsgo(TS7 native)로 대체. 문제 시 주석 해제로 복구.
+  -- ts_ls      = { tool = 'npm:typescript-language-server',   bin = 'typescript-language-server', ft = 'typescript', tags = { 'web', 'ts' } },
+  -- vtsls      = { tool = 'npm:@vtsls/language-server',       bin = 'vtsls',                     ft = 'typescript', tags = { 'web', 'ts' } },
+  tsgo       = { tool = 'github:microsoft/typescript-go',   bin = 'tsc',                       ft = 'typescript', tags = { 'web', 'ts' } },  -- GA는 바이너리 tsc(lib/tsc), 서버명은 tsgo
   html       = { tool = 'npm:vscode-langservers-extracted', bin = 'vscode-html-language-server',                  tags = { 'web' } },
   cssls      = { tool = 'npm:vscode-langservers-extracted', bin = 'vscode-css-language-server',  ft = 'css',       tags = { 'web' } },
   jsonls     = { tool = 'npm:vscode-langservers-extracted', bin = 'vscode-json-language-server', ft = 'json',      tags = { 'web' } },
@@ -456,7 +567,10 @@ do
       names[#names + 1] = name
     end
   end
-  if vim.tbl_contains(names, 'vtsls') then
+  -- 우선순위 tsgo > vtsls > ts_ls: 같은 TS 버퍼에 서버 중복(진단·완성 doubling) 방지
+  if vim.tbl_contains(names, 'tsgo') then
+    names = vim.tbl_filter(function(n) return n ~= 'vtsls' and n ~= 'ts_ls' end, names)
+  elseif vim.tbl_contains(names, 'vtsls') then
     names = vim.tbl_filter(function(n) return n ~= 'ts_ls' end, names)
   end
   vim.lsp.enable(names)
@@ -536,6 +650,39 @@ end, {
     return vim.tbl_keys(tags)
   end,
 })
+
+-- 특정 언어를 열 때 그 ft의 기대 LSP 서버가 미설치면 우측하단 토스트로 안내만 한다.
+-- 설치는 하지 않는다 — 실행할 mise/brew 명령만 알려주고 설치는 사용자가 직접 관리.
+-- 서버별 세션 1회만 평가·안내 (노이즈·mise 호출 최소화). fidget 우측하단, 없으면 vim.notify.
+do
+  local hinted = {}
+  local function install_cmd(e)
+    return e.via == 'brew' and ('brew install ' .. e.tool) or ('mise use -g ' .. e.tool)
+  end
+  vim.api.nvim_create_autocmd('FileType', {
+    group = vim.api.nvim_create_augroup('lsp_missing_hint', { clear = true }),
+    callback = function(ev)
+      local ft = ev.match
+      local base = ft:gsub('react$', '')  -- typescriptreact→typescript 등
+      vim.schedule(function()
+        local active
+        for name, e in pairs(lsp_tools) do
+          local matches = e.ft and (e.ft == ft or e.ft == base)
+          if matches and not hinted[name] and not (name == 'ts_ls' and lsp_tools.vtsls) then
+            active = active or lsp_active_tools()
+            hinted[name] = true
+            if not lsp_is_installed(e, active) then
+              local msg = string.format('%s 미설치 — %s', name, install_cmd(e))
+              local ok, fidget = pcall(require, 'fidget')
+              if ok then fidget.notify(msg, vim.log.levels.WARN)
+              else vim.notify(msg, vim.log.levels.WARN) end
+            end
+          end
+        end
+      end)
+    end,
+  })
+end
 vim.lsp.config('html', {
   filetypes = { "html", "eruby" },
 })
@@ -569,6 +716,7 @@ vim.lsp.config('biome', {
   root_markers = { "biome.json" },
 })
 
+--[[ ts_ls: tsgo(TS7)로 대체. 복구하려면 이 블록 주석 해제 + 레지스트리 ts_ls 복구.
 vim.lsp.config('ts_ls', {
   filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' },
   root_markers = { "package.json", "tsconfig.json", "jsconfig.json", ".git" },
@@ -579,7 +727,9 @@ vim.lsp.config('ts_ls', {
     },
   },
 })
+--]]
 
+--[[ vtsls: tsgo(TS7)로 대체. 복구하려면 이 블록 주석 해제 + 레지스트리 vtsls 복구.
 vim.lsp.config('vtsls', {
   filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' },
   root_markers = { 'tsconfig.json', 'package.json', 'jsconfig.json', '.git' },
@@ -589,6 +739,17 @@ vim.lsp.config('vtsls', {
       preferences = { includePackageJsonAutoImports = 'auto' },
     },
   },
+})
+--]]
+
+-- tsgo(TS7 native): GA 설치는 바이너리가 lib/tsc이고 base config는 `tsgo`를 찾으므로 cmd 오버라이드.
+-- mise where로 설치 경로를 서버 시작 시점에 계산 → 버전 업데이트에도 자동 추종.
+-- (root_dir·filetypes 등 나머지는 base lsp/tsgo.lua 그대로 병합됨)
+vim.lsp.config('tsgo', {
+  cmd = function(dispatchers, config)
+    local root = vim.fn.trim(vim.fn.system('mise where github:microsoft/typescript-go 2>/dev/null'))
+    return vim.lsp.rpc.start({ root .. '/lib/tsc', '--lsp', '--stdio' }, dispatchers)
+  end,
 })
 
 do
@@ -604,9 +765,24 @@ do
       end
     end,
   })
+  -- lombok + JVM 튜닝을 JDTLS_JVM_ARGS 로 전달. base(lsp/jdtls.lua)가 이 env를
+  -- 공백 분리해 --jvm-arg=<token> 로 변환하므로 cmd를 덮을 필요가 없다.
+  -- cmd를 안 덮으면 base의 스마트 cmd가 살아나 per-root -data(영속 workspace 캐시,
+  -- ~/.cache/nvim/jdtls/workspace/<root>)를 넣는다 → 한 번 import 후 재사용해 다음 세션이 빠르다.
+  -- (덮어쓸 때는 jdtls.py가 $TMPDIR/jdtls-<cwd해시> 로 폴백 → 주기적 청소·CWD별로 콜드 재import)
+  vim.env.JDTLS_JVM_ARGS = table.concat({
+    '-javaagent:' .. lombok_jar,
+    '-Xmx4g',              -- 큰 Maven 리액터 힙
+    '-XX:+UseParallelGC',
+  }, ' ')
   vim.lsp.config('jdtls', {
-    cmd = { 'jdtls', '--jvm-arg=-javaagent:' .. lombok_jar },
-    root_markers = { '.git', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'settings.gradle' },
+    -- cmd/root_markers 오버라이드 제거 → base의 영속 -data + Maven 멀티모듈 root 사용
+    settings = {
+      java = {
+        configuration = { updateBuildConfiguration = 'interactive' },  -- build 파일 변경마다 자동 재import 안 함
+        import = { exclusions = { '**/node_modules/**', '**/.git/**', '**/target/**', '**/build/**' } },
+      },
+    },
   })
 end
 
@@ -1126,6 +1302,68 @@ do
     gs.toggle_deleted(false)
     gs.toggle_word_diff(false)
   end, {})
+end
+
+-------------------
+-- LSP statusline indicator (lightline) — nvim 전용이라 여기(lua)에서 설정.
+-- attach된 서버명을 statusline에 표시 → "LSP 붙었나/안 붙었나"를 한눈에.
+-- client가 0이면 빈 문자열(노트/일반 버퍼에서 statusline 깔끔).
+-- fidget(진행 토스트)과 짝: fidget=로딩 중, 이 컴포넌트=현재 attach 상태.
+-------------------
+do
+  function _G.lsp_statusline()
+    local clients = vim.lsp.get_clients({ bufnr = 0 })
+    if #clients == 0 then return '' end
+    local names = {}
+    for _, c in ipairs(clients) do names[#names + 1] = c.name end
+    return '⚙ ' .. table.concat(names, ',')
+  end
+
+  vim.cmd([[
+    function! LightlineLsp() abort
+      return luaeval('_G.lsp_statusline()')
+    endfunction
+  ]])
+
+  -- g:lightline 확장: component_function에 등록 + active.right에 lsp 세그먼트 삽입.
+  -- vim.g.lightline은 복사본을 돌려주므로 통째로 재대입해야 반영된다.
+  local ll = vim.g.lightline
+  if type(ll) == 'table' then
+    ll.component_function = ll.component_function or {}
+    ll.component_function.lsp = 'LightlineLsp'
+    if ll.active and ll.active.right then
+      table.insert(ll.active.right, 2, { 'lsp' })  -- lineinfo 다음, diagnostics 앞
+    end
+    vim.g.lightline = ll
+    -- 이미 로드된 lightline에 반영 (idempotent — VimEnter에서 다시 init돼도 무해)
+    for _, fn in ipairs({ 'lightline#init', 'lightline#colorscheme', 'lightline#update' }) do
+      if vim.fn.exists('*' .. fn) == 1 then pcall(vim.fn[fn]) end
+    end
+  end
+end
+
+-------------------
+-- fzf-lua grep (nvim 전용). gvim은 fzf.vim :Rg 유지.
+-- <space>a 를 live_grep 으로 오버라이드 (nvim에서만 vimrc의 :Rg 매핑 대체).
+-- ctrl-g: live↔fuzzy 토글 · ctrl-q: 전체 결과를 quickfix로 (기존 alt-a 반복 제거).
+-- :Rg 의 제외 글롭 그대로 보존.
+-------------------
+do
+  local grep = {
+    rg_opts = '--column --line-number --no-heading --color=always --smart-case'
+      .. ' --glob=!*.log --glob=!*.lock --glob=!*.min.* --glob=!*.map --glob=!.claude/worktrees/*',
+  }
+  vim.keymap.set('n', '<space>a', function() require('fzf-lua').live_grep(grep) end, { desc = 'fzf-lua live_grep' })
+  vim.keymap.set('x', '<space>a', function() require('fzf-lua').grep_visual(grep) end, { desc = 'fzf-lua grep (visual)' })
+  -- ctrl-q = select-all+accept → 전량 qf. fzf-lua 로드 후 설정(VimEnter, pcall 가드).
+  -- { true, ... } 의 true 는 기본 keymap 유지하며 병합(config.lua 관례).
+  vim.api.nvim_create_autocmd('VimEnter', {
+    once = true,
+    callback = function()
+      local ok, fzf = pcall(require, 'fzf-lua')
+      if ok then fzf.setup({ keymap = { fzf = { true, ['ctrl-q'] = 'select-all+accept' } } }) end
+    end,
+  })
 end
 
 -------------------
