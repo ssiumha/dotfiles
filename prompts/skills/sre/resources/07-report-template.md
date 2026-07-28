@@ -50,9 +50,14 @@
 
 ## vault 페이지
 
-위치: `projects/{name}/investigation/{YYYY-MM-DD}-sre-audit.md`
+**개인 지식 저장소는 환경마다 있고 없고가 다르다. 있을 때만 쓴다.**
 
-vault 위치·namespace 판단은 `documentation` 스킬, 형식 규약은 `obsidian-write` 스킬을 따른다. **두 스킬에 없는 경로·키를 임의로 만들지 않는다.**
+| 상황 | 상세 리포트 위치 |
+|------|-----------------|
+| `documentation` 스킬이 있고 vault 경로가 실재 | `projects/{name}/investigation/{YYYY-MM-DD}-sre-audit.md` |
+| 없음 | **세션 출력에 상세까지 포함**하고 파일을 만들지 않는다. 대상 저장소에 쓰지 않는다 — 개인 도구 산출물을 팀 저장소에 남기지 않는다 |
+
+vault를 쓰는 경우에만 아래를 따른다. 위치·namespace 판단은 `documentation` 스킬, 형식 규약은 `obsidian-write` 스킬. **두 스킬에 없는 경로·키를 임의로 만들지 않는다.**
 
 - `investigation/`은 `documentation` 스킬 기준 **`projects/{name}/` 하위에만** 존재한다. 대상이 vault 프로젝트가 아니면 새 루트 네임스페이스를 만들지 말고, `documentation`의 매핑 표를 먼저 갱신할지 사용자에게 확인한다
 - `obsidian-write`는 **`type`을 별도 frontmatter key로 두지 않는다** — 폴더가 이미 구분한다. `tags`·`related`도 그 스킬의 규약에 없다
