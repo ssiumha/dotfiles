@@ -38,7 +38,8 @@ one_liner: "문서화보다 문서처럼 읽히는 코드가 우선 — 이름·
 | 단계 구분 주석 (`// 1단계`, `// --- 검증 ---`) | Extract Method 후보 |
 | 무의미 접미사 이름 (Service·Manager·Helper·Util·Data·Processor) | grep 접미사 빈도 |
 | 죽은 코드 주석 (주석 처리된 코드 블록) | grep 연속 주석 코드 |
-| README/문서와 실제 시그니처 불일치 | 문서의 함수명·인자 vs 코드 대조 |
+| README/문서와 실제 시그니처 불일치 | 문서 코드블록을 테스트로 실행 (doctest·pytest-codeblocks·rust-skeptic) — [[EXECUTABLE-DOCUMENTATION]] |
+| 도메인 식별자가 원시 타입 | `id: string`·`userId: str` 시그니처 카운트 — [[PARSE-DONT-VALIDATE]] |
 
 ### 판단 필요 (사람/LLM)
 
@@ -63,16 +64,19 @@ one_liner: "문서화보다 문서처럼 읽히는 코드가 우선 — 이름·
 |------|------|
 | WHAT/HOW 설명 주석 | **Extract Method** — 주석 문장을 이름 있는 함수로 (`// 유효성 검사` → `validateSignUpRequest()`) |
 | 제네릭 이름 클래스 | **Rename + Extract Class** — `UserService` → `UserSignUpService`·`UserProfileQueryService` |
-| 문서에만 있는 제약 | **타입·검증으로 이동** — `NonEmptyString`, precondition 검사(DbC) |
+| 문서에만 있는 제약 | **타입으로 이동** — `NonEmptyString`, 경계에서 파싱([[PARSE-DONT-VALIDATE]]). 런타임 계약은 [[DbC]] |
 | 매직 넘버 | **Extract Constant** — 의도가 담긴 이름 |
-| 사용법이 문서에만 | **테스트로 문서화** — 실행되는 예제(SELF-TESTING-CODE) |
+| 사용법이 문서에만 | **문서를 실행되게** — 코드블록을 테스트로 돌린다 ([[EXECUTABLE-DOCUMENTATION]]) |
+| 구조 규칙이 다이어그램에만 | **fitness function** — 계층·순환·경계를 CI 테스트로 ([[EXECUTABLE-DOCUMENTATION]]) |
 | 주석이 WHY를 담음 | 유지 — 이것만이 정당한 주석(COMMENT-WHY) |
 
 ## 다른 원칙과의 관계
 
 | 원칙 | 관계 |
 |------|------|
-| [[INTENTION-REVEALING-NAMES]] | 이 원칙의 어휘 층위 — 이름이 의도를 드러내는 것이 자기설명의 출발 |
+| [[INTENTION-REVEALING-NAMES]] | 이 원칙의 **어휘** 층위 — 이름이 의도를 드러내는 것이 자기설명의 출발 |
+| [[PARSE-DONT-VALIDATE]] | 이 원칙의 **타입** 층위 — 문서에만 있던 제약을 타입으로 옮겨 컴파일러가 검사하게 |
+| [[EXECUTABLE-DOCUMENTATION]] | 이 원칙의 **문서** 층위 — 코드로 못 옮긴 것도 실행되는 형태로 남겨 노후를 막는다 |
 | [[COMMENT-WHY]] | 이 원칙의 주석 정책 — WHAT/HOW는 코드로, 주석은 WHY만 |
 | [[UL]] | 도메인 용어와 일치하는 이름 → 코드가 곧 도메인 문서 |
 | [[SRP]] | 구체적 이름이 책임을 좁혀 SRP를 강제 |
@@ -81,7 +85,7 @@ one_liner: "문서화보다 문서처럼 읽히는 코드가 우선 — 이름·
 
 ## 주의
 
-- **문서를 쓰지 말라는 뜻이 아니다.** 코드로 표현할 수 없는 것 — 아키텍처 개요, 의사결정 기록(ADR), 외부 계약·규제, 온보딩 맥락 — 은 여전히 문서가 담는다. 이 원칙은 "**코드로 표현 가능한 것을 문서로 미루지 마라**"이다
+- **문서를 쓰지 말라는 뜻이 아니다.** 코드로 표현할 수 없는 것 — 아키텍처 개요, 의사결정 기록(ADR), 외부 계약·규제, 온보딩 맥락 — 은 여전히 문서가 담는다. 이 원칙은 "**코드로 표현 가능한 것을 문서로 미루지 마라**"이고, 남은 문서를 실행 가능하게 만드는 방법은 [[EXECUTABLE-DOCUMENTATION]]이다
 - 지나친 이름 길이는 오히려 의도를 흐린다 — `theServiceThatHandlesUserSignUpAndSendsEmail`보다 `UserSignUpService`
 - 자기설명적 코드는 **리팩터링을 두려워하지 않는 팀**에서만 유지된다. 이름이 낡으면 즉시 rename (BOY-SCOUT)
 - 팀 공유면 원칙과 상충하지 않게 — 코드·주석은 저장소만 보고 읽히는 내용만 담는다

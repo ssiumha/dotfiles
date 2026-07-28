@@ -58,6 +58,7 @@ argument-hint: "[evaluate|catalog|check <principle>] [target]"
 | BOY-SCOUT | process | 코드를 발견했을 때보다 깨끗하게 남겨라 |
 | CHESTERTONS-FENCE | process | 울타리가 왜 있는지 모르면 치우지 마라 |
 | COMMENT-WHY | process | 주석은 코드가 답할 수 없는 WHY만 적는다. WHAT/HOW는 코드 자체로 |
+| EXECUTABLE-DOCUMENTATION | process | 설명하는 문서 대신 실행되는 문서 — 깨지면 빌드가 알려주는 것만 진실로 남는다 |
 | BROKEN-WINDOWS | process | 깨진 유리창을 방치하면 건물 전체가 망가진다. 시스템이 품질을 강제해야 한다 |
 | TECHNICAL-DEBT | process | 의식적이고 신중한 차입은 건강하다. 인지되지 않은 부채가 위험 |
 | GOODHARTS-LAW | process | 측정 지표가 목표가 되면, 좋은 지표가 아니게 된다 |
@@ -65,6 +66,7 @@ argument-hint: "[evaluate|catalog|check <principle>] [target]"
 | IDEMPOTENCY | process | 같은 작업을 여러 번 수행해도 결과가 동일하다 |
 | COLLECTIVE-OWNERSHIP | process | 단 한 명만 만질 수 있는 코드는 부채. 모든 코드는 모두가 고칠 수 있어야 |
 | DbC | contract | precondition·postcondition·invariant으로 모듈 간 계약을 명시한다 |
+| PARSE-DONT-VALIDATE | contract | 검사 결과를 버리지 말고 타입에 남겨라 — 불법 상태를 표현조차 불가능하게 |
 | LSP | contract | 하위 타입은 상위 타입의 계약을 깨지 않고 대체할 수 있어야 한다 |
 | ISP | contract | 클라이언트가 사용하지 않는 메서드에 의존하지 않아야 한다 |
 | CQS | contract | 메서드는 상태를 바꾸거나 값을 반환하거나, 둘 중 하나만 |

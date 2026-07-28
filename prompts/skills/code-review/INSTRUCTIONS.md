@@ -21,6 +21,7 @@
 | lint 감사, 프로젝트 건강, 죽은 코드 | Lint Audit | `03-lint-audit.md` |
 | 테스트 리뷰, 테스트 품질, test smell, overfitting | Test Review | `test-review/INSTRUCTIONS.md` |
 | terraform, IaC, 인프라 코드 리뷰 | Terraform Review | `04-checklist-terraform.md` |
+| 자기설명 코드, 문서 드리프트, 문서/주석에만 있는 계약, 코드=문서 | Self-Documenting Review | `05-checklist-self-documenting.md` |
 | 전체 품질 체크, 다각적 리뷰 | Parallel Review Mode | 4개 에이전트 병렬 |
 | 둘 다 / Type Safety + Lint | 순차 실행 (Type Safety → Lint Audit) | 전체 |
 
@@ -96,6 +97,38 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 4. 요구사항 커버리지 (있을 경우)
 5. 리포트 생성 (심각도별 이슈 + 권장사항 + verdict)
 6. 후속 안내
+
+## Workflow 5: Self-Documenting Review
+
+문서를 늘리는 대신 지식을 코드로 내려보낼 수 있는 지점을 찾는다.
+
+### 1. 리뷰 범위 결정
+
+| 인자 | 범위 |
+|------|------|
+| 파일/디렉토리 경로 | 해당 경로 + 같은 모듈의 문서(README, docstring) |
+| 없음 + staged changes 있음 | staged 파일 + 그 파일이 참조되는 문서 |
+| 없음 + staged 없음 | 공개 API 표면 우선 (핸들러, 공개 모듈, README) |
+
+### 2. 체크 실행
+
+1. `resources/05-checklist-self-documenting.md` 로드
+2. Grep Patterns으로 스캔 — 주석 속 제약 서술, 정보를 버리는 검증 함수, 원시 타입 식별자
+3. 문서 코드블록 존재 여부 ↔ doctest 러너 설정 여부 대조
+4. 구조 규칙 서술 존재 여부 ↔ 아키텍처 테스트 존재 여부 대조
+   (도구 감지 절차: `harness-engineering` 스킬 `resources/06-arch-test-tools.md`)
+5. 생성물이어야 할 명세가 수기 편집되었는지 확인 (`git log`)
+6. 심각도 조정 규칙 적용 후 Output Format으로 출력
+
+### 3. 각 지적에 이동 층위 명시
+
+발견만으로 끝내지 않고 어느 층위로 내려보낼지 함께 제시한다:
+
+```
+타입 → 테스트·예제 → fitness function → 생성 명세 → (남으면) 수기 문서
+```
+
+내려보낼 층위가 없는 항목(WHY, ADR, 외부 제약)은 결함이 아니다 — 지적하지 않는다.
 
 ## Output Format
 
@@ -193,3 +226,5 @@ pyproject.toml / setup.py 존재 → Python → resources/02-checklist-python.md
 | `/code-metrics` | 구조 메트릭 | 복잡도, 결합도, 응집도 분석 |
 | `/plan-review tdd` | TDD 워크플로우 | RED-GREEN-REFACTOR 개발 진행 |
 | `/principles check <name>` | 설계 원칙 점검 | 이슈의 근본 원인이 원칙 위반일 때 (SRP, OCP, DRY, LoD 등). 스코어링 기준 + 기계적 검증 방법 제공 |
+| `/principles check PARSE-DONT-VALIDATE` | 타입 층위 점검 | 제약이 타입에 없고 문서·런타임 검증에만 있을 때 |
+| `/principles check EXECUTABLE-DOCUMENTATION` | 문서 실행 가능성 점검 | 문서·다이어그램이 코드와 어긋나 있을 때 |
