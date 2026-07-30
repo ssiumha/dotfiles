@@ -1,0 +1,36 @@
+#!/bin/sh
+# en0 의 MAC 주소를 원본값과 대체값 사이에서 전환한다.
+# MAC_ADDR_ORIGIN / MAC_ADDR_IOS 환경변수에 각각의 주소를 둔다.
+
+origin=$MAC_ADDR_ORIGIN
+ios=$MAC_ADDR_IOS
+
+if [ -z "$origin" ] || [ -z "$ios" ]; then
+  echo 'MAC_ADDR_ORIGIN, MAC_ADDR_IOS 환경변수가 필요하다'
+  exit 1
+fi
+
+# `ifconfig | grep -A 1 "^en0"` 는 options 줄을 집어 빈 값이 된다. ether 줄을 직접 찾는다.
+now=$(ifconfig en0 | awk '/ether/{print $2}')
+
+if [ -z "$now" ]; then
+  echo 'en0 의 MAC 주소를 읽지 못했다'
+  exit 1
+fi
+
+if [ "$now" = "$origin" ]; then
+  target=$ios
+  label='origin -> ios'
+else
+  target=$origin
+  label='ios -> origin'
+fi
+
+printf '%s ? (y/n) ' "$label"
+read -r input
+[ "$input" = 'y' ] || exit 0
+
+sudo ifconfig en0 ether "$target"
+sudo ifconfig en0 down
+sudo ifconfig en0 up
+echo "changed: $label"

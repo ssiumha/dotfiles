@@ -1,4 +1,0 @@
-# since '~/.config/direnv/direnvrc' is intended for people to manually customize.
-
-# load parents envrc
-#source_up .envrc

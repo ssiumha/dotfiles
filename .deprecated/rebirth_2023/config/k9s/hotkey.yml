@@ -1,5 +1,0 @@
-hotKey:
-  ctrl-k:
-    shortCut: ctrl-k
-    description: avoid kill
-    command: view

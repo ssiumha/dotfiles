@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-kubectl get pod $@ | fzf | awk '{ print $1 }'

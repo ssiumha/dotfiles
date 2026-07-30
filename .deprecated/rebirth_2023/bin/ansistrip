@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-cat - | perl -MTerm::ANSIColor -ne 'print Term::ANSIColor::colorstrip($_)'
