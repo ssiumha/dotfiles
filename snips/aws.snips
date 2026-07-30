@@ -185,6 +185,32 @@ kubectl get nodes -ojson \
   | sort
 endsnippet
 
+snippet ec2_k8s_node_mapping "ruby: EC2 instances <-> k8s nodes (fzf multi-context)"
+#!/usr/bin/env ruby
+# 선택한 컨텍스트들의 노드를 모아 EC2 인스턴스와 InstanceID 로 매칭한다.
+# 어느 컨텍스트에도 없는 인스턴스는 K8s Context 가 '-' 로 남는다.
+
+contexts = `kubectl config get-contexts -o name | fzf --multi --prompt="Select Kube Contexts > "`.lines.map(&:strip)
+abort("No context selected") if contexts.empty?
+
+id_map = {}
+contexts.each do |ctx|
+  ids = `kubectl --context=#{ctx} get nodes -o json | jq -r '.items[].spec.providerID'`
+         .lines.map { |l| l.split('/').last.strip rescue nil }.compact
+  ids.each { |id| id_map[id] = ctx.split(':').last }
+end
+
+instances = `aws ec2 describe-instances | jq -r '.Reservations[].Instances[] | [.InstanceId, (.Tags[]? | select(.Key=="Name") | .Value)? , .PrivateDnsName] | @tsv'`
+             .lines.map { |l| l.strip.split("\t") }
+             .sort_by { |_id, name, _dns| name.to_s.downcase }
+
+puts "%-20s %-30s %-20s %-30s" % ["InstanceID", "Name", "K8s Context", "Node Name"]
+puts "-" * 100
+instances.each do |id, name, dns|
+  puts "%-20s %-30s %-20s %-30s" % [id, name || 'N/A', id_map[id] || '-', dns || '-']
+end
+endsnippet
+
 snippet ecs_task_definition_attributes ""
 family: "app"
 networkMode: "awsvpc"
@@ -215,4 +241,35 @@ containerDefinitions:
 # inferenceAccelerators
 # ephemeralStorage
 # runtimePlatform
+endsnippet
+
+snippet ecr_repositories "ECR 리포지토리 목록"
+aws ecr describe-repositories \
+  --query 'repositories[*].[repositoryName, createdAt]' \
+  --output text \
+  | column -t
+endsnippet
+
+snippet ecr_image_list "ECR 최근 푸시 이미지 10개 (태그 prefix 필터)"
+REPO='<repository-name>'
+
+# 최근 푸시 순 10개
+aws ecr describe-images \
+  --repository-name "$REPO" \
+  --query 'reverse(sort_by(imageDetails, & imagePushedAt))[:10]' \
+  --output json \
+  | jq -r '.[] | "\(.imagePushedAt)  \(.imageSizeInBytes)  \(.imageTags // [] | join(","))"'
+
+# 태그 prefix 로 필터. imageTags 가 배열이므로 [?contains(@, `TAG`)] 를 한 겹 더 감싼다
+TAG='release-'
+aws ecr describe-images \
+  --repository-name "$REPO" \
+  --query "reverse(sort_by(imageDetails[?imageTags[?contains(@,\`$TAG\`)]], & imagePushedAt))[:10]" \
+  --output json
+
+# 이미지 URI 는 repositoryUri 를 그대로 쓴다 (리전/계정 조립 불필요)
+aws ecr describe-repositories \
+  --repository-names "$REPO" \
+  --query 'repositories[0].repositoryUri' \
+  --output text
 endsnippet

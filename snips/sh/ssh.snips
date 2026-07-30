@@ -26,6 +26,14 @@ trap 'echo -e "\nStopping..."; for PID in "${PIDS[@]}"; do kill $PID 2>/dev/null
 wait
 endsnippet
 
+snippet fetch_public_keys "계정의 공개 SSH 키 조회"
+# github 은 인증 없이 공개된다
+curl -s https://github.com/<userid>.keys
+
+# gitlab 도 동일한 형식
+curl -s https://gitlab.com/<userid>.keys
+endsnippet
+
 snippet send_dev_tcp "with file descriptor"
 exec 3<>/dev/tcp/example.com/80
 echo -e "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n" >&3

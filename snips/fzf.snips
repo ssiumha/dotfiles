@@ -31,3 +31,48 @@ endsnippet
 snippet input_by_pass "run ruby"
 fzf --disabled --bind "start:reload:echo ''" --bind "enter:become(echo {q})" --preview 'ruby -e {q}' --preview-window 'bottom,100'
 endsnippet
+
+snippet shortcut_menu "prefix 로 좁혀 유일해지는 순간 자동 실행되는 단축키 메뉴"
+# --query '^' 로 시작하면 prefix 앵커 매칭이 된다 (^a -> a, ad / ^ad -> ad)
+# 후보가 1개로 좁혀지는 순간 one:accept 가 자동 선택하므로 키 입력만으로 실행된다
+KEYMAP="printf '%s\n' \
+  'key :: cmd' \
+  'j  :: jump' \
+  'a  :: add' \
+  'ad :: add-dir'"
+
+fzf --ansi --select-1 \
+    --query '^' \
+    --bind "start:reload:$KEYMAP" \
+    --bind 'one:accept' \
+    --delimiter '\s+::\s+' \
+    --header-lines=1 \
+    --with-nth='{1}' \
+    --style full
+endsnippet
+
+snippet preview_window_offset "preview-window 오프셋 문법"
+--preview-window '~4,+{2}+4/3,<80(up)'
+#  ~4      4줄을 고정 헤더로 만들어 항상 표시
+#  +{2}    두번째 토큰에서 기본 오프셋을 추출
+#  +4      헤더 보정을 위해 기본 오프셋에 4줄 추가
+#  /3      일치하는 줄이 창의 세번째 위치에 오도록 조정
+#  <80(up) 너비가 80열보다 좁으면 오른쪽 50% 대신 위쪽에 50% 높이로 열림
+
+--preview-window 'down,50%,<70(down,40%)'
+#  아래로 50% 높이, 70열보다 좁으면 아래 40% 높이
+endsnippet
+
+snippet no_input_toggle "j/k 네비게이션과 검색 입력을 토글"
+fzf --layout reverse-list --no-input \
+    --bind 'j:down,k:up,/:show-input+unbind(j,k,/)' \
+    --bind 'enter,esc,ctrl-c:transform:
+      if [[ $FZF_INPUT_STATE = enabled ]]; then
+        echo "rebind(j,k,/)+hide-input"
+      elif [[ $FZF_KEY = enter ]]; then
+        echo accept
+      else
+        echo abort
+      fi
+    '
+endsnippet

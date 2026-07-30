@@ -5,3 +5,29 @@ endsnippet
 snippet run_pod_with_service_account "can use kubectl as permitted by role-binding"
 kubectl run -it --rm --image ubuntu --overrides='{ "spec": { "serviceAccountName":"awesome-service-account" } }' ubuntu
 endsnippet
+
+snippet pods_by_node "노드 기준으로 파드 보기"
+# 노드명으로 정렬
+kubectl get pods -A -o wide --sort-by="{.spec.nodeName}"
+
+# 특정 노드의 파드만
+kubectl get pods -A -o wide --field-selector spec.nodeName=<ip-10-0-0-1.ap-northeast-2.compute.internal>
+
+# go-template 으로 이름만
+kubectl get pods --template '{{range .items}}{{if eq .spec.nodeName "<node>"}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}'
+endsnippet
+
+snippet pods_by_restart "재시작 횟수 순 정렬"
+# containerStatuses 는 배열이라 [:1] 로 첫 컨테이너를 집는다
+kubectl get pods -A --sort-by="{.status.containerStatuses[:1].restartCount}"
+endsnippet
+
+snippet get_monitors "prometheus-operator 대상 ServiceMonitor/PodMonitor"
+kubectl get servicemonitor,podmonitor -A -o json \
+  | jq -r '.items[] | [ .kind, .metadata.namespace, .metadata.labels.release, .metadata.name ] | @tsv' \
+  | column -t
+
+# release 라벨로 필터
+kubectl get servicemonitor,podmonitor -A -o json \
+  | jq '[ .items[] | select( .metadata.labels.release | startswith("prometheus-operator") ) ]'
+endsnippet

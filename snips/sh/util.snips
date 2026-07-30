@@ -296,3 +296,14 @@ for f in glob.glob('*'):
         print(f'✓ {f} -> {nfc}')
 "
 endsnippet
+
+snippet inspect_domain "도메인 조사: whois/nslookup/ping/dig 를 한 번에"
+domain='example.com'
+
+_sec() { printf '\n\033[32m======== %s ========\033[0m\n' "$1"; }
+
+_sec whois    ; whois "$domain"
+_sec nslookup ; nslookup "$domain"
+_sec ping     ; ping -c 1 "$domain"
+_sec dig      ; dig "$domain"
+endsnippet
