@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-#MISE description="인터랙티브 그래프 시각화 (dep/schema/vault/render)"
-#MISE alias="vis:graph"
-
 """vis-graph — unified CLI for interactive graph visualization.
 
 Usage:
-    mise run vis:graph dep --root . --scope src/
-    mise run vis:graph schema --conn postgresql://localhost/mydb
-    mise run vis:graph vault --vault ~/Documents/obsidian
-    mise run vis:graph render --type schema < data.json
-    mise run vis:graph build-templates
+    vis-graph dep --root . --scope src/
+    vis-graph schema --conn postgresql://localhost/mydb
+    vis-graph vault --vault ~/Documents/obsidian
+    vis-graph render --type schema < data.json
+    vis-graph build-templates
 """
 from __future__ import annotations
 
@@ -18,8 +15,9 @@ import sys
 import importlib.util
 from pathlib import Path
 
-TASK_DIR = Path(__file__).resolve().parent.parent
-SCRIPT_DIR = TASK_DIR / "vis-graph" / "scripts"
+# 스크립트·템플릿·SCHEMA.md 는 같은 이름의 .d 디렉토리에 둔다 (bin/stargazer.d 와 동일 규약)
+BASE_DIR = Path(__file__).resolve().parent / "vis-graph.d"
+SCRIPT_DIR = BASE_DIR / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 
@@ -54,7 +52,7 @@ def cmd_render(argv: list[str]) -> None:
     p.add_argument("--output", type=Path, default=Path("graph.html"), help="Output HTML file")
     args = p.parse_args(argv)
 
-    tpl_dir = TASK_DIR / "vis-graph" / "templates" / "src"
+    tpl_dir = BASE_DIR / "templates" / "src"
     template_path = tpl_dir / f"{args.type}.html"
     if not template_path.exists():
         print(f"error: template not found: {template_path}", file=sys.stderr)
@@ -72,7 +70,7 @@ def cmd_render(argv: list[str]) -> None:
     missing = [f for f in ("nodes", "edges") if f not in data]
     if missing:
         print(f"error: missing required fields: {', '.join(missing)}", file=sys.stderr)
-        print("See vis-graph/SCHEMA.md for the expected format.", file=sys.stderr)
+        print(f"See {BASE_DIR / 'SCHEMA.md'} for the expected format.", file=sys.stderr)
         sys.exit(1)
 
     inject_template(data, template_path, args.output)
@@ -93,7 +91,7 @@ COMMANDS = {
 }
 
 USAGE = """\
-usage: mise run vis:graph <command> [args...]
+usage: vis-graph <command> [args...]
 
 commands:
   dep              File dependency graph

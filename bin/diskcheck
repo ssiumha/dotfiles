@@ -1,11 +1,21 @@
-#!/usr/bin/env ruby
-#MISE description="Check OS Disk"
+#!/usr/bin/env -S mise x ruby@4 -- ruby
 
-require_relative '../common'
 require 'json'
 require 'optparse'
 
-CACHE_FILE = "/tmp/disk_check_#{Process.uid}.json"
+# 경로 조립(Dir.home/'.cargo')과 출력 색상. 이 스크립트가 쓰는 것만 정의한다.
+class String
+  def /(other)
+    File.join(self.to_s, other.to_s)
+  end
+
+  def red;    "\e[31m#{self}\e[0m" end
+  def yellow; "\e[33m#{self}\e[0m" end
+  def gray;   "\e[37m#{self}\e[0m" end
+  def bold;   "\e[1m#{self}\e[22m" end
+end
+
+CACHE_FILE = "/tmp/diskcheck_#{Process.uid}.json"
 CACHE_TTL = 86400 # 1 day
 
 $recommendations = []
@@ -193,7 +203,7 @@ def run_group(group, items, cache, refresh:)
   end
 
   # Sort by size (largest first)
-  results.sort_by { -_1[:size] }.each do |r|
+  results.sort_by { |x| -x[:size] }.each do |r|
     print_item(r[:output], r[:cleanup])
     # cleanup 힌트가 있는 항목은 recommendations에 추가
     if r[:cleanup] && r[:size] > 0.1
@@ -213,7 +223,7 @@ end
 # System info (no cache)
 def print_system
   puts "==== System ===="
-  df = `df -g #{Dir.home}`.split("\n")[1].split.then { _1[1..4] }.zip(%i[size used avail capacity]).to_h.invert
+  df = `df -g #{Dir.home}`.split("\n")[1].split.then { |a| a[1..4] }.zip(%i[size used avail capacity]).to_h.invert
   puts "#{df[:used]}Gi / #{df[:size]}Gi (Avail: #{df[:avail]}Gi, #{df[:capacity]})"
   puts
 
@@ -255,7 +265,7 @@ def print_recommendations
   puts "정리 가능한 항목 (크기순):".gray
   puts
 
-  $recommendations.sort_by { -_1[:size] }.first(10).each do |r|
+  $recommendations.sort_by { |x| -x[:size] }.first(10).each do |r|
     puts "  #{'%6.1fG' % r[:size]}  #{r[:name]}"
     puts "         └─ #{r[:cleanup]}".yellow
   end

@@ -1,6 +1,8 @@
-#!/usr/bin/env ruby
-#MISE description="AWS 리소스 IRB 세션 (ActiveRecord 스타일)"
-#MISE alias="aws:irb"
+#!/usr/bin/env -S mise x ruby@4 -- ruby
+# AWS 리소스 IRB 세션 (ActiveRecord 스타일)
+#
+# bundler/inline 로 aws-sdk 를 런타임 설치하므로 mise ruby 가 필요하다.
+# (시스템 ruby 2.6 은 read-only 라 gem 설치가 불가능)
 
 require 'bundler/inline'
 gemfile do
@@ -17,9 +19,9 @@ gemfile do
 end
 
 # Usage:
-#   mise run aws:irb                    # 기본 프로필
-#   mise run aws:irb production         # 특정 프로필
-#   mise run aws:irb --region us-west-2 # 특정 리전
+#   aws-irb                    # 기본 프로필
+#   aws-irb production         # 특정 프로필
+#   aws-irb --region us-west-2 # 특정 리전
 
 require 'json'
 

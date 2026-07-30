@@ -130,14 +130,14 @@ vis-graph의 모든 모드는 이 JSON 포맷을 공유한다.
 
 ```bash
 # 추출만 (JSON stdout)
-mise run vis:graph schema --conn postgresql://... --json > schema.json
+vis-graph schema --conn postgresql://... --json > schema.json
 
 # 렌더링만 (JSON stdin → HTML)
-mise run vis:graph render --type schema < schema.json
+vis-graph render --type schema < schema.json
 
 # 원스텝 (기존 동작 유지)
-mise run vis:graph schema --conn postgresql://... --output schema.html
+vis-graph schema --conn postgresql://... --output schema.html
 
-# 외부 도구 연동
-ruby db-irb-schema-export.rb | mise run vis:graph render --type schema --output erd.html
+# 외부 도구 연동 (이 문서의 JSON 형식을 stdout으로 내보내면 무엇이든)
+ruby schema-export.rb | vis-graph render --type schema --output erd.html
 ```

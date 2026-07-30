@@ -15,6 +15,8 @@ class UT
   UUID_NAMESPACE_OID  = '6ba7b812-9dad-11d1-80b4-00c04fd430c8'.freeze
   UUID_NAMESPACE_X500 = '6ba7b814-9dad-11d1-80b4-00c04fd430c8'.freeze
 
+  PASSWORD_CHARS = (('a'..'z').to_a + ('A'..'Z').to_a + ('0'..'9').to_a + %w[! @ # % ^ & *]).freeze
+
   # Command metadata: method_name => [usage, description]
   COMMANDS = {
     'base64_encode' => ['[text|-]', 'Encode to base64'],
@@ -35,6 +37,7 @@ class UT
     'jwt_encode' => ['[json|-] --secret KEY', 'Create JWT token'],
     'jwt_decode' => ['[token|-]', 'Decode JWT (no verification)'],
     'jwt_verify' => ['[token|-] --secret KEY', 'Verify and decode JWT'],
+    'rand_password' => ['[length]', 'Generate random password (default 20)'],
     'uuid_v1' => ['', 'Generate UUID v1 (timestamp+MAC)'],
     'uuid_v3' => ['[name|-] [--ns NAMESPACE]', 'Generate UUID v3 (MD5+namespace)'],
     'uuid_v4' => ['', 'Generate UUID v4 (random)'],
@@ -252,6 +255,18 @@ class UT
       STDERR.puts "Error: Password verification failed"
       exit 1
     end
+  end
+
+  def self.rand_password(args)
+    length = (args.first || 20).to_i
+
+    unless length.positive?
+      STDERR.puts "Error: Length must be a positive integer"
+      STDERR.puts "Usage: ut rand password [length]"
+      exit 1
+    end
+
+    puts Array.new(length) { PASSWORD_CHARS[SecureRandom.random_number(PASSWORD_CHARS.size)] }.join
   end
 
   # Case Conversion Helper Methods
