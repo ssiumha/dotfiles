@@ -208,6 +208,42 @@ task 'install:mise' do
   sh 'curl https://mise.run | sh'
 end
 
+desc 'install devops tools into ~/.mise.toml'
+task 'install:mise:devops' do
+  tools = %w[terraform nova kubectl awscli github-cli krew helm k9s cargo:kdash]
+  sh "mise use -C #{Dir.home} --yes #{tools.join(' ')}"
+end
+
+desc 'install ruby build dependencies'
+task 'install:ruby:deps' do
+  case OS_TYPE
+  when :osx then sh 'brew install openssl readline zlib'
+  when :linux then sh 'sudo apt-get install -y libssl-dev libreadline-dev zlib1g-dev'
+  else puts "unsupported OS: #{OS_TYPE}"
+  end
+end
+
+desc 'setup ir search index for obsidian vault'
+task 'install:ir' do
+  vault = File.join(Dir.home, 'Documents/obsidian')
+
+  puts '# obsidian 등록'
+  system("ir collection add obsidian #{vault}", err: File::NULL) || puts('  already registered')
+
+  puts '# 한국어 전처리기 설치'
+  sh 'ir preprocessor install ko'
+  sh 'ir preprocessor bind ko obsidian'
+
+  puts '# BM25 인덱싱'
+  sh 'ir update obsidian'
+
+  puts '# 벡터 임베딩'
+  sh 'ir embed obsidian'
+
+  puts '# 데몬 시작'
+  sh 'ir daemon start'
+end
+
 desc 'install vscode settings'
 task 'install:vscode' do
   VSCODE_SETTINGS_PATH = "#{Dir.home}/Library/Application Support/Code/User/settings.json"
