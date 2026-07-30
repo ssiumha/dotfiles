@@ -105,15 +105,20 @@ project: session-{name}
 date: 'YYYY-MM-DD'
 status: archived
 session-id: {sid8}
-messages: '{count}'
 exclude-from-graph-view: 'true'
 ---
 
 # Summary
 
+- Request: {첫 사용자 메시지}
+- Journal: [[YYYY-MM-DD]]
+
 # Conversation
 
 # Files
 ```
+
+세션 페이지는 **JSONL 원문으로 가는 색인**이다. 검색 키(Request·날짜·session-id)와 연결 대상(Files)만 담고,
+**결과 요약은 당일 저널의 `- [x] {요약} (sid:...)` 이 단일 진실**이다. 요약을 두 곳에서 서로 다른 품질로 만들지 않는다.
 
 `status` 프론트매터(active/archived)로 필터. graph view에서는 제외된다.

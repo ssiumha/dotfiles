@@ -19,15 +19,6 @@ MAX_SUMMARY           = 200
 SYSTEM_PROPERTIES = Set["project", "date", "status", "session-id", "messages", "exclude-from-graph-view"]
 SYSTEM_SECTIONS   = Set["Summary", "Conversation", "Files"]
 
-# Conversation 표시에서 생략할 노이즈 도구
-SKIP_TOOLS = Set[
-  "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput", "TaskStop",
-  "AskUserQuestion", "ToolSearch", "ScheduleWakeup",
-  "EnterPlanMode", "ExitPlanMode", "EnterWorktree", "ExitWorktree",
-  "NotebookEdit", "Monitor", "SendMessage",
-  "CronCreate", "CronDelete", "CronList",
-  "ListMcpResourcesTool", "ReadMcpResourceTool",
-]
 
 # --- ARGV 파싱 ---
 
@@ -156,30 +147,6 @@ def collect_files(messages)
   files
 end
 
-def collect_tool_stats(messages)
-  counts = Hash.new(0)
-  messages.each do |msg|
-    content = msg.dig("message", "content")
-    next unless content.is_a?(Array)
-
-    content.each do |block|
-      next unless block.is_a?(Hash) && block["type"] == "tool_use"
-      counts[block["name"]] += 1 unless SKIP_TOOLS.include?(block["name"])
-    end
-  end
-  counts.sort_by { |_, v| -v }.to_h
-end
-
-def last_assistant_text(messages)
-  messages.reverse_each do |msg|
-    next unless msg["type"] == "assistant"
-    text = extract_text(msg.dig("message", "content") || "")
-    next if text.nil? || text.length < 10
-    text = text.gsub(/\n+/, " ").strip
-    return text.length > 200 ? "#{text[0, 200]}..." : text
-  end
-  nil
-end
 
 def parse_existing_page(path)
   content = path.read(encoding: "utf-8")
@@ -300,15 +267,8 @@ def generate_page(session, status, existing_path)
   summary = strip_links(first_text).gsub(/\n+/, " ").strip
   summary = summary.length > MAX_SUMMARY ? "#{summary[0, MAX_SUMMARY]}..." : summary
 
-  start_time = format_time(session[:first_ts])
-  end_time   = format_time(session[:last_ts])
-  dur = duration_minutes(session[:first_ts], session[:last_ts])
-
   turns = build_conversation(session[:all_messages])
   files = collect_files(session[:all_messages])
-  tool_stats = collect_tool_stats(session[:all_messages])
-  completed = strip_links(last_assistant_text(session[:all_messages]) || "")
-  completed = nil if completed.empty?
 
   lines = []
   lines << "---"
@@ -316,7 +276,6 @@ def generate_page(session, status, existing_path)
   lines << "date: '#{date_str}'"
   lines << "status: #{status}"
   lines << "session-id: #{sid_short}"
-  lines << "messages: '#{session[:user_count]}'"
   lines << "exclude-from-graph-view: 'true'"
   user_properties.each_value { |raw| lines << raw }
   lines << "---"
@@ -326,14 +285,10 @@ def generate_page(session, status, existing_path)
   lines << "# Summary"
   lines << ""
   lines << "- Request: #{summary}"
-  lines << "- Duration: #{start_time} - #{end_time} (#{dur}min)"
-  lines << "- Messages: #{session[:user_count]} user, #{session[:assistant_count]} assistant"
-  if tool_stats.any?
-    top_tools = tool_stats.first(6).map { |k, v| "#{k}(#{v})" }.join(", ")
-    lines << "- Investigated: #{top_tools}"
-  end
-  lines << "- Completed: #{completed}" if completed
-  lines << "- Files: #{files.size} touched" if files.any?
+  # 결과 요약은 당일 저널의 `- [x] {요약} (sid:...)` 이 단일 진실이다.
+  # 예전엔 마지막 어시스턴트 메시지를 문자 수로 잘라 Completed 로 넣었는데,
+  # 문장 중간에서 끊기고 결론이 아니라 마지막에 말한 아무 문장이 들어가 읽을 수 없었다.
+  lines << "- Journal: [[#{date_str}]]"
 
   if turns.any?
     lines << ""
@@ -345,8 +300,6 @@ def generate_page(session, status, existing_path)
       a = strip_links(turn[:assistant])
       lines << "[#{turn[:time]}] U: #{u}"
       lines << "[#{turn[:time]}] A: #{a}" unless a.empty?
-      visible_tools = turn[:tools].reject { |t| SKIP_TOOLS.include?(t) }
-      lines << "[#{turn[:time]}]    tools: #{visible_tools[0, 5].join(", ")}" if visible_tools.any?
     end
     lines << "```"
   end

@@ -24,7 +24,7 @@ DB 접속 정보를 받아 스키마를 분석하고, vis-network 기반 인터�
 Python3가 설치되어 있으면 스크립트로 전체 파이프라인을 실행한다.
 
 ```bash
-mise run vis:graph schema \
+vis-graph schema \
   --conn "<connection-string>" \
   --output schema-graph.html \
   [--schema <name>] [--exclude <pattern>] [--group-by type]
@@ -34,7 +34,7 @@ mise run vis:graph schema \
 - `--schema`: 특정 스키마 필터 (PG용. 기본: 시스템 스키마 제외 전체)
 - `--exclude`: 테이블 제외 glob (반복 가능)
 - `--group-by`: `schema` (기본) 또는 `type`
-- 템플릿은 mise task 내부에서 자동 해석됨
+- 템플릿은 vis-graph 내부에서 자동 해석됨
 
 스크립트가 성공하면 **Phase 4-4 결과 보고**로 바로 이동.
 실패 시 Phase 1부터 수동 진행.

@@ -21,10 +21,10 @@ Obsidian vault의 노트 간 `[[wikilink]]`와 `#tag` 연결을 분석하여 vis
 
 ## Instructions
 
-### Phase 0: mise task 실행 (권장)
+### Phase 0: vis-graph 실행 (권장)
 
 ```bash
-mise run vis:graph vault \
+vis-graph vault \
   --vault {VAULT_ROOT} \
   --output knowledge-graph.html \
   [--include-session] [--include-date] [--no-orphans] \
@@ -62,7 +62,7 @@ mise run vis:graph vault \
 
 ## Technical Details
 
-**스크립트**: `config/mise/tasks/vis-graph/scripts/vault-graph.py` (Python 3.10+, 표준 라이브러리만)
+**스크립트**: `bin/vis-graph.d/scripts/vault-graph.py` (Python 3.10+, 표준 라이브러리만)
 - 재귀 스캔(`rglob`) + 폴더 기반 네임스페이스
 - `[[wikilink]]`/`#tag` 파싱, `#heading`·`|alias`·`folder/` 정규화
 - frontmatter `aliases:` (inline `[a,b]` / 블록 `- a` / 스칼라) → alias→canonical 병합
