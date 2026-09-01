@@ -24,21 +24,14 @@ if has('statusline')
   setlocal statusline=%{get(b:,'webdav_current_path','')}%=WebDAV\ List
 endif
 
-" Key mappings for navigation
-nnoremap <buffer> <CR> :call webdav#ui#open()<CR>
-nnoremap <buffer> t :call webdav#ui#open_in_tab()<CR>
-nnoremap <buffer> - :call webdav#ui#go_up()<CR>
-nnoremap <buffer> r :call webdav#ui#list(b:webdav_current_path, b:webdav_server)<CR>
-nnoremap <buffer> R :call webdav#operations#rename()<CR>
-nnoremap <buffer> D :call webdav#operations#delete()<CR>
+" Key mappings for navigation, from the table webdav#ui#hint_line() also renders
+let b:undo_ftplugin = "setlocal buftype< bufhidden< swapfile< modifiable< nowrap< cursorline< conceallevel< statusline<"
 
 " NOTE: map/unmap commands absorb a literal '|' into their {lhs}, so they
 " cannot be chained with '| nunmap ...'. Wrap each in execute() so the '|'
 " acts as a real command separator and every unmap actually runs.
-let b:undo_ftplugin = "setlocal buftype< bufhidden< swapfile< modifiable< nowrap< cursorline< conceallevel< statusline<"
-      \ . " | exe 'silent! nunmap <buffer> <CR>'"
-      \ . " | exe 'silent! nunmap <buffer> t'"
-      \ . " | exe 'silent! nunmap <buffer> -'"
-      \ . " | exe 'silent! nunmap <buffer> r'"
-      \ . " | exe 'silent! nunmap <buffer> R'"
-      \ . " | exe 'silent! nunmap <buffer> D'"
+for s:keymap in webdav#ui#keymaps()
+  execute printf('nnoremap <buffer> %s :%s<CR>', s:keymap.key, s:keymap.rhs)
+  let b:undo_ftplugin .= " | exe 'silent! nunmap <buffer> " . s:keymap.key . "'"
+endfor
+unlet! s:keymap

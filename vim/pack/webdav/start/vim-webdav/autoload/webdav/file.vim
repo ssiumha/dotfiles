@@ -45,7 +45,6 @@ function! webdav#file#get(path, server_name = '')
   " Handle 404 - file doesn't exist yet, create empty buffer
   if http_code == 404
     call webdav#buffer#setup(a:path, server_name, server_info, '', '', '')
-    call webdav#recent#track(a:path, server_info.url, server_name)
     return
   endif
 
@@ -82,9 +81,6 @@ function! webdav#file#get(path, server_name = '')
 
   " Setup buffer with content and metadata
   call webdav#buffer#setup(a:path, server_name, server_info, etag, last_modified, body)
-
-  " Track this file in recent files list
-  call webdav#recent#track(a:path, server_info.url, server_name)
 endfunction
 
 " Save WebDAV buffer with conflict detection
@@ -309,7 +305,6 @@ function! webdav#file#get_absolute(base_url, path, server_name)
   if http_code == 404
     call webdav#buffer#setup(a:path, a:server_name, server_info, '', '', '')
     let b:webdav_base_url = a:base_url
-    call webdav#recent#track(a:path, a:base_url, a:server_name)
     return
   endif
 
@@ -327,5 +322,4 @@ function! webdav#file#get_absolute(base_url, path, server_name)
   " Store base_url separately for PUT requests
   call webdav#buffer#setup(a:path, a:server_name, server_info, etag, last_modified, body)
   let b:webdav_base_url = a:base_url
-  call webdav#recent#track(a:path, a:base_url, a:server_name)
 endfunction

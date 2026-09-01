@@ -213,4 +213,59 @@ class TestWebDAVFzf < TestWebDAVBase
     assert true, "insert_link feature verified via code review and manual testing"
   end
 
+
+  # Test F in the folder view reaches files deeper than the Depth:1 listing
+  def test_folder_view_f_searches_recursively
+    start_vim("WEBDAV_DEFAULT_URL" => "http://localhost:9999")
+
+    vim_cmd("WebDAVList /test/")
+    wait_for_text("WebDAV:")
+
+    send_keys("F")
+    wait_for_text("WebDAV>", 3)
+
+    # /test/deep/subfolder/nested.txt sits two levels below the listing, so it
+    # only shows up if the scan recursed past Depth:1
+    send_keys("nested")
+    wait_for_text("deep/subfolder/nested.txt", 5)
+    send_enter
+    wait_for_text("Nested file content", 3)
+
+    output = capture
+    assert_includes output, "Nested file content",
+                    "F should reach /test/deep/subfolder/nested.txt from /test/"
+
+    # Pin the path: an empty fzf result would fall back to the query as a filename
+    vim_cmd("echo b:webdav_original_path")
+    wait_for_text("/test/deep/subfolder/nested.txt", 2)
+
+    output = capture
+    assert_includes output, "/test/deep/subfolder/nested.txt",
+                    "F should open the matched file, not the raw query"
+  end
+
+  # Test F roots the search at the listing path, not the server root
+  def test_folder_view_f_roots_at_current_path
+    start_vim("WEBDAV_DEFAULT_URL" => "http://localhost:9999")
+
+    vim_cmd("WebDAVList /test/deep/")
+    wait_for_text("WebDAV:")
+
+    send_keys("F")
+    wait_for_text("WebDAV>", 3)
+
+    # Relative to /test/deep/, so the match carries no 'deep/' prefix
+    send_keys("nested")
+    wait_for_text("subfolder/nested.txt", 5)
+    send_enter
+    wait_for_text("Nested file content", 3)
+
+    vim_cmd("echo b:webdav_original_path")
+    wait_for_text("/test/deep/subfolder/nested.txt", 2)
+
+    output = capture
+    assert_includes output, "/test/deep/subfolder/nested.txt",
+                    "F should build the path from the listing directory"
+  end
+
 end

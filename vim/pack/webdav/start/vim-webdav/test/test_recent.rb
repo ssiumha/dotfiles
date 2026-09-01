@@ -269,4 +269,52 @@ class TestWebDAVRecent < TestWebDAVBase
     output = capture
     assert_match(/This is test file content/, output, "Should handle server name in selection")
   end
+
+  # Test a file created from the listing lands in the recent list
+  def test_created_file_is_tracked
+    start_vim_with_cache
+
+    vim_cmd("WebDAVList /test/")
+    wait_for_text("+New", 2)
+
+    send_keys("4G")  # +New
+    send_enter
+    wait_for_text("New file name", 2)
+    send_keys("recent_new_note")
+    send_enter
+    wait_for_text("recent_new_note", 3)
+
+    # The buffer name is on screen too, so tag the echo: matching the bare path
+    # would pass on the statusline alone
+    vim_cmd("let recent = TestGetRecentFiles()")
+    vim_cmd('echo \"RECENTPATH=\" . get(get(recent, 0, {}), \"path\", \"NONE\")')
+    wait_for_text("RECENTPATH=/test/recent_new_note.md", 3)
+
+    assert_includes capture, "RECENTPATH=/test/recent_new_note.md",
+                    "Creating a file should track it, not just opening one"
+  end
+
+  # Test a note created through WebDAVNote lands in the recent list
+  def test_created_note_is_tracked
+    start_vim_with_cache
+
+    # Double quotes only: single quotes do not survive docker exec sh -c
+    vim_cmd('let g:webdav_note_patterns = {\"probe\": {\"server\": \"\", \"path\": \"/test/{title}.md\", \"template\": \"\", \"unit\": \"day\", \"prompt_title\": v:null}}')
+    sleep 0.3
+
+    vim_cmd("WebDAVNote probe")
+    wait_for_text("Title:", 2)
+    send_keys("Storage Array")
+    send_enter
+
+    vim_cmd("echo b:webdav_original_path")
+    wait_for_text("/test/Storage Array.md", 3)
+
+    vim_cmd("let recent = TestGetRecentFiles()")
+    vim_cmd('echo \"RECENTPATH=\" . get(get(recent, 0, {}), \"path\", \"NONE\")')
+    wait_for_text("RECENTPATH=/test/Storage Array.md", 3)
+
+    assert_includes capture, "RECENTPATH=/test/Storage Array.md",
+                    "A note created by WebDAVNote should be tracked"
+  end
 end

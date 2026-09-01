@@ -230,7 +230,8 @@ endfunction
 let s:plugin_root = fnamemodify(resolve(expand('<sfile>:p')), ':h:h:h')
 
 " Build streaming scan shell command
-function! webdav#fzf#build_scan_cmd(base_path, server_info, max_depth) abort
+" mode: 'files' (default) lists every file, 'dirs' lists every directory
+function! webdav#fzf#build_scan_cmd(base_path, server_info, max_depth, mode = 'files') abort
   let script = s:plugin_root . '/scripts/scan-bfs.sh'
   let auth_arg = ''
   if !empty(a:server_info.user) && !empty(a:server_info.pass)
@@ -241,6 +242,15 @@ function! webdav#fzf#build_scan_cmd(base_path, server_info, max_depth) abort
     \ . ' ' . shellescape(a:base_path)
     \ . ' ' . a:max_depth
     \ . ' ' . shellescape(auth_arg)
+    \ . ' ' . shellescape(a:mode)
+endfunction
+
+" Launch the recursive picker at an explicit path and server.
+" resolve_args() reads a leading-/ first argument as a path and falls back to
+" the default server, so the server name has to come as its own argument.
+function! webdav#fzf#open_at(path, server_name) abort
+  let args = empty(a:server_name) ? [a:path] : [a:server_name, a:path]
+  call webdav#fzf#main(args, 0)
 endfunction
 
 " Main fzf interface with streaming BFS scan

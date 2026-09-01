@@ -27,6 +27,7 @@ nnoremap <buffer> <silent> - :WebDAVList<CR>
 " Key mappings for wikilink navigation
 " gf: follow wikilink under cursor (like vim's gf for goto file)
 nnoremap <buffer> <silent> gf :call webdav#wikilink#open()<CR>
+
 " Note: <CR> mapping is handled by note.vim's OpenWiki() which dispatches to
 " webdav#wikilink#open() for WebDAV buffers
 
@@ -34,3 +35,11 @@ nnoremap <buffer> <silent> gf :call webdav#wikilink#open()<CR>
 " into their {lhs}, so chaining with '| nunmap ...' silently skips all but
 " the first. execute() makes the '|' a real separator.
 let b:undo_ftplugin = "setlocal swapfile< statusline< | exe 'silent! nunmap <buffer> -' | exe 'silent! nunmap <buffer> gf'"
+
+" The palette and the <space>p pickers act on this buffer the same way they act
+" on a listing, so they come from the table ftplugin/webdavlist.vim maps
+for s:keymap in filter(copy(webdav#ui#keymaps()), 'v:val.shared')
+  execute printf('nnoremap <buffer> %s :%s<CR>', s:keymap.key, s:keymap.rhs)
+  let b:undo_ftplugin .= " | exe 'silent! nunmap <buffer> " . s:keymap.key . "'"
+endfor
+unlet! s:keymap

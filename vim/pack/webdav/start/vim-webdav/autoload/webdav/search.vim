@@ -120,7 +120,6 @@ function! webdav#search#grep_fzf(...) abort
     \   '--prompt', 'Search> ',
     \   '--header', 'Enter: open | Preview: file content',
     \   '--print-query',
-    \   '--expect', '',
     \   '--preview', preview_cmd,
     \   '--preview-window', 'down:50%',
     \ ],
@@ -129,9 +128,10 @@ function! webdav#search#grep_fzf(...) abort
 endfunction
 
 function! s:grep_fzf_sink(server_name, result) abort
-  if len(a:result) < 3 | return | endif
+  if len(a:result) < 2 | return | endif
 
-  let selection = a:result[2]
+  " --print-query without --expect gives [query, selection]
+  let selection = a:result[1]
   if empty(selection) | return | endif
 
   let webdav_path = '/' . selection

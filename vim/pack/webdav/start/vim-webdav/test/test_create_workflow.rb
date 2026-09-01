@@ -10,8 +10,8 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     vim_cmd("WebDAVList /test/")
     wait_for_text("+New")
 
-    # Select +New item (line 3)
-    send_keys("3G")
+    # Select +New item (line 4)
+    send_keys("4G")
     send_enter
     wait_for_text("New file name", 2)
 
@@ -41,8 +41,8 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     vim_cmd("WebDAVList /test/")
     wait_for_text("+Folder")
 
-    # Select +Folder item (line 4)
-    send_keys("4G")
+    # Select +Folder item (line 5)
+    send_keys("5G")
     send_enter
     wait_for_text("New folder name", 2)
 
@@ -68,7 +68,7 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     wait_for_text("+New")
 
     # Select +New item
-    send_keys("3G")
+    send_keys("4G")
     send_enter
     wait_for_text("New file name", 2)
 
@@ -99,7 +99,7 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     wait_for_text("+Folder")
 
     # Select +Folder item
-    send_keys("4G")
+    send_keys("5G")
     send_enter
     wait_for_text("New folder name", 2)
 
@@ -158,7 +158,7 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     wait_for_text("+New")
 
     # Create new file
-    send_keys("3G")
+    send_keys("4G")
     send_enter
     wait_for_text("New file name", 2)
     send_keys("editable")
@@ -190,7 +190,7 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     vim_cmd("let before = line('$')")
 
     # Try to create file but cancel
-    send_keys("3G")
+    send_keys("4G")
     send_enter
     wait_for_text("New file name", 2)
     # Send empty name (cancel)
@@ -219,7 +219,7 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     vim_cmd("let before = line('$')")
 
     # Try to create folder but cancel
-    send_keys("4G")
+    send_keys("5G")
     send_enter
     wait_for_text("New folder name", 2)
     # Send empty name (cancel)
@@ -245,7 +245,7 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     wait_for_text("+New")
 
     # Create file with name that already has .md
-    send_keys("3G")
+    send_keys("4G")
     send_enter
     wait_for_text("New file name", 2)
     send_keys("test.md")
@@ -265,7 +265,7 @@ class TestWebDAVCreateWorkflow < TestWebDAVBase
     wait_for_text("+Folder")
 
     # Create folder without trailing slash
-    send_keys("4G")
+    send_keys("5G")
     send_enter
     wait_for_text("New folder name", 2)
     send_keys("noslash")

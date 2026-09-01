@@ -41,6 +41,31 @@ function! webdav#buffer#validate()
   return 1
 endfunction
 
+" Resolve what a WebDAV action acts on. Returns {} when the buffer is neither a
+" listing nor a document — webdav#recent#list() also sets filetype=webdavlist
+" but keeps no path, so callers just check emptiness.
+function! webdav#buffer#context() abort
+  if &filetype ==# 'webdavlist' && exists('b:webdav_current_path')
+    let line = getline('.')
+    let navigable = !empty(trim(line)) && line !~ '^"'
+          \ && line !=# '+New' && line !=# '+Folder' && line !=# '../'
+    return {'kind': 'list',
+          \ 'server': get(b:, 'webdav_server', ''),
+          \ 'dir': b:webdav_current_path,
+          \ 'target': navigable ? webdav#core#join_path(b:webdav_current_path, line) : '',
+          \ 'name': navigable ? line : '',
+          \ 'is_folder': navigable && line =~ '/$'}
+  elseif &filetype ==# 'webdav' && exists('b:webdav_original_path')
+    return {'kind': 'file',
+          \ 'server': get(b:, 'webdav_server', ''),
+          \ 'dir': substitute(b:webdav_original_path, '[^/]*$', '', ''),
+          \ 'target': b:webdav_original_path,
+          \ 'name': fnamemodify(b:webdav_original_path, ':t'),
+          \ 'is_folder': 0}
+  endif
+  return {}
+endfunction
+
 " Setup WebDAV buffer with metadata and save handler
 " Parameters: path, server_name, server_info, etag, last_modified, body
 function! webdav#buffer#setup(path, server_name, server_info, etag, last_modified, body)
@@ -109,6 +134,12 @@ function! webdav#buffer#setup(path, server_name, server_info, etag, last_modifie
 
   " Mark as unmodified (just loaded)
   setlocal nomodified
+
+  " Every document reaches the user through this function, so recording the
+  " visit here is what keeps a newly created note in the recent list. Leaving
+  " it to callers lost the two creation paths (note#open, operations#create_file).
+  " The url matches the buffer name built above, not any caller-side base_url.
+  call webdav#recent#track(a:path, a:server_info.url, a:server_name)
 endfunction
 
 " Get syntax type from file extension

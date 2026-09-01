@@ -91,7 +91,7 @@ class TestWebDAVListWorkflow < TestWebDAVBase
 
     # If there are files in folder1, open one
     # For now just verify we can navigate back
-    send_keys("2G")  # Go to ../
+    send_keys("3G")  # Go to ../
     send_enter
     wait_for_text("/test/", 2)
 

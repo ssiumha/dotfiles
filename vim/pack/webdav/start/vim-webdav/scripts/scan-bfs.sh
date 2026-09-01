@@ -2,8 +2,9 @@
 # Streaming BFS scanner for WebDAV directories
 # Outputs files as discovered — designed to pipe into fzf
 #
-# Usage: scan-bfs.sh <base_url> <base_path> <max_depth> [auth_arg]
+# Usage: scan-bfs.sh <base_url> <base_path> <max_depth> [auth_arg] [mode]
 # Example: scan-bfs.sh "http://host:8080" "/vault/" 3 "-u user:pass"
+# mode: files (default) emits every file, dirs emits every directory instead
 
 set -euo pipefail
 
@@ -11,6 +12,7 @@ BASE_URL="$1"
 BASE_PATH="$2"
 MAX_DEPTH="${3:-3}"
 AUTH_ARG="${4:-}"
+MODE="${5:-files}"
 
 propfind() {
   local path="$1"
@@ -50,10 +52,14 @@ while [ ${#queue[@]} -gt 0 ]; do
     if [[ "$line" == DIR:* ]]; then
       dir="${line#DIR:}"
       next_depth=$((depth + 1))
+      if [ "$MODE" = dirs ]; then
+        # Output path relative to BASE_PATH
+        printf '%s\n' "${current_path#"$BASE_PATH"}${dir}"
+      fi
       if [ "$next_depth" -lt "$MAX_DEPTH" ]; then
         queue+=("${next_depth}${TAB}${current_path}${dir}")
       fi
-    else
+    elif [ "$MODE" != dirs ]; then
       # Output path relative to BASE_PATH
       rel="${current_path#"$BASE_PATH"}"
       echo "${rel}${line}"

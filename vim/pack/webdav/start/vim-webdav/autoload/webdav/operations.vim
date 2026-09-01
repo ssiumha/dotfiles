@@ -134,6 +134,142 @@ function! webdav#operations#create_folder(current_path)
   endif
 endfunction
 
+" Move (or rename) a resource. Returns 1 on success.
+" Callers own the follow-up: a listing reloads, a document buffer re-opens.
+function! webdav#operations#move_path(source_path, dest_path, server_name) abort
+  let server_info = webdav#server#get_info(a:server_name)
+  if empty(server_info)
+    return 0
+  endif
+
+  " Check if destination already exists. Pass raw_response so the reply carries
+  " headers — without it the perl pipe eats stdout and every code reads as 0.
+  let check_cmd = webdav#http#build_request('PROPFIND', a:dest_path, server_info, 1)
+  if !empty(check_cmd)
+    " Modify PROPFIND to only check if resource exists (Depth: 0)
+    let check_cmd = substitute(check_cmd, '-H "Depth: 1"', '-H "Depth: 0"', '')
+    let check_result = webdav#http#execute(check_cmd)
+
+    if check_result.success
+      let http_code = webdav#core#extract_http_code(check_result.response)
+
+      if http_code == 207 || (http_code >= 200 && http_code < 300)
+        " Destination exists - ask for confirmation
+        echohl WarningMsg
+        echo "\nDestination already exists: " . a:dest_path
+        echohl None
+        let choice = confirm('Overwrite?', "&Yes\n&No", 2)
+        if choice != 1
+          echo "\nCancelled"
+          return 0
+        endif
+      endif
+    endif
+  endif
+
+  " Execute MOVE request
+  let cmd = webdav#http#build_request('MOVE', a:source_path, server_info, a:dest_path)
+  if empty(cmd)
+    return 0
+  endif
+
+  let result = webdav#http#execute(cmd)
+
+  if !result.success
+    echoerr "Error renaming: HTTP request failed"
+    echoerr result.response
+    return 0
+  endif
+
+  " Parse response status
+  let http_code = webdav#core#extract_http_code(result.response)
+
+  if http_code >= 200 && http_code < 300
+    return 1
+  elseif http_code == 409
+    echoerr "Error: Parent collection does not exist or conflict occurred"
+    echoerr result.response
+  elseif http_code == 412
+    echoerr "Error: Precondition failed (destination may already exist)"
+    echoerr result.response
+  else
+    echoerr "Error renaming: HTTP " . http_code
+    echoerr result.response
+  endif
+  return 0
+endfunction
+
+" Delete a resource. Returns 1 on success.
+" Callers own the follow-up: a listing reloads, a document buffer wipes.
+function! webdav#operations#delete_path(path, server_name, is_folder) abort
+  let server_info = webdav#server#get_info(a:server_name)
+  if empty(server_info)
+    return 0
+  endif
+
+  let item_name = fnamemodify(substitute(a:path, '/$', '', ''), ':t')
+  if a:is_folder
+    let item_name .= '/'
+  endif
+
+  " SAFETY: For folders, check if empty
+  if a:is_folder
+    echo "Checking if folder is empty..."
+    let empty_status = webdav#http#folder_empty(a:path, a:server_name)
+
+    if empty_status == -1
+      echoerr "Error: Could not verify folder status"
+      return 0
+    endif
+
+    if empty_status == 0
+      echoerr "Error: Folder is not empty. Delete contents first."
+      return 0
+    endif
+  endif
+
+  " Confirmation prompt (skip in test mode)
+  if !exists('$WEBDAV_TEST_MODE') || $WEBDAV_TEST_MODE != '1'
+    let choice = confirm('Delete "' . item_name . '"?', "&Yes\n&No", 2)
+    if choice != 1
+      echo "Cancelled"
+      return 0
+    endif
+  endif
+
+  " Execute DELETE request
+  let cmd = webdav#http#build_request('DELETE', a:path, server_info)
+  if empty(cmd)
+    return 0
+  endif
+
+  let result = webdav#http#execute(cmd)
+
+  if !result.success
+    echoerr "Error deleting: HTTP request failed"
+    echoerr result.response
+    return 0
+  endif
+
+  " Parse response status
+  let http_code = webdav#core#extract_http_code(result.response)
+
+  if http_code >= 200 && http_code < 300
+    " Invalidate cache for this file's directory
+    call webdav#cache#invalidate(a:server_name, server_info, a:path)
+    return 1
+  elseif http_code == 404
+    echoerr "Error: Item not found"
+  elseif http_code == 409
+    echoerr "Error: Folder is not empty or has dependencies"
+    echoerr result.response
+  else
+    echoerr "Error deleting: HTTP " . http_code
+    echoerr result.response
+  endif
+  return 0
+endfunction
+
 " Rename (move) file or folder in current directory
 function! webdav#operations#rename()
   " Get server info from current buffer
@@ -187,64 +323,13 @@ function! webdav#operations#rename()
     let dest_path = webdav#core#join_path(b:webdav_current_path, new_name)
   endif
 
-  " Check if destination already exists
-  let server_info = webdav#server#get_info(server_name)
-  let check_cmd = webdav#http#build_request('PROPFIND', dest_path, server_info)
-  if !empty(check_cmd)
-    " Modify PROPFIND to only check if resource exists (Depth: 0)
-    let check_cmd = substitute(check_cmd, '-H "Depth: 1"', '-H "Depth: 0"', '')
-    let check_result = webdav#http#execute(check_cmd)
-
-    if check_result.success
-      " Parse HTTP status
-      let http_code = webdav#core#extract_http_code(check_result.response)
-
-      if http_code == 207 || (http_code >= 200 && http_code < 300)
-        " Destination exists - ask for confirmation
-        echohl WarningMsg
-        echo "\nDestination already exists: " . new_name
-        echohl None
-        let choice = confirm('Overwrite?', "&Yes\n&No", 2)
-        if choice != 1
-          echo "\nCancelled"
-          return
-        endif
-      endif
-    endif
-  endif
-
-  " Execute MOVE request
-  let cmd = webdav#http#build_request('MOVE', source_path, server_info, dest_path)
-  if empty(cmd)
+  if !webdav#operations#move_path(source_path, dest_path, server_name)
     return
   endif
 
-  let result = webdav#http#execute(cmd)
-
-  if !result.success
-    echoerr "Error renaming: HTTP request failed"
-    echoerr result.response
-    return
-  endif
-  let response = result.response
-
-  " Parse response status
-  let http_code = webdav#core#extract_http_code(response)
-
-  if http_code >= 200 && http_code < 300
-    echo "\nRenamed: " . current_name . " -> " . new_name
-    " Refresh current list
-    call webdav#ui#list(b:webdav_current_path)
-  elseif http_code == 409
-    echoerr "Error: Parent collection does not exist or conflict occurred"
-    echoerr response
-  elseif http_code == 412
-    echoerr "Error: Precondition failed (destination may already exist)"
-    echoerr response
-  else
-    echoerr "Error renaming: HTTP " . http_code
-    echoerr response
-  endif
+  echo "\nRenamed: " . current_name . " -> " . new_name
+  " Refresh current list
+  call webdav#ui#list(b:webdav_current_path)
 endfunction
 
 " Delete file or empty folder
@@ -273,72 +358,14 @@ function! webdav#operations#delete()
     return
   endif
 
-  " Determine if it's a folder (ends with /)
-  let is_folder = (line =~ '/$')
-  let item_name = line
-
   " Build path
-  let path = webdav#core#join_path(b:webdav_current_path, item_name)
+  let path = webdav#core#join_path(b:webdav_current_path, line)
 
-  " SAFETY: For folders, check if empty
-  if is_folder
-    echo "Checking if folder is empty..."
-    let empty_status = webdav#http#folder_empty(path, server_name)
-
-    if empty_status == -1
-      echoerr "Error: Could not verify folder status"
-      return
-    endif
-
-    if empty_status == 0
-      echoerr "Error: Folder is not empty. Delete contents first."
-      return
-    endif
-  endif
-
-  " Confirmation prompt (skip in test mode)
-  if !exists('$WEBDAV_TEST_MODE') || $WEBDAV_TEST_MODE != '1'
-    let choice = confirm('Delete "' . item_name . '"?', "&Yes\n&No", 2)
-    if choice != 1
-      echo "Cancelled"
-      return
-    endif
-  endif
-
-  " Execute DELETE request
-  let server_info = webdav#server#get_info(server_name)
-  let cmd = webdav#http#build_request('DELETE', path, server_info)
-  if empty(cmd)
+  if !webdav#operations#delete_path(path, server_name, line =~ '/$')
     return
   endif
 
-  let result = webdav#http#execute(cmd)
-
-  if !result.success
-    echoerr "Error deleting: HTTP request failed"
-    echoerr result.response
-    return
-  endif
-  let response = result.response
-
-  " Parse response status
-  let http_code = webdav#core#extract_http_code(response)
-
-  if http_code >= 200 && http_code < 300
-    echo "\nDeleted: " . item_name
-
-    " Invalidate cache for this file's directory
-    call webdav#cache#invalidate(server_name, server_info, path)
-
-    " Refresh current list
-    call webdav#ui#list(b:webdav_current_path)
-  elseif http_code == 404
-    echoerr "Error: Item not found"
-  elseif http_code == 409
-    echoerr "Error: Folder is not empty or has dependencies"
-    echoerr response
-  else
-    echoerr "Error deleting: HTTP " . http_code
-    echoerr response
-  endif
+  echo "\nDeleted: " . line
+  " Refresh current list
+  call webdav#ui#list(b:webdav_current_path)
 endfunction

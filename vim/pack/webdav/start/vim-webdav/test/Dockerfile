@@ -7,6 +7,7 @@ RUN apk add --no-cache \
     curl \
     perl \
     perl-uri \
+    python3 \
     bash \
     ruby \
     nginx \

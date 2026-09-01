@@ -63,6 +63,23 @@ function! webdav#core#parent_path(path)
   return parent
 endfunction
 
+" Walk up `levels` directories, stopping at the vault root or the server root.
+" parent_path('/') returns '/', so the walk saturates instead of running off.
+function! webdav#core#ascend(path, levels, vault_root)
+  let path = a:path
+  for _ in range(a:levels)
+    if !empty(a:vault_root) && path ==# a:vault_root
+      break
+    endif
+    let parent = webdav#core#parent_path(path)
+    if parent ==# path
+      break
+    endif
+    let path = parent
+  endfor
+  return path
+endfunction
+
 " Helper function to extract HTTP status code from response
 " Returns integer HTTP code (e.g., 200, 404, 500)
 function! webdav#core#extract_http_code(response)

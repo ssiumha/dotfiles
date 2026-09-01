@@ -122,8 +122,76 @@ Add to .bashrc or .zshrc for persistent configuration.
         :WebDAVList /
 <
     Navigation:
-      <CR>        Open file or navigate to directory (new tab)
-      ../         Navigate to parent directory
+      <space><space>  Command palette (see |webdav-palette|)
+      <CR>        Open file or navigate to directory
+      t           Open in a new tab
+      -           Go to parent directory
+      r           Reload current listing
+      F           Recursive fzf search from the current directory
+      R           Rename (MOVE)
+      D           Delete (DELETE)
+
+    The same keys are shown as a hint line at the top of every listing.
+
+                                                            *webdav-palette*
+COMMAND PALETTE                                             ~
+
+<space><space> opens a fzf palette of the WebDAV actions. It is mapped in both
+the directory listing (filetype=webdavlist) and the document buffer
+(filetype=webdav), with the same labels in each.
+
+What an action applies to depends on the buffer:
+
+      listing     the item on the line under the cursor
+      document    the file the buffer holds
+
+The header line of the palette names that target. Rename, Move to folder and
+Delete only appear when there is one, so they are hidden on the header, the
+hint line, '../', '+New' and '+Folder'.
+
+    Actions:
+      Rename            Change name or path (MOVE). A name carrying
+                        directories moves as well as renames.
+      Move to folder    Pick a destination folder with fzf, then MOVE.
+      Delete            Remove the target (DELETE).
+      New file          Create a .md file in the current directory.
+      New folder        Create a folder in the current directory (MKCOL).
+      Find file         Recursive fzf from the current directory.
+      Grep vault        |:WebDAVGrepFzf|
+      Backlinks         |:WebDAVBacklinks| (document only)
+      Recent files      |:WebDAVRecentFzf|
+      Parent listing    Browse the folder above.
+      Diff with server  |:WebDAVDiff| (document only)
+      Save              |:WebDAVPut| (document only)
+      Reload            Fetch the listing or document again.
+      Note: {pattern}   |:WebDAVNote| — one entry per key configured in
+                        |g:webdav_note_patterns|.
+
+                                                            *webdav-keys*
+KEYS SHARED BY BOTH BUFFERS                                 ~
+
+These are mapped in the directory listing (filetype=webdavlist) and the
+document buffer (filetype=webdav) alike. The <space>p family shadows the
+common :Files pickers, which point at the local filesystem and so mean
+nothing inside a WebDAV buffer.
+
+      <space><space>  Command palette (see |webdav-palette|)
+      <space>p        Recursive fzf below the current directory
+      <space>pp       Same as <space>p
+      <space>p1       Recursive fzf below the current directory
+      <space>p2       ... one directory above
+      <space>p3       ... two directories above
+      <space>p4       ... three directories above
+      <space>p5       ... four directories above
+      <space>pr       |:WebDAVGrepFzf|
+
+The digits mirror the :Files %:p:h chain, so <space>p1 is the directory
+holding the file and each further digit climbs one more level. Climbing stops
+at the vault root (see |g:webdav_vault_roots|) or the server root.
+
+For a document the current directory is the one holding the open file; for a
+listing it is the path being shown. The listing has its own keys on top of
+these — see the Navigation list under |:WebDAVList|.
 
                                                             *:WebDAVNote*
 :WebDAVNote {pattern} [offset]

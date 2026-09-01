@@ -137,4 +137,40 @@ class TestWebDAVList < TestWebDAVBase
     assert_equal dirs.sort, dirs, "Directories should be alphabetically sorted"
     assert_equal files.sort, files, "Files should be alphabetically sorted"
   end
+
+  # Test hint line renders the folder-view key bindings
+  def test_hint_line_shown
+    start_vim("WEBDAV_DEFAULT_URL" => "http://localhost:9999")
+    vim_cmd("WebDAVList /test/")
+    wait_for_text("WebDAV:")
+
+    # Header stays on line 1 so path assertions elsewhere keep working
+    assert_header '" WebDAV: http://localhost:9999/test/'
+
+    output = capture
+    assert_includes output, '" ␣␣:menu ↵:open t:tab -:up r:reload F:find R:rename D:delete',
+                    "Hint line should list the folder-view key bindings"
+  end
+
+  # Test line-item shortcuts stay inert while the cursor sits on the hint line
+  def test_shortcuts_inert_on_hint_line
+    start_vim("WEBDAV_DEFAULT_URL" => "http://localhost:9999")
+    vim_cmd("WebDAVList /test/")
+    wait_for_text("WebDAV:")
+
+    send_keys("2G")  # line 2 = hint line
+
+    send_keys("D")
+    wait_for_text("Cannot delete special items")
+
+    send_keys("R")
+    wait_for_text("Cannot rename special items")
+
+    send_enter  # <CR> on the hint line
+    sleep 0.3
+
+    output = capture
+    assert_includes output, '" WebDAV: http://localhost:9999/test/',
+                    "Enter on the hint line should keep the listing open"
+  end
 end
