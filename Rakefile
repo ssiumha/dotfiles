@@ -9,7 +9,6 @@ DOT_VIMRC = "#{Dir.home}/.vimrc"
 DOT_CONFIG = "#{Dir.home}/.config"
 DOT_CACHE = "#{Dir.home}/.cache"
 DOT_MISE = "#{Dir.home}/.local/share/mise"
-DOT_CLAUDE = "#{Dir.home}/.claude"
 
 # defaults write -g ApplePressAndHoldEnabled -bool false
 # defaults -currentHost write -g AppleFontSmoothing -int 1
@@ -41,7 +40,6 @@ task 'install:all' => [
   'install:brew:dev',
   'install:brew:extra',
   'install:vim_plugins',
-  'install:claude',
   'install:macos'
 ] do
 end
@@ -268,115 +266,4 @@ task 'install:vscode' do
   #   vscodevim.vim
   #   github.copilot
   #   github.copilot-chat
-end
-
-desc 'install claude code settings'
-task 'install:claude' do
-  FileUtils.mkdir_p DOT_CLAUDE
-
-  symlinks = {
-    'prompts/agents' => 'agents',
-    'prompts/AGENTS.md' => 'CLAUDE.md',
-    'prompts/commands' => 'commands',
-    'prompts/hooks' => 'hooks',
-    'prompts/rules' => 'rules',
-    'prompts/skills' => 'skills',
-  }
-
-  symlinks.each do |src, dest|
-    src_path = File.join(DOT_DIR, src)
-    dest_path = File.join(DOT_CLAUDE, dest)
-    pname = dest.ljust(15)
-
-    if File.symlink?(dest_path)
-      puts "#{pname} : already linked"
-    elsif File.exist?(dest_path)
-      puts "#{pname} : link failed. already exists"
-    else
-      FileUtils.ln_s src_path, dest_path
-      puts "#{pname} : now linked"
-    end
-  end
-
-  # settings.json에 statusLine 설정 추가
-  settings_path = File.join(DOT_CLAUDE, 'settings.json')
-  statusline_path = File.join(DOT_DIR, 'prompts/statusline.sh')
-
-  if File.exist?(settings_path)
-    begin
-      settings_content = JSON.parse(File.read(settings_path))
-    rescue JSON::ParserError => e
-      puts "settings.json  : invalid JSON, skipping (#{e.message})"
-      settings_content = nil
-    end
-
-    if settings_content
-      if settings_content.dig('statusLine', 'command') == statusline_path
-        puts "settings.json  : statusLine already configured"
-      else
-        settings_content['statusLine'] = {
-          'type' => 'command',
-          'command' => statusline_path
-        }
-        File.write(settings_path, JSON.pretty_generate(settings_content))
-        puts "settings.json  : statusLine updated"
-      end
-    end
-  else
-    puts "settings.json  : not found, skipping"
-  end
-
-  # marketplace plugins 설치
-  plugins = {
-    'ast-grep/claude-skill' => 'ast-grep',
-  }
-
-  # 공식 마켓플레이스 플러그인 (anthropics/claude-plugins-official)
-  official_plugins = %w[typescript-lsp pyright-lsp]
-
-  installed_plugins_path = File.join(DOT_CLAUDE, 'plugins/installed_plugins.json')
-  installed_plugins = begin
-                        data = JSON.parse(File.read(installed_plugins_path))
-                        data['plugins']&.keys || []
-                      rescue JSON::ParserError, Errno::ENOENT => e
-                        puts "plugins        : failed to read installed_plugins.json (#{e.message})"
-                        []
-                      end
-
-  plugins.each do |marketplace, plugin|
-    marketplace_name = marketplace.split('/').last.sub('-', '-marketplace')
-    plugin_key = "#{plugin}@#{marketplace_name}"
-
-    if installed_plugins.any? { |k| k.start_with?("#{plugin}@") }
-      puts "plugin         : #{plugin} already installed"
-      next
-    end
-
-    marketplace_list = `claude plugin marketplace list 2>/dev/null`
-    unless marketplace_list.include?(marketplace_name)
-      puts "marketplace    : adding #{marketplace}"
-      unless system("claude plugin marketplace add #{marketplace}")
-        puts "marketplace    : failed to add #{marketplace}, skipping"
-        next
-      end
-    end
-
-    puts "plugin         : installing #{plugin}"
-    unless system("claude plugin install #{plugin}")
-      puts "plugin         : failed to install #{plugin}"
-    end
-  end
-
-  # 공식 마켓플레이스 플러그인 설치
-  official_plugins.each do |plugin|
-    if installed_plugins.any? { |k| k.start_with?("#{plugin}@") }
-      puts "plugin         : #{plugin} already installed"
-      next
-    end
-
-    puts "plugin         : installing #{plugin} (official)"
-    unless system("claude plugin install #{plugin}")
-      puts "plugin         : failed to install #{plugin}"
-    end
-  end
 end
