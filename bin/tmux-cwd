@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# tmux-cwd: resolve the working directory of a tmux pane, then open a window/pane there.
+#
+# `#{pane_current_path}` 는 pane 의 foreground process group cwd 다. claude 가 다른
+# 저장소의 job 을 보고 있으면 그 job 의 폴더와 갈리고, 값이 비거나 사라진 디렉토리를
+# 가리키면 `split-window -c` 가 pane 을 못 만들고 조용히 끝난다.
+#
+# claude 는 지금 보고 있는 job 이름을 pane title 에 쓴다. 그 이름으로
+# `~/.claude/jobs/*/state.json` 의 cwd 를 찾으면 pane 기준으로 폴더가 잡힌다.
+# 이름이 안 걸리면 pane 경로, process tree cwd, 남은 상위 디렉토리 순으로 내려간다.
+#
+# Usage:
+#   tmux-cwd window  [pane_id]   # new-window
+#   tmux-cwd hsplit  [pane_id]   # split-window -h
+#   tmux-cwd vsplit  [pane_id]   # split-window -v
+#   tmux-cwd resolve [pane_id]   # print the resolved directory
+set -euo pipefail
+
+# run-shell 은 tmux 서버 환경을 물려받아 mise shim 이 빠질 수 있다.
+export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+
+JOBS_DIR="$HOME/.claude/jobs"
+
+ACTION="${1:-window}"
+PANE="${2:-${TMUX_PANE:-}}"
+
+pane_var() {
+  if [[ -n "$PANE" ]]; then
+    tmux display-message -p -t "$PANE" "$1"
+  else
+    tmux display-message -p "$1"
+  fi
+}
+
+proc_cwd() {
+  lsof -a -p "$1" -d cwd -Fn 2>/dev/null | awk '/^n/ { print substr($0, 2); exit }'
+}
+
+# pane 의 프로세스와 그 자손. 깊은 쪽을 먼저 낸다. foreground 가 wrapper 라
+# cwd 가 낡았을 때 실제로 일하는 자식이 먼저 걸린다.
+proc_tree() {
+  local root="$1"
+  ps -axo pid,ppid | awk -v root="$root" '
+    NR > 1 { parent[$1] = $2; pid[n++] = $1 }
+    END {
+      queue[0] = root; qn = 1; head = 0
+      while (head < qn) {
+        cur = queue[head++]
+        for (i = 0; i < n; i++) if (parent[pid[i]] == cur) queue[qn++] = pid[i]
+      }
+      for (i = qn - 1; i >= 0; i--) print queue[i]
+    }
+  '
+}
+
+# pane title 에 적힌 job 이름으로 그 job 의 cwd 를 찾는다. title 앞에는 상태 글자가
+# 붙으므로 이름과 같거나 " 이름" 으로 끝나는 것을 맞는 것으로 본다.
+job_cwd_by_title() {
+  local title states
+  title=$(pane_var '#{pane_title}')
+  [[ -n "$title" ]] || return 0
+  [[ -d "$JOBS_DIR" ]] || return 0
+
+  states=$(find "$JOBS_DIR" -maxdepth 2 -name state.json 2>/dev/null)
+  [[ -n "$states" ]] || return 0
+
+  # shellcheck disable=SC2086
+  jq -s -r --arg t "$title" '
+    map(select(type == "object" and .cwd != null and .name != null))
+    | map(select(.name as $n | $t == $n or ($t | endswith(" " + $n))))
+    | sort_by(.updatedAt // "") | reverse
+    | (.[0].cwd // empty)
+  ' $states 2>/dev/null || true
+}
+
+resolve() {
+  local path pid p job
+
+  # 1. pane 이 보고 있는 claude job 의 cwd.
+  job=$(job_cwd_by_title)
+  if [[ -n "$job" && -d "$job" ]]; then
+    printf '%s\n' "$job"
+    return
+  fi
+
+  # 2. tmux 가 보는 경로. claude 가 EnterWorktree 로 chdir 해도 여기에 따라온다.
+  path=$(pane_var '#{pane_current_path}')
+  if [[ -n "$path" && -d "$path" ]]; then
+    printf '%s\n' "$path"
+    return
+  fi
+
+  # 3. pane 의 프로세스 트리에 살아 있는 cwd.
+  pid=$(pane_var '#{pane_pid}')
+  if [[ -z "$path" && -z "$pid" ]]; then
+    tmux display-message "tmux-cwd: no such pane: ${PANE:-current}"
+    exit 1
+  fi
+  if [[ -n "$pid" ]]; then
+    while read -r p; do
+      [[ -n "$p" ]] || continue
+      local cwd
+      cwd=$(proc_cwd "$p")
+      if [[ -n "$cwd" && -d "$cwd" ]]; then
+        printf '%s\n' "$cwd"
+        return
+      fi
+    done < <(proc_tree "$pid")
+  fi
+
+  # 4. 사라진 경로의 남아 있는 상위 디렉토리.
+  p="$path"
+  while [[ -n "$p" && "$p" != "/" ]]; do
+    p=$(dirname "$p")
+    if [[ -d "$p" ]]; then
+      printf '%s\n' "$p"
+      return
+    fi
+  done
+
+  printf '%s\n' "$HOME"
+}
+
+dir=$(resolve)
+
+case "$ACTION" in
+  resolve) printf '%s\n' "$dir" ;;
+  window)  tmux new-window -c "$dir" ;;
+  hsplit)  tmux split-window -h -c "$dir" ${PANE:+-t "$PANE"} ;;
+  vsplit)  tmux split-window -v -c "$dir" ${PANE:+-t "$PANE"} ;;
+  *)       tmux display-message "tmux-cwd: unknown action: $ACTION"; exit 1 ;;
+esac
