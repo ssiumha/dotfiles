@@ -158,6 +158,8 @@ let s:actions = [
       \ {'label': 'Find file',       'desc': 'recursive fzf from here',    'when': 'always', 'run': function('s:find')},
       \ {'label': 'Grep vault',      'desc': 'search file contents',       'when': 'always', 'cmd': 'WebDAVGrepFzf'},
       \ {'label': 'Backlinks',       'desc': 'notes linking here',         'when': 'file',   'cmd': 'WebDAVBacklinks'},
+      \ {'label': 'Open asset',      'desc': 'asset:// under cursor in browser', 'when': 'file', 'cmd': 'WebDAVAssetOpen'},
+      \ {'label': 'Preview asset',   'desc': 'asset:// under cursor in a popup', 'when': 'file', 'cmd': 'WebDAVAssetPreview'},
       \ {'label': 'Recent files',    'desc': 'recently opened',            'when': 'always', 'cmd': 'WebDAVRecentFzf'},
       \ {'label': 'Parent listing',  'desc': 'browse the folder above',    'when': 'always', 'run': function('s:parent')},
       \ {'label': 'Diff with server','desc': 'compare against remote',     'when': 'file',   'cmd': 'WebDAVDiff'},
@@ -165,17 +167,36 @@ let s:actions = [
       \ {'label': 'Reload',          'desc': 'fetch again',                'when': 'always', 'run': function('s:reload')},
       \ ]
 
+" Entries contributed by other plugins. Kept apart from s:actions so this file
+" never has to name them, and so a re-source of the caller cannot duplicate the
+" built-ins.
+let s:registered = []
+
+" Let another plugin add palette entries. An entry takes the same shape as
+" s:actions: 'label', 'desc', an optional 'when' (defaulting to 'always'), and
+" either a 'cmd' string or a 'run' Funcref taking ctx.
+function! webdav#palette#register(entry) abort
+  call add(s:registered, a:entry)
+endfunction
+
+function! s:visible(action, ctx) abort
+  let when = get(a:action, 'when', 'always')
+  if when ==# 'target' && empty(a:ctx.target)
+    return 0
+  endif
+  if when ==# 'file' && a:ctx.kind !=# 'file'
+    return 0
+  endif
+  return 1
+endfunction
+
 function! s:entries(ctx) abort
   let entries = []
 
-  for action in s:actions
-    if action.when ==# 'target' && empty(a:ctx.target)
-      continue
+  for action in s:actions + s:registered
+    if s:visible(action, a:ctx)
+      call add(entries, action)
     endif
-    if action.when ==# 'file' && a:ctx.kind !=# 'file'
-      continue
-    endif
-    call add(entries, action)
   endfor
 
   " Note entries come from the user's g:webdav_note_patterns rather than a list
@@ -184,6 +205,15 @@ function! s:entries(ctx) abort
     call add(entries, {'label': 'Note: ' . name, 'desc': 'open or create',
           \ 'when': 'always', 'cmd': 'WebDAVNote ' . name})
   endfor
+
+  " Asset patterns come from the same place for the same reason. These entries
+  " are appended past s:visible(), so the document-only check happens here.
+  if a:ctx.kind ==# 'file'
+    for name in sort(keys(get(g:, 'webdav_asset_patterns', {})))
+      call add(entries, {'label': 'Paste image: ' . name, 'desc': 'upload clipboard image',
+            \ 'when': 'file', 'cmd': 'WebDAVPasteImage ' . name})
+    endfor
+  endif
 
   return entries
 endfunction

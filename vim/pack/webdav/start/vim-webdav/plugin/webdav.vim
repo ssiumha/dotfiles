@@ -10,9 +10,26 @@ let g:webdav_preview_use_bat = get(g:, 'webdav_preview_use_bat', 1)
 let g:webdav_fzf_max_depth = get(g:, 'webdav_fzf_max_depth', 3)
 let g:webdav_vault_roots = get(g:, 'webdav_vault_roots', {})
 
+" Asset settings. The clipboard command takes the destination path as %s, so a
+" different reader (or a test fixture) drops in without touching the plugin.
+let g:webdav_asset_patterns = get(g:, 'webdav_asset_patterns', {})
+let g:webdav_asset_clipboard_cmd = get(g:, 'webdav_asset_clipboard_cmd', 'pngpaste %s')
+
 " Public wrapper for webdav#file#get (called from autoload/webdav/fzf.vim)
 function! WebDAVGet(path, server_name = '')
   call webdav#file#get(a:path, a:server_name)
+endfunction
+
+" p and P are core editing keys, so losing the asset module must not cost the
+" reader a paste. E117 is what a stale session looks like: vim sources an
+" autoload script once, so a function added after that script was first loaded
+" stays invisible until vim restarts.
+function! WebDAVPasteOrPut(key)
+  try
+    call webdav#asset#put(a:key)
+  catch /E117/
+    execute 'normal! "' . v:register . v:count1 . a:key
+  endtry
 endfunction
 
 " Public wrapper for webdav#ui#list (called from autoload/webdav/operations.vim)
@@ -34,6 +51,9 @@ command! -nargs=0 WebDAVFollowLink call webdav#wikilink#open()
 command! -nargs=1 WebDAVGrep call webdav#search#grep(<q-args>)
 command! WebDAVGrepFzf call webdav#search#grep_fzf()
 command! WebDAVBacklinks call webdav#search#backlinks()
+command! -nargs=? WebDAVPasteImage call webdav#asset#paste(<q-args>)
+command! WebDAVAssetOpen call webdav#asset#open()
+command! WebDAVAssetPreview call webdav#asset#preview()
 
 " Setup autocmd for WebDAV buffers (ONLY for webdav:// protocol buffers)
 augroup webdav_buffers

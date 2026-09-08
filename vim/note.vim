@@ -95,9 +95,10 @@ function! NoteDashboard() abort
   let g:_dashboard_opening = 0
 endfunction
 
+" Every dashboard command opens in its own tab, so the dashboard is left where
+" it is rather than wiped. Closing that tab lands back on it.
 function! s:DashboardRun(cmd) abort
   let g:_dashboard_opening = 1
-  bwipeout
   execute a:cmd
   let g:_dashboard_opening = 0
 endfunction
@@ -190,7 +191,6 @@ augroup MyMarkdown
   autocmd FileType markdown,webdav nnoremap <buffer> <C-c>. :PickDateAtCursor<CR>
   autocmd FileType markdown,webdav inoremap <buffer> <C-c>. <c-o>:PickDateAtCursor<CR>
 
-  autocmd FileType markdown,webdav inoremap <buffer> [[ <C-o>:call LocalLinkFzf()<CR>
   autocmd FileType markdown,webdav let b:complete_chain = ['NoteComplete', 'SnippetComplete']
   autocmd FileType markdown,webdav inoremap <buffer><expr> <C-n> NoteSmartCN()
   autocmd FileType markdown,webdav inoremap <buffer><expr> <C-p> NoteSmartCP()

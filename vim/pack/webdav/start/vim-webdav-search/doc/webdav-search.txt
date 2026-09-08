@@ -1,0 +1,205 @@
+*webdav-search.txt*  Search a vault through an index API
+
+==============================================================================
+CONTENTS                                              *webdav-search-contents*
+
+    1. Why a separate plugin ............ |webdav-search-why|
+    2. Configuration .................... |webdav-search-config|
+    3. Commands ......................... |webdav-search-commands|
+    4. Modes and scope .................. |webdav-search-modes|
+    5. Keys and palette ................. |webdav-search-keys|
+    6. Staleness ........................ |webdav-search-staleness|
+    7. The API .......................... |webdav-search-api|
+
+==============================================================================
+1. WHY A SEPARATE PLUGIN                                   *webdav-search-why*
+
+WebDAV reads and writes files. It has no search, so |vim-webdav| answers a
+content query by fetching every note and grepping it one at a time. Searching
+needs an index, and the index lives behind an HTTP API.
+
+This plugin talks to that API. Results open as `webdav://` buffers through
+|vim-webdav|, so the two read as one workflow without being one plugin.
+
+The dependency runs one way. This plugin calls vim-webdav; vim-webdav does not
+know this plugin exists. It attaches through two seams:
+
+    WebDAVGet()                 opening a result
+    webdav#palette#register()   contributing palette entries
+
+vim-webdav keeps its own |:WebDAVGrep| and friends. They stay useful where no
+index is reachable.
+
+==============================================================================
+2. CONFIGURATION                                        *webdav-search-config*
+
+                                                        *g:webdav_search_url*
+The base URL of the index API. Empty by default, and empty means this plugin
+registers nothing at all: no commands, no keys, no palette entries.
+
+Set it outside this repository, beside your `$WEBDAV_UI_*` values: >
+    let g:webdav_search_url = '...'
+<
+`$WEBDAV_SEARCH_URL` is read when the variable is unset, so the address can
+live in the environment instead.
+
+                                                     *g:webdav_search_server*
+Name of the WebDAV server results are opened on. Default `home`. Its root has
+to be the vault root, because the API returns vault-relative paths and this
+plugin prefixes them with `/`.
+
+                                                      *g:webdav_search_limit*
+Maximum results per request. Default 200.
+
+                                               *g:webdav_search_exclude_tags*
+Tags whose notes stay out of search results. A list, empty by default. Which
+tags to hide is a property of your vault, so the list belongs beside the
+address: >
+    let g:webdav_search_exclude_tags = ['...']
+<
+Naming one of these tags outright in |:WebDAVSearchTags| overrides the
+exclusion, because picking a tag and then seeing nothing would be a lie.
+
+==============================================================================
+3. COMMANDS                                           *webdav-search-commands*
+
+                                                             *:WebDAVSearch*
+:WebDAVSearch
+    Live search below the folder you are in. Every keystroke re-asks the index,
+    so fzf does no filtering of its own and the server decides what matches.
+
+        <Tab>     switch between title and content (see |webdav-search-modes|)
+        <C-a>     widen to the whole vault, keeping the mode and the query
+
+:WebDAVSearch {query}
+    Answer once into |quickfix|. Entries carry `webdav://` names, so <CR>
+    opens the note on the server. A query given here searches titles and
+    contents both, since there is no <Tab> to press.
+
+:WebDAVSearch!
+:WebDAVSearch! {query}
+    The same, over the whole vault.
+
+                                                       *webdav-search-modes*
+The picker opens on **titles**, because that is how you look for a note you
+know exists. A title is any name the note goes by:
+
+        filename    notes/Example.md matches `example`
+        aliases     an `aliases:` entry in the frontmatter
+        headings    a `#` line inside the note
+
+<Tab> switches to **content**, which reads note bodies and reports the
+matching line. <Tab> again comes back. The query is carried across, so you can
+start by name and fall through to full text without retyping.
+
+                                                       *webdav-search-scope*
+The folder is taken from the buffer: the one holding the open note, or the
+path a listing is showing. It is measured against the vault root rather than
+the buffer's own server, so a note opened through a server rooted part-way
+down the vault still scopes to where it actually lives.
+
+The prompt names the mode and the scope together, so both are visible while
+you type: `Title(notes/)>`, `Content(all)>`.
+
+                                                    *:WebDAVSearchBacklinks*
+:WebDAVSearchBacklinks
+    Notes linking to the open one, into quickfix. Alias links
+    (`[[target|alias]]`), heading links and markdown links all count, which is
+    what separates this from vim-webdav's |:WebDAVBacklinks|.
+
+                                                        *:WebDAVSearchLinks*
+:WebDAVSearchLinks [state]
+    Links the open note points at. `state` is `all` (default), `resolved`, or
+    `unresolved`; the last is the broken-link check.
+
+                                                         *:WebDAVSearchTags*
+:WebDAVSearchTags
+    Pick a tag, then list the notes carrying it.
+
+                                                   *:WebDAVSearchInsertLink*
+:WebDAVSearchInsertLink
+    Pick a note and drop a `[[wikilink]]` to it at the cursor. Searches the
+    whole vault in title mode, since when you are writing you link to
+    anything, not only to what is nearby.
+
+    What goes in depends on what matched:
+
+        filename    `[[Example]]`
+        heading     `[[Example#Heading]]`    points inside the note
+        alias       `[[Example|별칭]]`       shows the alias, links the file
+
+    Always a basename, so moving the note later does not break the link.
+
+                                                           *:WebDAVSearchIn*
+:WebDAVSearchIn {server} [query]
+    Search one server's subtree, named rather than taken from the buffer.
+    `{server}` is a `$WEBDAV_UI_*` name and completes; it has to sit under the
+    vault root. Without a query this opens the live picker.
+
+    This is what a caller outside any WebDAV buffer uses, a start screen for
+    instance, since there is no folder there to scope to: >
+        :WebDAVSearchIn notes
+        :WebDAVSearchIn notes example
+<
+
+==============================================================================
+4. KEYS AND PALETTE                                       *webdav-search-keys*
+
+In `webdav` and `webdavlist` buffers:
+
+    <space>pr       |:WebDAVSearch|    below the current folder
+    <space>pR       |:WebDAVSearch!|   the whole vault
+
+In `webdav` document buffers, insert mode:
+
+    <C-c><C-k>      |:WebDAVSearchInsertLink|
+
+A listing is nomodifiable, so the link key is not mapped there. `<C-c><C-k>`
+joins the `<C-c>` family note.vim already uses for `SmartLink` and
+`PickDateAtCursor`.
+
+The mapping is added through a FileType autocmd, which runs after vim-webdav's
+ftplugin, so it takes the key over. Without |g:webdav_search_url| nothing is
+mapped and <space>pr keeps vim-webdav's own picker.
+
+The palette (|webdav-palette|) gains six entries, marked `Search:` to
+separate them from the WebDAV-only ones:
+
+    Search: contents (here)     |:WebDAVSearch|
+    Search: contents (vault)    |:WebDAVSearch!|
+    Search: tags                |:WebDAVSearchTags|
+    Search: backlinks           |:WebDAVSearchBacklinks|   (document buffers)
+    Search: links               |:WebDAVSearchLinks|       (document buffers)
+    Search: insert link         |:WebDAVSearchInsertLink|  (document buffers)
+
+==============================================================================
+5. STALENESS                                         *webdav-search-staleness*
+
+The index is built from a copy of the vault and can lag it. A note written
+moments ago may be missing from every result here.
+
+That is why each answer reports the index it came from: the timestamp shown
+beside a result count is `indexed_at`. When a fresh note does not appear, that
+line is the reason.
+
+Nothing in this plugin is authoritative about whether a note exists. Renaming,
+moving and following a wikilink all stay with vim-webdav, which reads the
+server live.
+
+==============================================================================
+6. THE API                                                 *webdav-search-api*
+
+The contract is `doc/vault-search-api.openapi.yaml` in this plugin. It defines
+four read-only endpoints: >
+    GET /api/vault/search       note contents, by text or tag
+    GET /api/vault/backlinks    incoming links
+    GET /api/vault/links        outgoing links
+    GET /api/vault/tags         tag vocabulary with counts
+<
+Every endpoint answers JSON by default and newline-delimited JSON with
+`?format=ndjson`, which is what the live picker streams.
+
+The spec carries no host, no server list and no deployment detail: only inputs
+and outputs. The address belongs in your configuration.
+
+ vim:tw=78:ts=8:ft=help:norl:

@@ -159,6 +159,8 @@ hint line, '../', '+New' and '+Folder'.
       Find file         Recursive fzf from the current directory.
       Grep vault        |:WebDAVGrepFzf|
       Backlinks         |:WebDAVBacklinks| (document only)
+      Open asset        |:WebDAVAssetOpen| (document only)
+      Preview asset     |:WebDAVAssetPreview| (document only)
       Recent files      |:WebDAVRecentFzf|
       Parent listing    Browse the folder above.
       Diff with server  |:WebDAVDiff| (document only)
@@ -166,6 +168,8 @@ hint line, '../', '+New' and '+Folder'.
       Reload            Fetch the listing or document again.
       Note: {pattern}   |:WebDAVNote| — one entry per key configured in
                         |g:webdav_note_patterns|.
+      Paste image: {p}  |:WebDAVPasteImage| — one entry per key configured in
+                        |g:webdav_asset_patterns| (document only).
 
                                                             *webdav-keys*
 KEYS SHARED BY BOTH BUFFERS                                 ~
@@ -223,6 +227,129 @@ these — see the Navigation list under |:WebDAVList|.
       unit          Time unit: 'day', 'week', 'month'
 
     See also: |strftime()|
+
+                                                      *:WebDAVPasteImage*
+:WebDAVPasteImage [pattern]
+    Upload the clipboard image to the asset server and insert a reference to
+    it at the cursor. Works only in a document buffer. Without an argument the
+    pattern named 'default' is used.
+
+    Mapped to CTRL-C CTRL-V in normal and insert mode.
+
+    `p` and `P` also reach it, but only when the register they would paste is
+    empty — which is exactly what an image on the clipboard looks like under
+    'clipboard' unnamed/unnamedplus. Text on the clipboard still pastes. A
+    count and a named register are honoured, so "a2p behaves as always.
+
+    A terminal does not hand Cmd-V to vim: it pastes the clipboard's text as
+    key input, and an image carries no text, so nothing arrives and there is
+    nothing to map. `p` is the closest gesture that works.
+
+    The reference is `![](asset://<path>)`, the form the Obsidian plugin
+    obsidian-asset-manager writes and renders. Naming and hashing follow that
+    plugin so both clients produce the same file name for the same bytes: the
+    path is `<prefix>/<slug>-<hash8>.webp`, where slug is the note's parent
+    folder name and basename and hash8 is the first 8 hex characters of the
+    SHA-256 of the stored bytes. Pasting the same image twice therefore
+    resolves to the same path and skips the second upload.
+
+    Example: >
+        :WebDAVPasteImage           " the 'default' pattern
+        :WebDAVPasteImage diagram
+<
+    Configuration: >
+        let g:webdav_asset_patterns = {}
+        let g:webdav_asset_patterns.default = {
+          \ 'server': 'asset',
+          \ 'prefix': 'vim/%Y/%m',
+          \ 'max_width': 2048,
+          \ 'target_bytes': 512000,
+          \ 'quality': 82
+          \ }
+<
+                                                  *g:webdav_asset_patterns*
+    Pattern fields:
+      server        Server name (empty for default). Its URL must equal the
+                    asset-manager store's serverUrl plus rootPath, because
+                    asset:// paths are relative to that root.
+      prefix        Folder below the asset root, strftime-expanded. Give it a
+                    leading segment of its own to tell vim uploads apart from
+                    the ones Obsidian makes. Default '%Y/%m'.
+      store         Store alias for a non-default asset-manager store. Set it
+                    and the reference becomes `asset://<store>@<path>`.
+                    Omit it for the default store.
+      max_width     Shrink images wider than this. Default 2048.
+      target_bytes  Re-encode when the first pass exceeds this. Default
+                    512000. Set 0 to skip the second pass.
+      quality       cwebp quality of the first pass. Default 82.
+
+                                                *g:webdav_asset_clipboard_cmd*
+    The clipboard reader, with %s standing for the destination path. Default
+    'pngpaste %s'. Any command that writes an image file works: >
+        let g:webdav_asset_clipboard_cmd = 'wl-paste --type image/png > %s'
+<
+    Requirements:
+      pngpaste      Reads the clipboard image. Install it separately.
+      cwebp         Converts to webp. Without it the original is uploaded
+                    unchanged and the message says so.
+
+    Note: asset-manager reads everything before the first '@' in a reference
+    as a store name, so a note title containing '@' produces a path it cannot
+    resolve. The naming rule is that plugin's, and this command follows it
+    rather than diverging and breaking dedup.
+
+                                                       *:WebDAVAssetOpen*
+:WebDAVAssetOpen
+    Open the asset:// reference under the cursor in the system browser,
+    resolved to the https URL that serves it. Works only in a document buffer.
+
+    Mapped to `gx`, the vim convention for opening what the cursor points at.
+
+    The store qualifier decides which pattern resolves the URL: no qualifier
+    uses the 'default' pattern, and `<store>@` uses the pattern whose 'store'
+    field matches, falling back to the pattern of that name. The URL carries
+    no credentials, so a server behind Basic auth prompts in the browser.
+
+                                                    *:WebDAVAssetPreview*
+:WebDAVAssetPreview
+    Show the asset:// reference under the cursor as a picture in a popup,
+    without leaving the note. Works only in a document buffer.
+
+    Mapped to `K`, the vim convention for looking up what the cursor points at.
+    Any key or a cursor move closes the popup.
+
+    A popup draws characters, not pixels, so the picture is carried by glyphs.
+    Enough to tell one screenshot from another at a glance; use
+    |:WebDAVAssetOpen| when you need the real thing.
+
+                                                *g:webdav_asset_preview_style*
+    Which glyphs carry the picture. Default "color".
+
+      color    An upper half block per cell, its top half painted in the
+               foreground and its bottom half in the background, so one cell
+               shows two pixels in colour. Colours are quantised to the
+               xterm 216 cube, which serves both a 256-colour terminal and
+               the MacVim GUI from one number. Each colour pair becomes a
+               highlight group; a screenshot at the default width needs a few
+               hundred.
+      braille  2x4 dots per cell, so a cell carries eight samples instead of
+               two. The finest detail of the three, but monochrome: tone
+               arrives as dot density from dithering.
+      blocks   Five shades of block per cell. The coarsest, and the only one
+               that needs neither colour nor a dither pattern to read.
+
+                                                *g:webdav_asset_preview_width*
+    Width of the rendering in cells. Default 48. The height follows the
+    image's proportions; each style samples a cell differently, so the
+    conversion accounts for a terminal cell being about twice as tall as it
+    is wide.
+
+    Only the extensions asset-manager treats as images are rendered (png, jpg,
+    jpeg, gif, webp, svg, avif, bmp); anything else says so and stops. A PDF
+    would need ghostscript, and `gx` already opens it.
+
+    Requires `magick` (ImageMagick). Renderings are cached per reference for
+    the session, because a reference always points at the same bytes.
 
                                                             *:WebDAVPut*
 :WebDAVPut

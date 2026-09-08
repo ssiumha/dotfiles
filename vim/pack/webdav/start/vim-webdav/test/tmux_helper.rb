@@ -1,5 +1,8 @@
 # Helper methods for tmux + Docker testing
 module TmuxHelper
+  # The command is wrapped in single quotes here, so a ' inside it ends the
+  # quoting and its contents reach the shell unquoted. Write vim strings with
+  # \\\" rather than ' — see test_wikilink.rb for the shape.
   def docker_exec(cmd)
     `docker exec #{@container} sh -c '#{cmd}'`
   end

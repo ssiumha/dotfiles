@@ -1,0 +1,491 @@
+openapi: 3.1.0
+info:
+  title: Vault Search API
+  version: 1.0.0
+  description: |
+    Read-only search over an Obsidian vault.
+
+    Every response reports the index that answered it. An index may lag the
+    vault it was built from, so a recently written note can be absent from
+    every response here; `IndexInfo` is what lets a client say so rather than
+    guess. Nothing in this API is authoritative about whether a note exists.
+
+    Path conventions, applying to every `path` in this document:
+      - vault-relative, no leading slash, `/` separated (`notes/Example.md`)
+      - UTF-8, Unicode NFC normalized on both request and response
+      - ordinary query-string percent-encoding, decoded once
+
+tags:
+  - name: search
+  - name: links
+  - name: tags
+
+paths:
+  /api/vault/search:
+    get:
+      tags: [search]
+      operationId: searchVault
+      summary: Search note contents
+      description: |
+        Returns one entry per match. A note matching several times yields
+        several entries.
+
+        `q` and `tag` may be combined; results then satisfy both. At least one
+        of the two is required.
+
+        `in` chooses what `q` is matched against. `content` reads note bodies
+        and each entry is a matching line. `title` reads the names a note goes
+        by — its filename, its `aliases`, and its markdown headings — and each
+        entry is one of those. `all` is the union.
+
+        Every entry keeps the same shape either way, so a client can switch
+        between the two by changing this one parameter. `matched_in` says which
+        kind of match an entry is. For a `filename` or `alias` match there is no
+        line to point at, so `line` is 1 and `text` carries the name that
+        matched; a `heading` match points at the heading's own line.
+      parameters:
+        - name: q
+          in: query
+          description: Query text. Interpreted per `mode`.
+          schema: { type: string, minLength: 1 }
+        - name: in
+          in: query
+          description: |
+            What `q` is matched against. Defaults to `content`, which is what a
+            caller that predates this parameter expects.
+          schema:
+            type: string
+            enum: [content, title, all]
+            default: content
+        - name: mode
+          in: query
+          description: |
+            `substring` matches literally. `regex` interprets `q` as a regular
+            expression; an invalid pattern is a 400.
+          schema:
+            type: string
+            enum: [substring, regex]
+            default: substring
+        - name: case_sensitive
+          in: query
+          schema: { type: boolean, default: false }
+        - name: tag
+          in: query
+          description: |
+            Restrict to notes carrying this tag. Repeatable; repeats are ANDed.
+            Given without a leading `#`. Nested tags match by prefix, so
+            `infra` also matches `infra/k8s`.
+          schema:
+            type: array
+            items: { type: string }
+          explode: true
+        - name: exclude_tag
+          in: query
+          description: |
+            Drop notes carrying this tag. Repeatable; repeats accumulate. Given
+            without a leading `#`, and nested tags match by prefix the same way
+            `tag` does. Applied after `tag`, so naming the same value in both
+            yields nothing.
+          schema:
+            type: array
+            items: { type: string }
+          explode: true
+        - name: path
+          in: query
+          description: |
+            Restrict to notes whose path starts with this prefix
+            (`notes/`). Repeatable; repeats are ORed.
+          schema:
+            type: array
+            items: { type: string }
+          explode: true
+        - name: ext
+          in: query
+          description: File extensions to search, without the dot.
+          schema:
+            type: array
+            items: { type: string }
+            default: [md]
+          explode: true
+        - name: context
+          in: query
+          description: Lines of surrounding context to include on each side.
+          schema: { type: integer, minimum: 0, maximum: 10, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, ndjson]
+            default: json
+      responses:
+        '200':
+          description: |
+            Matches ordered by `score` descending, ties broken by `path`
+            ascending, so paging stays stable.
+          headers:
+            X-Vault-Commit: { $ref: '#/components/headers/XVaultCommit' }
+            X-Vault-Indexed-At: { $ref: '#/components/headers/XVaultIndexedAt' }
+            X-Result-Total: { $ref: '#/components/headers/XResultTotal' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, total, index]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/SearchHit' }
+                  total:
+                    type: integer
+                    description: Matches before `limit`/`offset`.
+                  index: { $ref: '#/components/schemas/IndexInfo' }
+            application/x-ndjson:
+              schema: { $ref: '#/components/schemas/SearchHit' }
+              description: |
+                One `SearchHit` object per line, emitted as matches are found
+                rather than buffered, so a client can consume the response
+                while it is still arriving. The envelope fields are carried in
+                the response headers instead.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '503': { $ref: '#/components/responses/IndexUnavailable' }
+
+  /api/vault/backlinks:
+    get:
+      tags: [links]
+      operationId: getBacklinks
+      summary: Notes linking to a note
+      description: |
+        Returns one entry per link occurrence, so a note linking twice appears
+        twice.
+
+        `path` names the note exactly; `name` matches by basename anywhere in
+        the vault and also matches `aliases` from frontmatter, which is how
+        `[[별칭]]` is found as a backlink of `notes/Example.md`. Exactly one of
+        the two is required.
+      parameters:
+        - name: path
+          in: query
+          schema: { type: string }
+          example: notes/Example.md
+        - name: name
+          in: query
+          description: Basename without extension, or an alias.
+          schema: { type: string }
+          example: Example
+        - name: kind
+          in: query
+          description: Restrict to certain link syntaxes.
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/LinkKind' }
+          explode: true
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, ndjson], default: json }
+      responses:
+        '200':
+          description: Incoming links.
+          headers:
+            X-Vault-Commit: { $ref: '#/components/headers/XVaultCommit' }
+            X-Vault-Indexed-At: { $ref: '#/components/headers/XVaultIndexedAt' }
+            X-Result-Total: { $ref: '#/components/headers/XResultTotal' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, total, index]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/LinkOccurrence' }
+                  total: { type: integer }
+                  index: { $ref: '#/components/schemas/IndexInfo' }
+            application/x-ndjson:
+              schema: { $ref: '#/components/schemas/LinkOccurrence' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NoteNotFound' }
+        '503': { $ref: '#/components/responses/IndexUnavailable' }
+
+  /api/vault/links:
+    get:
+      tags: [links]
+      operationId: getOutgoingLinks
+      summary: Links a note points at
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+          example: notes/Example.md
+        - name: state
+          in: query
+          description: |
+            `unresolved` returns only links whose target does not exist, which
+            is what a broken-link check wants.
+          schema:
+            type: string
+            enum: [all, resolved, unresolved]
+            default: all
+        - name: kind
+          in: query
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/LinkKind' }
+          explode: true
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, ndjson], default: json }
+      responses:
+        '200':
+          description: Outgoing links, in document order.
+          headers:
+            X-Vault-Commit: { $ref: '#/components/headers/XVaultCommit' }
+            X-Vault-Indexed-At: { $ref: '#/components/headers/XVaultIndexedAt' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, total, index]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/LinkOccurrence' }
+                  total: { type: integer }
+                  index: { $ref: '#/components/schemas/IndexInfo' }
+            application/x-ndjson:
+              schema: { $ref: '#/components/schemas/LinkOccurrence' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NoteNotFound' }
+        '503': { $ref: '#/components/responses/IndexUnavailable' }
+
+  /api/vault/tags:
+    get:
+      tags: [tags]
+      operationId: listTags
+      summary: Tag vocabulary with counts
+      description: |
+        Counts both frontmatter `tags:` entries and inline `#tag` occurrences.
+
+        An inline tag is `#` followed by at least one non-numeric character,
+        with `/` allowed for nesting. A purely numeric `#288` is not a tag.
+      parameters:
+        - name: prefix
+          in: query
+          description: Only tags starting with this string.
+          schema: { type: string }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [name, count], default: count }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 2000, default: 500 }
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, ndjson], default: json }
+      responses:
+        '200':
+          description: Tags in the vault.
+          headers:
+            X-Vault-Commit: { $ref: '#/components/headers/XVaultCommit' }
+            X-Vault-Indexed-At: { $ref: '#/components/headers/XVaultIndexedAt' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, total, index]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/TagCount' }
+                  total: { type: integer }
+                  index: { $ref: '#/components/schemas/IndexInfo' }
+            application/x-ndjson:
+              schema: { $ref: '#/components/schemas/TagCount' }
+        '503': { $ref: '#/components/responses/IndexUnavailable' }
+
+components:
+  headers:
+    XVaultCommit:
+      description: Source revision the index was built from.
+      schema: { type: string }
+      example: 4f2c1ab9d3e5c7180a2b6f4d8e1c9a3b5d7f0e2c
+    XVaultIndexedAt:
+      description: When the index was last built, RFC 3339.
+      schema: { type: string, format: date-time }
+    XResultTotal:
+      description: Matches before `limit`/`offset`. Carries the envelope's `total` for ndjson clients.
+      schema: { type: integer }
+
+  schemas:
+    IndexInfo:
+      type: object
+      description: |
+        Identifies the index that answered the request, so a client can tell a
+        missing note from a stale index.
+      required: [commit, indexed_at, note_count]
+      properties:
+        commit:
+          type: string
+          description: Source revision the index was built from.
+        indexed_at: { type: string, format: date-time }
+        note_count: { type: integer }
+
+    SearchHit:
+      type: object
+      required: [path, line, text]
+      properties:
+        path:
+          type: string
+          example: notes/Example.md
+        title:
+          type: string
+          description: First H1 if present, otherwise the basename without extension.
+          example: Example
+        line:
+          type: integer
+          description: 1-based line number of the match.
+          example: 22
+        column:
+          type: integer
+          description: 1-based byte column of the match start.
+        text:
+          type: string
+          description: The matching line, verbatim from the file, not normalized or highlighted.
+          example: '- 예시 문서의 한 줄입니다.'
+        context_before:
+          type: array
+          items: { type: string }
+          description: Present when `context` > 0.
+        context_after:
+          type: array
+          items: { type: string }
+        score:
+          type: number
+          format: double
+          description: Relevance in 0..1, used for ordering.
+        matched_in:
+          type: string
+          enum: [content, filename, alias, heading]
+          description: |
+            Which part of the note matched. Present whenever `in` was given.
+            `filename` and `alias` matches carry `line: 1` and put the matching
+            name in `text`; `heading` carries the heading's line and text.
+
+    LinkKind:
+      type: string
+      enum: [wikilink, markdown, frontmatter]
+      description: |
+        `wikilink` — `[[target]]`, `[[target|alias]]`, `[[target#heading]]`,
+        `[[target#^block]]`, and the `![[...]]` embed form.
+        `markdown` — `[text](target)`.
+        `frontmatter` — a property whose whole value is a wikilink, such as
+        `project: "[[pj-foo]]"`. A wikilink embedded in a longer value is not
+        a link and is not counted.
+
+    Link:
+      type: object
+      required: [raw, target, kind, embed]
+      properties:
+        raw:
+          type: string
+          description: The link exactly as written.
+          example: '[[Example|별칭]]'
+        target:
+          type: string
+          description: Target as written, before resolution.
+          example: Example
+        alias:
+          type: [string, 'null']
+          example: 별칭
+        heading:
+          type: [string, 'null']
+          description: The `#heading` part, when present.
+        block:
+          type: [string, 'null']
+          description: The `#^block` anchor, when present.
+        kind: { $ref: '#/components/schemas/LinkKind' }
+        embed:
+          type: boolean
+          description: True for `![[...]]`.
+
+    LinkOccurrence:
+      type: object
+      description: |
+        One link, at the place it is written. For backlinks `path` is the note
+        holding the link; for outgoing links it is the note being asked about.
+      required: [path, line, text, link]
+      properties:
+        path: { type: string }
+        title: { type: string }
+        line: { type: integer }
+        text:
+          type: string
+          description: The line holding the link, verbatim.
+        link: { $ref: '#/components/schemas/Link' }
+        resolved_path:
+          type: [string, 'null']
+          description: |
+            Vault path the target resolves to, or null when nothing matches —
+            a broken link.
+          example: notes/Example.md
+        matched_by:
+          type: [string, 'null']
+          enum: [path, basename, alias, null]
+          description: |
+            How the target was resolved. `alias` says the link used a
+            frontmatter alias rather than the filename.
+
+    TagCount:
+      type: object
+      required: [tag, count]
+      properties:
+        tag:
+          type: string
+          description: Without the leading `#`.
+          example: infra/k8s
+        count:
+          type: integer
+          description: Total occurrences.
+        note_count:
+          type: integer
+          description: Distinct notes carrying it.
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Short machine-readable reason.
+        detail:
+          type: string
+          description: Human-readable explanation.
+
+  responses:
+    BadRequest:
+      description: Missing or malformed parameter, including an invalid regex.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoteNotFound:
+      description: No note matches the given `path` or `name`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    IndexUnavailable:
+      description: Index is building or unreadable.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

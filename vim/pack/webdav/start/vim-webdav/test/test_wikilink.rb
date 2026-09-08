@@ -76,7 +76,7 @@ class TestWikilink < TestWebDAVBase
     start_vim("WEBDAV_DEFAULT_URL" => "http://localhost:9999", "WEBDAV_TEST_MODE" => "1")
 
     # Set vault_root for absolute path resolution
-    vim_cmd("let g:webdav_vault_roots = {'default': '/vault'}")
+    vim_cmd("let g:webdav_vault_roots = {\\\"default\\\": \\\"/vault\\\"}")
 
     # First: Open notes index
     vim_cmd("WebDAVGet /vault/notes/index.md")
@@ -128,23 +128,23 @@ class TestWikilink < TestWebDAVBase
     start_vim("WEBDAV_DEFAULT_URL" => "http://localhost:9999", "WEBDAV_TEST_MODE" => "1")
 
     # Set vault_root
-    vim_cmd("call TestSetVaultRoot('default', '/vault')")
+    vim_cmd("call TestSetVaultRoot(\\\"default\\\", \\\"/vault\\\")")
     sleep 0.1
 
     # Verify vault_root is set
-    vim_cmd("echo TestWikilinkGetVaultRoot('')")
+    vim_cmd("echo TestWikilinkGetVaultRoot(\\\"\\\")")
     sleep 0.2
     output = capture
     assert_includes output, "/vault", "Should return configured vault root"
 
     # Test absolute path resolution
-    vim_cmd("echo TestWikilinkResolve('/notes/index.md', '/vault/projects/todo.md', '/vault')")
+    vim_cmd("echo TestWikilinkResolve(\\\"/notes/index.md\\\", \\\"/vault/projects/todo.md\\\", \\\"/vault\\\")")
     sleep 0.2
     output = capture
     assert_includes output, "/vault/notes/index.md", "Absolute path should resolve relative to vault root"
 
     # Test relative path resolution
-    vim_cmd("echo TestWikilinkResolve('../index.md', '/vault/notes/daily/note.md', '/vault')")
+    vim_cmd("echo TestWikilinkResolve(\\\"../index.md\\\", \\\"/vault/notes/daily/note.md\\\", \\\"/vault\\\")")
     sleep 0.2
     output = capture
     assert_includes output, "/vault/notes/index.md", "Relative path should resolve from current dir"
@@ -157,9 +157,9 @@ class TestWikilink < TestWebDAVBase
     # Create buffer with heading anchor link
     vim_cmd("enew")
     vim_cmd("let b:webdav_managed = 1")
-    vim_cmd("let b:webdav_original_path = '/test.md'")
-    vim_cmd("let b:webdav_server = ''")
-    vim_cmd("call setline(1, '[[target#section]]')")
+    vim_cmd("let b:webdav_original_path = \\\"/test.md\\\"")
+    vim_cmd("let b:webdav_server = \\\"\\\"")
+    vim_cmd("call setline(1, \\\"[[target#section]]\\\")")
     vim_cmd("call cursor(1, 5)")
     sleep 0.1
 

@@ -183,4 +183,25 @@ class TestWebDAVPalette < TestWebDAVBase
     assert_includes output, "Not a WebDAV buffer",
                     "Recent buffer uses filetype=webdavlist but keeps no path"
   end
+
+  # Test another plugin can contribute an entry without palette.vim naming it
+  def test_registered_entry_appears
+    start_vim("WEBDAV_DEFAULT_URL" => "http://localhost:9999")
+
+    # Double quotes only: single quotes do not survive docker exec sh -c
+    vim_cmd('call webdav#palette#register({\"label\": \"Probe entry\", \"desc\": \"contributed from outside\", \"cmd\": \"echo\"})')
+    sleep 0.3
+
+    vim_cmd("WebDAVList /test/")
+    wait_for_text("file1.txt")
+
+    send_palette_key
+    wait_for_text("WebDAV>", 3)
+
+    palette_query("Probe entry")
+    wait_for_text("contributed from outside", 2)
+
+    assert_includes capture, "contributed from outside",
+                    "A registered entry should show up in the palette"
+  end
 end
