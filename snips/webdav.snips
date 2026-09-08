@@ -1,0 +1,5 @@
+snippet aliases ""
+aliases:
+  - TMP
+  - Include Space
+endsnippet

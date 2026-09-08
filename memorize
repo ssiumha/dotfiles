@@ -5,6 +5,7 @@ v ~/dots/memorize
 v ~/dots/snips/
 v ~/dots/config/nvim/words
 v ~/dots/config/mise/config.toml
+v ~/.config/mise/config.toml
 v $(mise config | grep '.mise.toml' | awk '{print $1}' | perl -pe 's/~/$ENV{"HOME"}/')  ## open near mise config
 
 cd ~/.local/state/k9s/screen-dumps
