@@ -439,8 +439,24 @@ if [[ "$_ZSH_INIT_MINIMAL" != true ]]; then
 
   compinit -C -d "$ZSH_COMPDUMP"
 
-  _mise() { eval "$(mise completion zsh)"; _mise "$@" }
-  compdef _mise mise
+  # mise's completion reads the raw $BUFFER, not the alias-expanded $words, so `m <tab>`
+  # reaches it as `m ...` and falls back to top-level candidates. Expand the head first.
+  _mise_load() {
+    eval "$(mise completion zsh)"
+    functions[_mise_usage]=$functions[_mise]
+    _mise() {
+      local head=${${(z)BUFFER}[1]}
+      local expanded=${aliases[$head]}
+      local pre=${BUFFER%%${head}*}
+      if [[ -n $expanded && $BUFFER == ${pre}${head}[[:space:]]* ]]; then
+        local -h BUFFER="${pre}${expanded}${BUFFER#${pre}${head}}"
+        local -h -i CURSOR=$(( CURSOR + $#expanded - $#head ))
+      fi
+      _mise_usage "$@"
+    }
+    _mise "$@"
+  }
+  compdef _mise_load mise
 
   _just() { unfunction _just; source <(JUST_COMPLETE=zsh just); _clap_dynamic_completer_just "$@" }
   compdef _just just
