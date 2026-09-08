@@ -10,20 +10,35 @@
 #     join query + docker + kube etc..
 
 show_help() {
-  echo "Usage: $0 <filetype>"
+  echo "Usage: $0 [filetype] [filepath]"
+  echo
+  echo "  filetype 를 주면 해당 타입과 연관된 snips 만 대상으로 한다."
+  echo "  인자 없이 실행하면 전체 snips 를 검색한다 (파일명도 검색어에 포함)."
 }
 
-if [ -z "$1" ]; then
-  show_help
-  exit 1
-fi
+case $1 in
+  -h|--help) show_help; exit 0 ;;
+esac
 
 cd "$HOME/dots/snips" || exit 1
 
 ft=$1
 fp=$2
-snips=("all.snips")
-[ -r "$ft.snips" ] && snips+=("$ft.snips")
+
+if [ -z "$ft" ]; then
+  # 전체 검색 모드. 목록이 길어 tmux 팝업을 전체 화면으로 띄운다.
+  # (tmux 밖에서는 --tmux 가 무시되고 일반 전체 화면으로 동작)
+  snips=()
+  while IFS= read -r f; do
+    snips+=("$f")
+  done < <(find . -name '*.snips' | sed 's|^\./||' | sort)
+  fzf_window=(--tmux 90%,75%)
+else
+  # vim MySnip 경로. floaterm 안에서 도니 팝업을 겹치지 않는다.
+  snips=("all.snips")
+  [ -r "$ft.snips" ] && snips+=("$ft.snips")
+  fzf_window=(--height '~50%')
+fi
 
 case $ft in
   typescriptreact) snips+=("typescript.snips") ;;
@@ -114,15 +129,40 @@ resolve_imports
 tmpfile=$(mktemp)
 trap "rm -f $tmpfile" EXIT
 
+# 표시용 컬럼은 여기서 완성한다. fzf 는 첫 필드만 보여주고(--with-nth=1)
+# 뒤 두 필드(이름, 파일)는 preview/bind 에서만 쓴다.
+# 패딩과 탭을 섞으면 탭스톱 때문에 컬럼이 밀리므로 공백으로만 채운다.
 rg --with-filename --color=never '^snippet ' ${snips[@]} \
-  | perl -ne 's/^(?<f>.+?):snippet (?<n>.+?) "(?<c>.*)"//; printf qq{%-30s\t\033[33m%-20s\033[0m\t%s\n}, $+{n}, $+{c}, $+{f}' \
-  | sort \
-  | fzf --delimiter "\t" --with-nth='1,2' --select-1 --height '~50%' \
-        --preview 'perl -ne "\$a=sprintf {1}; print if /^snippet \$a /../endsnippet/ and not /^snippet|endsnippet/" {3} \
+  | perl -CSD -e '
+      # 동아시아 문자는 터미널에서 두 칸을 차지한다
+      sub vw {
+        my $w = 0;
+        $w += /[\x{1100}-\x{115F}\x{2E80}-\x{A4CF}\x{AC00}-\x{D7A3}\x{F900}-\x{FAFF}\x{FF00}-\x{FF60}\x{FFE0}-\x{FFE6}]/ ? 2 : 1
+          for split //, $_[0];
+        return $w;
+      }
+      my (@rows, $wn, $wc);
+      while (<>) {
+        next unless /^(?<f>.+?):snippet (?<n>\S+)\s*"(?<c>.*)"/;
+        my ($n, $c, $f) = ($+{n}, $+{c}, $+{f});
+        push @rows, [$n, $c, $f];
+        $wn = vw($n) if vw($n) > $wn;
+        $wc = vw($c) if vw($c) > $wc;
+      }
+      for my $r (sort { $a->[0] cmp $b->[0] } @rows) {
+        my ($n, $c, $f) = @$r;
+        printf qq{%s%s  \033[33m%s%s\033[0m  %s\t%s\t%s\n},
+          $n, q{ } x ($wn - vw($n)),
+          $c, q{ } x ($wc - vw($c)),
+          $f, $n, $f;
+      }
+    ' \
+  | fzf --delimiter "\t" --with-nth=1 --select-1 --ansi "${fzf_window[@]}" \
+        --preview 'perl -ne "\$a=sprintf {2}; print if /^snippet \$a /../endsnippet/ and not /^snippet|endsnippet/" {3} \
           | bat --plain --color always --language ruby' \
-        --preview-window 'bottom:nowrap' \
+        --preview-window 'bottom:40%:nowrap' \
         --bind 'ctrl-e:become(nvim {3})' \
-        --bind 'enter:become(perl -ne "\$a=sprintf {1}; print if /^snippet \$a\b/../endsnippet/ and not /^snippet|endsnippet/" {3} > '"$tmpfile"')'
+        --bind 'enter:become(perl -ne "\$a=sprintf {2}; print if /^snippet \$a\b/../endsnippet/ and not /^snippet|endsnippet/" {3} > '"$tmpfile"')'
 
 if [ ! -s "$tmpfile" ]; then
   exit 1
